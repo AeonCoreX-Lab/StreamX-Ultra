@@ -2,10 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- ইন্টারনেট ব্যবহারের অনুমতি -->
+    <!-- ইন্টারনেট এবং নোটিফিকেশনের জন্য অনুমতি -->
     <uses-permission android:name="android.permission.INTERNET" />
-    
-    <!-- নোটিফিকেশন দেখানোর অনুমতি (ঐচ্ছিক কিন্তু ভালো) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
@@ -19,19 +17,14 @@
         android:theme="@style/Theme.StreamXUltra"
         tools:targetApi="31">
         
+        <!-- MainActivity-এর কনফিগারেশন -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:theme="@style/Theme.StreamXUltra"
-            
-            <!-- =================== এই দুটি লাইন যোগ করা হয়েছে =================== -->
-            <!-- PiP মোড সমর্থন করার জন্য এই লাইনটি অপরিহার্য -->
             android:supportsPictureInPicture="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden|uiMode">
             
-            <!-- PiP মোডে যাওয়ার সময় অ্যাপ ক্র্যাশ হওয়া থেকে আটকাতে এই লাইনটি অপরিহার্য -->
-            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden|uiMode"
-            <!-- ================================================================= -->
-            >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
