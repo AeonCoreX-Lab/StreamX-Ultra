@@ -6,4 +6,5 @@ data class Channel(
     val logoUrl: String = "",
     val streamUrl: String = "",
     val category: String = ""
+    val isFeatured: Boolean = false
 )

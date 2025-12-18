@@ -18,7 +18,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.aeoncorex.streamx.R // আপনার R ফাইল ইম্পোর্ট করুন
+import com.aeoncorex.streamx.R
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.delay
 
