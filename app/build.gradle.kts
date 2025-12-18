@@ -71,4 +71,7 @@ dependencies {
 
     // Coil for Image Loading
     implementation("io.coil-kt:coil-compose:2.6.0")
+    
+    // Shimmer Effect এর জন্য এই লাইব্রেরিটি যোগ করুন
+    implementation("com.valentinilk.shimmer:compose-shimmer:1.2.0")
 }
