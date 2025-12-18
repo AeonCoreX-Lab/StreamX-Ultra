@@ -1,5 +1,5 @@
 # ওয়ার্কফ্লোর নাম
-name: Android Build & SHA-1 Printer
+name: StreamX Ultra APK Build
 
 on:
   push:
@@ -12,10 +12,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ধাপ ১: রিপোজিটরির কোড StreamX-Ultra ফোল্ডারে আনা
+      # ধাপ ১: রিপোজিটরির কোড আনা
       - name: Checkout repository
         uses: actions/checkout@v4
-        # এই ধাপের পরে আপনার কোড StreamX-Ultra ফোল্ডারের ভেতরে থাকবে
 
       # ধাপ ২: JDK 17 সেটআপ করা
       - name: Set up JDK 17
@@ -28,7 +27,6 @@ jobs:
       # ধাপ ৩: Gradle Wrapper-কে এক্সিকিউট করার অনুমতি দেওয়া
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
-        working-directory: ./StreamX-Ultra # <--- মূল সমাধান: সঠিক ফোল্ডারে কমান্ড চালানো হচ্ছে
 
       # ধাপ ৪: Firebase-এর জন্য google-services.json ফাইল তৈরি করা
       - name: Decode google-services.json
@@ -38,12 +36,10 @@ jobs:
           echo "Decoding google-services.json..."
           echo $GOOGLE_SERVICES_JSON_BASE64 | base64 --decode > app/google-services.json
           echo "google-services.json created successfully."
-        working-directory: ./StreamX-Ultra # <--- মূল সমাধান: সঠিক ফোল্ডারে ফাইল তৈরি হচ্ছে
-
+      
       # ধাপ ৫: Gradle ব্যবহার করে ডিবাগ APK বিল্ড করা
       - name: Build with Gradle
         run: ./gradlew assembleDebug
-        working-directory: ./StreamX-Ultra # <--- মূল সমাধান: সঠিক ফোল্ডারে কমান্ড চালানো হচ্ছে
 
       # ধাপ ৬: বিল্ড সফল হওয়ার পর SHA-1 ফিঙ্গারপ্রিন্ট প্রিন্ট করা
       - name: Print SHA-1 Fingerprint to Console
@@ -54,11 +50,10 @@ jobs:
           keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep "SHA1:"
           echo "===================================================================="
           echo "Copy the SHA-1 value above and add it to your Firebase project settings."
-        # keytool কমান্ডটি ফোল্ডারের উপর নির্ভরশীল নয়, তাই এখানে working-directory না দিলেও চলে
 
       # ধাপ ৭: বিল্ড হওয়া APK ফাইলটিকে Artifact হিসেবে আপলোড করা
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: StreamX-Ultra-Debug-APK
-          path: StreamX-Ultra/app/build/outputs/apk/debug/app-debug.apk # <--- মূল সমাধান: সঠিক পাথ
+          path: app/build/outputs/apk/debug/app-debug.apk
