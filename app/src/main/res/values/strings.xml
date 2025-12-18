@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">StreamX Ultra</string>
+    
+    <!-- এই লাইনটি যোগ করুন এবং আপনার ID দিয়ে প্রতিস্থাপন করুন -->
+    <string name="default_web_client_id">948787109880-b9qkqm2gc4fvjcil49ijpuj4c4li8e90.apps.googleusercontent.com</string>
+</resources>

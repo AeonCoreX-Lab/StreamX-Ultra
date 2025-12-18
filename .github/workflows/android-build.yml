@@ -1,0 +1,61 @@
+# ওয়ার্কফ্লোর নাম
+name: Android Build & SHA-1 Printer
+
+# কখন এই ওয়ার্কফ্লোটি চলবে
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    # কোন অপারেটিং সিস্টেমে চলবে
+    runs-on: ubuntu-latest
+
+    steps:
+      # ধাপ ১: রিপোজিটরির কোড আনা
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ধাপ ২: JDK 17 সেটআপ করা
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      # ধাপ ৩: Gradle Wrapper-কে এক্সিকিউট করার অনুমতি দেওয়া
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # ধাপ ৪: Firebase-এর জন্য google-services.json ফাইল তৈরি করা
+      - name: Decode google-services.json
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          echo "Decoding google-services.json..."
+          echo $GOOGLE_SERVICES_JSON_BASE64 | base64 --decode > app/google-services.json
+          echo "google-services.json created successfully."
+
+      # ধাপ ৫: SHA-1 ফিঙ্গারপ্রিন্ট সরাসরি বিল্ড লগে প্রিন্ট করা (মূল পরিবর্তন)
+      - name: Print SHA-1 Fingerprint to Console
+        run: |
+          echo "===================================================================="
+          echo "🔑 DEBUG KEYSTORE SHA-1 FINGERPRINT:"
+          echo "===================================================================="
+          keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep "SHA1:"
+          echo "===================================================================="
+          echo "Copy the SHA-1 value above and add it to your Firebase project settings."
+      
+      # ধাপ ৬: Gradle ব্যবহার করে ডিবাগ APK বিল্ড করা
+      - name: Build with Gradle
+        run: ./gradlew assembleDebug
+
+      # ধাপ ৭: বিল্ড হওয়া APK ফাইলটিকে Artifact হিসেবে আপলোড করা
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: StreamX-Ultra-Debug-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
