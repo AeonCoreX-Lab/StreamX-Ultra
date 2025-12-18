@@ -38,8 +38,12 @@ jobs:
           echo "Decoding google-services.json..."
           echo $GOOGLE_SERVICES_JSON_BASE64 | base64 --decode > app/google-services.json
           echo "google-services.json created successfully."
+      
+      # ধাপ ৫: Gradle ব্যবহার করে ডিবাগ APK বিল্ড করা (এটি debug.keystore তৈরি করবে)
+      - name: Build with Gradle
+        run: ./gradlew assembleDebug
 
-      # ধাপ ৫: SHA-1 ফিঙ্গারপ্রিন্ট সরাসরি বিল্ড লগে প্রিন্ট করা (মূল পরিবর্তন)
+      # ধাপ ৬: বিল্ড সফল হওয়ার পর SHA-1 ফিঙ্গারপ্রিন্ট প্রিন্ট করা (সঠিক ধাপ)
       - name: Print SHA-1 Fingerprint to Console
         run: |
           echo "===================================================================="
@@ -48,10 +52,6 @@ jobs:
           keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep "SHA1:"
           echo "===================================================================="
           echo "Copy the SHA-1 value above and add it to your Firebase project settings."
-      
-      # ধাপ ৬: Gradle ব্যবহার করে ডিবাগ APK বিল্ড করা
-      - name: Build with Gradle
-        run: ./gradlew assembleDebug
 
       # ধাপ ৭: বিল্ড হওয়া APK ফাইলটিকে Artifact হিসেবে আপলোড করা
       - name: Upload Debug APK
