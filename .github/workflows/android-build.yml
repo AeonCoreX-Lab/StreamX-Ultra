@@ -1,5 +1,5 @@
 # ওয়ার্কফ্লোর নাম
-name: StreamX-Ultra APK
+name: StreamX-Ultra APK & Keys
 
 on:
   push:
@@ -28,29 +28,19 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # ধাপ ৪: Gradle ব্যবহার করে ডিবাগ APK বিল্ড করা (এটি debug.keystore তৈরি করবে)
-      - name: Build with Gradle
+      # ধাপ ৪: Gradle ব্যবহার করে ডিবাগ APK বিল্ড করা (এটি debug.keystore তৈরি করে)
+      - name: Build Debug APK
         run: ./gradlew assembleDebug
 
-      # ধাপ ৫: বিল্ড সফল হওয়ার পর SHA-1 ফিঙ্গারপ্রিন্ট বের করা এবং প্রিন্ট করা
-      - name: Extract and Print SHA-1 Fingerprint
-        id: sha1_extractor # এই ধাপটিকে একটি আইডি দেওয়া হলো
+      # ধাপ ৫: Gradle signingReport টাস্ক ব্যবহার করে সব কী প্রিন্ট করা
+      - name: Generate and Print Signing Keys (SHA-1, SHA-256)
         run: |
           echo "===================================================================="
-          echo "🔑 DEBUG KEYSTORE SHA-1 FINGERPRINT:"
+          echo "🔑 GENERATING ALL SIGNING FINGERPRINTS..."
           echo "===================================================================="
-          # keytool থেকে সম্পূর্ণ আউটপুট নেওয়া হচ্ছে
-          KEY_OUTPUT=$(keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android)
-          
-          # আউটপুট থেকে শুধুমাত্র SHA1 লাইনটি বের করা হচ্ছে
-          SHA1_FINGERPRINT=$(echo "$KEY_OUTPUT" | grep "SHA1:")
-          
-          # SHA1 লাইনটি প্রিন্ট করা হচ্ছে
-          echo "$SHA1_FINGERPRINT"
+          ./gradlew signingReport
           echo "===================================================================="
-
-          # SHA1 মানটিকে আউটপুট হিসেবে সেট করা হচ্ছে (ঐচ্ছিক কিন্তু ভালো অভ্যাস)
-          echo "sha1_value=$SHA1_FINGERPRINT" >> $GITHUB_OUTPUT
+          echo "Copy the SHA-1 and SHA-256 values from the 'Variant: debug' section above."
 
       # ধাপ ৬: বিল্ড হওয়া APK ফাইলটিকে Artifact হিসেবে আপলোড করা
       - name: Upload Debug APK
