@@ -1,5 +1,5 @@
 # ওয়ার্কফ্লোর নাম
-name: StreamX Ultra APK Build
+name: StreamX-Ultra APK
 
 on:
   push:
@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ধাপ ১: রিপোজিটরির কোড আনা
+      # ধাপ ১: রিপোজিটরির কোড আনা (এর সাথেই google-services.json ফাইলটি চলে আসবে)
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -28,20 +28,14 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # ধাপ ৪: Firebase-এর জন্য google-services.json ফাইল তৈরি করা
-      - name: Decode google-services.json
-        env:
-          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
-        run: |
-          echo "Decoding google-services.json..."
-          echo $GOOGLE_SERVICES_JSON_BASE64 | base64 --decode > app/google-services.json
-          echo "google-services.json created successfully."
-      
-      # ধাপ ৫: Gradle ব্যবহার করে ডিবাগ APK বিল্ড করা
+      # -- অপ্রয়োজনীয় ধাপটি মুছে ফেলা হয়েছে --
+      # google-services.json ফাইল তৈরি করার আর প্রয়োজন নেই
+
+      # ধাপ ৪: Gradle ব্যবহার করে ডিবাগ APK বিল্ড করা
       - name: Build with Gradle
         run: ./gradlew assembleDebug
 
-      # ধাপ ৬: বিল্ড সফল হওয়ার পর SHA-1 ফিঙ্গারপ্রিন্ট প্রিন্ট করা
+      # ধাপ ৫: বিল্ড সফল হওয়ার পর SHA-1 ফিঙ্গারপ্রিন্ট প্রিন্ট করা
       - name: Print SHA-1 Fingerprint to Console
         run: |
           echo "===================================================================="
@@ -51,7 +45,7 @@ jobs:
           echo "===================================================================="
           echo "Copy the SHA-1 value above and add it to your Firebase project settings."
 
-      # ধাপ ৭: বিল্ড হওয়া APK ফাইলটিকে Artifact হিসেবে আপলোড করা
+      # ধাপ ৬: বিল্ড হওয়া APK ফাইলটিকে Artifact হিসেবে আপলোড করা
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
