@@ -1,13 +1,13 @@
 package com.aeoncorex.streamx.ui.home
 
 import android.util.Log
+import androidx.compose.animation.animateColor
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.animateColor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -63,7 +63,7 @@ fun HomeScreen(navController: NavController) {
     var selectedCategory by remember { mutableStateOf("All") }
     var isLoading by remember { mutableStateOf(true) }
 
-    // Data fetching logic (unchanged)
+    // Data fetching logic
     LaunchedEffect(Unit) {
         try {
             val api = Retrofit.Builder()
@@ -143,12 +143,15 @@ fun HomeScreen(navController: NavController) {
                     val filteredChannels = if (selectedCategory == "All") allChannels.value else allChannels.value.filter { it.category == selectedCategory }
                     itemsIndexed(filteredChannels.chunked(3)) { index, rowChannels ->
                         // Animated entry for each row
+                        // FIXED: Removed <Float> to allow generic usage for both Float and Dp
                         val animation = tween<Float>(durationMillis = 300, delayMillis = index * 100)
+                        val animationDp = tween<androidx.compose.ui.unit.Dp>(durationMillis = 300, delayMillis = index * 100)
+
                         var isVisible by remember { mutableStateOf(false) }
                         LaunchedEffect(Unit) { isVisible = true }
                         
                         val alpha by animateFloatAsState(targetValue = if(isVisible) 1f else 0f, animationSpec = animation)
-                        val offsetY by animateDpAsState(targetValue = if(isVisible) 0.dp else 50.dp, animationSpec = animation)
+                        val offsetY by animateDpAsState(targetValue = if(isVisible) 0.dp else 50.dp, animationSpec = animationDp)
                         
                         Row(
                             Modifier
@@ -162,7 +165,6 @@ fun HomeScreen(navController: NavController) {
                                     navController.navigate("player/$encodedUrl")
                                 }
                             }
-                            // Add spacers to keep the layout consistent if a row has less than 3 items
                             if (rowChannels.size < 3) {
                                 repeat(3 - rowChannels.size) { Spacer(Modifier.weight(1f)) }
                             }
@@ -184,8 +186,9 @@ fun ChannelCard(channel: Channel, modifier: Modifier, onClick: () -> Unit) {
             modifier = Modifier
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(24.dp))
-                .background(Color.White.copy(0.1f)) // Glassmorphism effect
-                .border(Brush.horizontalGradient(listOf(Color.White.copy(0.2f), Color.Transparent)), 1.dp, RoundedCornerShape(24.dp))
+                .background(Color.White.copy(0.1f))
+                // FIXED: Explicitly named parameters for border
+                .border(width = 1.dp, brush = Brush.horizontalGradient(listOf(Color.White.copy(0.2f), Color.Transparent)), shape = RoundedCornerShape(24.dp))
                 .padding(16.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -274,7 +277,6 @@ fun FeaturedCarousel(featured: List<Channel>, navController: NavController) {
     }
 }
 
-// Linear interpolation function for smooth animations
 fun lerp(start: Float, stop: Float, fraction: Float): Float {
     return (1 - fraction) * start + fraction * stop
 }

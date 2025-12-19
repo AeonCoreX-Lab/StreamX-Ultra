@@ -27,25 +27,25 @@ fun AppNavigation() {
         composable("home") {
             HomeScreen(navController)
         }
-        // FIXED: Route now accepts channelId AND streamUrl
+        // FIXED: Route now accepts only streamUrl as PlayerScreen doesn't use channelId
         composable(
-            route = "player/{channelId}/{streamUrl}",
+            route = "player/{streamUrl}",
             arguments = listOf(
-                navArgument("channelId") { type = NavType.StringType },
                 navArgument("streamUrl") { type = NavType.StringType }
             )
         ) { backStackEntry ->
-            val channelId = backStackEntry.arguments?.getString("channelId") ?: ""
             val encodedUrl = backStackEntry.arguments?.getString("streamUrl") ?: ""
             val decodedUrl = URLDecoder.decode(encodedUrl, StandardCharsets.UTF_8.toString())
             
-            // FIXED: Passed both required parameters to PlayerScreen
-            PlayerScreen(navController, channelId, decodedUrl)
+            // FIXED: Removed incorrect arguments. PlayerScreen only takes streamUrl and onBack.
+            PlayerScreen(
+                streamUrl = decodedUrl,
+                onBack = { navController.popBackStack() }
+            )
         }
     }
 }
 
-// URL এনকোড করার জন্য একটি Helper ফাংশন
 fun encodeUrl(url: String): String {
     return URLEncoder.encode(url, StandardCharsets.UTF_8.toString())
 }

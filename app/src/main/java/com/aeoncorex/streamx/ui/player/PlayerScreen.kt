@@ -1,18 +1,17 @@
 package com.aeoncorex.streamx.ui.player
 
 import android.app.Activity
-import android.content.Context
-import android.media.AudioManager
+import android.net.Uri
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
+import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -22,9 +21,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -33,15 +30,16 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.google.android.exoplayer2.ExoPlayer
-import com.google.android.exoplayer2.MediaItem
-import com.google.android.exoplayer2.Player
-import com.google.android.exoplayer2.source.hls.HlsMediaSource
-import com.google.android.exoplayer2.ui.AspectRatioFrameLayout
-import com.google.android.exoplayer2.ui.StyledPlayerView
-import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
+import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 
+@OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -56,8 +54,9 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
                 .setUserAgent(userAgent)
                 .setAllowCrossProtocolRedirects(true)
             
+            // Note: If streamUrl is not HLS (.m3u8), you might need DefaultMediaSourceFactory instead
             val mediaSource = HlsMediaSource.Factory(dataSourceFactory)
-                .createMediaSource(MediaItem.fromUri(streamUrl))
+                .createMediaSource(MediaItem.fromUri(Uri.parse(streamUrl)))
             
             setMediaSource(mediaSource)
             prepare()
@@ -65,6 +64,9 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
         }
     }
 
+    // Explicitly importing getValue/setValue is done via star import of runtime.*, 
+    // but sometimes explicit casts or type inference fails without clear imports.
+    // The "by remember" below works because of `import androidx.compose.runtime.*`
     var isControlsVisible by remember { mutableStateOf(true) }
     var aspectRatioMode by remember { mutableStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     
@@ -93,7 +95,8 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
     ) {
         AndroidView(
             factory = { ctx ->
-                StyledPlayerView(ctx).apply {
+                // StyledPlayerView is replaced by PlayerView in Media3
+                PlayerView(ctx).apply {
                     player = exoPlayer
                     useController = false
                     resizeMode = aspectRatioMode
@@ -103,7 +106,10 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
                     )
                 }
             },
-            update = { it.resizeMode = aspectRatioMode },
+            update = { 
+                // We must update the resizeMode if it changes
+                it.resizeMode = aspectRatioMode 
+            },
             modifier = Modifier.fillMaxSize()
         )
 
@@ -171,7 +177,8 @@ fun PlayerControls(
                 AspectRatioFrameLayout.RESIZE_MODE_FILL,
                 AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             )
-            var currentModeIndex by remember { mutableStateOf(0) }
+            // Use mutableIntStateOf for primitives to avoid boxing overhead, or regular state
+            var currentModeIndex by remember { mutableIntStateOf(0) }
 
             IconButton(onClick = {
                 currentModeIndex = (currentModeIndex + 1) % modes.size
@@ -180,7 +187,14 @@ fun PlayerControls(
                 Icon(Icons.Default.AspectRatio, "Aspect Ratio", tint = Color.White)
             }
 
-            IconButton(onClick = { activity?.enterPictureInPictureMode() }) {
+            IconButton(onClick = { 
+                // Verify Build version for PiP or wrap in try-catch
+                try {
+                   activity?.enterPictureInPictureMode() 
+                } catch (e: Exception) {
+                    // Handle devices not supporting PiP
+                }
+            }) {
                 Icon(Icons.Default.PictureInPicture, "PiP", tint = Color.White)
             }
         }
