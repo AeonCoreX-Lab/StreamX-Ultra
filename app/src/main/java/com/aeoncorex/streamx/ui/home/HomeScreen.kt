@@ -144,7 +144,7 @@ fun HomeScreen(navController: NavController) {
                     itemsIndexed(filteredChannels.chunked(3)) { index, rowChannels ->
                         // Animated entry for each row
                         // FIXED: Removed <Float> to allow generic usage for both Float and Dp
-                        val animation = tween<Float>(durationMillis = 300, delayMillis = index * 100)
+                        val animation = tween(durationMillis = 300, delayMillis = index * 100)
                         val animationDp = tween<androidx.compose.ui.unit.Dp>(durationMillis = 300, delayMillis = index * 100)
 
                         var isVisible by remember { mutableStateOf(false) }

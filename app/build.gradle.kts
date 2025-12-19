@@ -69,8 +69,8 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.android.gms:play-services-auth:21.0.0")
 
-    // Media3 (ExoPlayer)
-    implementation("androidx.media3:media3-exoplayer:1.3.1")
+    // Media3 (ExoPlayer) - build.gradle.kts এ এই লাইনটি যোগ করুন
+    implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
 
     // Coil for Image Loading

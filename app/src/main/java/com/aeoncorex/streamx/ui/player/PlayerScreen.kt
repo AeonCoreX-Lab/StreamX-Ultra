@@ -30,6 +30,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+// Media3 Imports
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -45,7 +46,6 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val activity = context as? Activity
     
-    // --- Global IPTV User-Agent Config ---
     val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
     
     val exoPlayer = remember {
@@ -54,7 +54,6 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
                 .setUserAgent(userAgent)
                 .setAllowCrossProtocolRedirects(true)
             
-            // Note: If streamUrl is not HLS (.m3u8), you might need DefaultMediaSourceFactory instead
             val mediaSource = HlsMediaSource.Factory(dataSourceFactory)
                 .createMediaSource(MediaItem.fromUri(Uri.parse(streamUrl)))
             
@@ -64,13 +63,9 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
         }
     }
 
-    // Explicitly importing getValue/setValue is done via star import of runtime.*, 
-    // but sometimes explicit casts or type inference fails without clear imports.
-    // The "by remember" below works because of `import androidx.compose.runtime.*`
     var isControlsVisible by remember { mutableStateOf(true) }
     var aspectRatioMode by remember { mutableStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     
-    // Auto-hide controls
     LaunchedEffect(isControlsVisible) {
         if (isControlsVisible) {
             delay(5000)
@@ -95,7 +90,6 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
     ) {
         AndroidView(
             factory = { ctx ->
-                // StyledPlayerView is replaced by PlayerView in Media3
                 PlayerView(ctx).apply {
                     player = exoPlayer
                     useController = false
@@ -106,14 +100,10 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
                     )
                 }
             },
-            update = { 
-                // We must update the resizeMode if it changes
-                it.resizeMode = aspectRatioMode 
-            },
+            update = { it.resizeMode = aspectRatioMode },
             modifier = Modifier.fillMaxSize()
         )
 
-        // --- All Original Features & UI ---
         AnimatedVisibility(visible = isControlsVisible, enter = fadeIn(), exit = fadeOut()) {
             PlayerControls(
                 exoPlayer = exoPlayer,
@@ -140,7 +130,6 @@ fun PlayerControls(
     activity: Activity?
 ) {
     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))) {
-        // Top Bar
         Row(
             modifier = Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -150,7 +139,6 @@ fun PlayerControls(
             }
         }
 
-        // Center Play/Pause
         var isPlaying by remember { mutableStateOf(exoPlayer.isPlaying) }
         IconButton(
             onClick = {
@@ -167,7 +155,6 @@ fun PlayerControls(
             )
         }
 
-        // Bottom Controls (Aspect Ratio & PiP)
         Row(
             modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp).fillMaxWidth(),
             horizontalArrangement = Arrangement.End
@@ -177,8 +164,7 @@ fun PlayerControls(
                 AspectRatioFrameLayout.RESIZE_MODE_FILL,
                 AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             )
-            // Use mutableIntStateOf for primitives to avoid boxing overhead, or regular state
-            var currentModeIndex by remember { mutableIntStateOf(0) }
+            var currentModeIndex by remember { mutableStateOf(0) }
 
             IconButton(onClick = {
                 currentModeIndex = (currentModeIndex + 1) % modes.size
@@ -187,14 +173,7 @@ fun PlayerControls(
                 Icon(Icons.Default.AspectRatio, "Aspect Ratio", tint = Color.White)
             }
 
-            IconButton(onClick = { 
-                // Verify Build version for PiP or wrap in try-catch
-                try {
-                   activity?.enterPictureInPictureMode() 
-                } catch (e: Exception) {
-                    // Handle devices not supporting PiP
-                }
-            }) {
+            IconButton(onClick = { activity?.enterPictureInPictureMode() }) {
                 Icon(Icons.Default.PictureInPicture, "PiP", tint = Color.White)
             }
         }
