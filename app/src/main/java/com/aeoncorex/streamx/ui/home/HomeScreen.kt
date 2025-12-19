@@ -1,145 +1,172 @@
 package com.aeoncorex.streamx.ui.home
 
 import android.util.Log
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateColor
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Dashboard
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.aeoncorex.streamx.model.Channel
-import com.aeoncorex.streamx.model.LiveEvent
-import com.aeoncorex.streamx.navigation.encodeUrl
-import com.google.firebase.Timestamp
-import com.google.firebase.firestore.ktx.firestore
-import com.google.firebase.firestore.ktx.toObjects
-import com.google.firebase.ktx.Firebase
-import com.valentinilk.shimmer.shimmer
-import kotlinx.coroutines.tasks.await
+import com.google.accompanist.pager.ExperimentalPagerApi
+import com.google.accompanist.pager.HorizontalPager
+import com.google.accompanist.pager.calculateCurrentOffsetForPage
+import com.google.accompanist.pager.rememberPagerState
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.http.GET
+import retrofit2.http.Url
+import java.net.URLEncoder
+import kotlin.math.absoluteValue
 
-@OptIn(ExperimentalMaterial3Api::class)
+// Retrofit API setup
+interface IPTVApi {
+    @GET("index.json")
+    suspend fun getIndex(): Map<String, Any>
+    @GET
+    suspend fun getChannelsByUrl(@Url url: String): Map<String, Any>
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPagerApi::class)
 @Composable
 fun HomeScreen(navController: NavController) {
-    val db = Firebase.firestore
-    val liveEvents = remember { mutableStateOf<List<LiveEvent>>(emptyList()) }
-    val featuredChannels = remember { mutableStateOf<List<Channel>>(emptyList()) }
     val allChannels = remember { mutableStateOf<List<Channel>>(emptyList()) }
-    val categories = remember { mutableStateOf<List<String>>(emptyList()) }
+    val categories = remember { mutableStateOf<List<String>>(listOf("All")) }
     var selectedCategory by remember { mutableStateOf("All") }
-    val isLoading = remember { mutableStateOf(true) }
-    val errorState = remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
 
+    // Data fetching logic (unchanged)
     LaunchedEffect(Unit) {
         try {
-            isLoading.value = true
-            val eventsSnapshot = db.collection("live_events").whereEqualTo("isLive", true).get().await()
-            val channelsSnapshot = db.collection("channels").get().await()
+            val api = Retrofit.Builder()
+                .baseUrl("https://raw.githubusercontent.com/cybernahid-dev/streamx-iptv-data/main/")
+                .addConverterFactory(GsonConverterFactory.create())
+                .build().create(IPTVApi::class.java)
+            
+            val index = api.getIndex()
+            val cats = index["categories"] as? List<Map<String, Any>>
+            val masterList = mutableListOf<Channel>()
 
-            val now = Timestamp.now().seconds
-            liveEvents.value = eventsSnapshot.toObjects<LiveEvent>().filter { it.startTime.seconds <= now && it.endTime.seconds >= now }
-
-            val channels = channelsSnapshot.toObjects<Channel>()
-            featuredChannels.value = channels.filter { it.isFeatured }
-            allChannels.value = channels
-            categories.value = listOf("All") + channels.mapNotNull { it.category.takeIf { c -> c.isNotBlank() } }.distinct()
-
-        } catch (e: Exception) {
-            Log.e("FirestoreError", "Error fetching data: ", e)
-            errorState.value = "Failed to load content. Check Firestore rules and internet connection."
-        } finally {
-            isLoading.value = false
+            cats?.forEach { cat ->
+                val fileName = cat["file"] as String
+                val catName = cat["name"] as String
+                try {
+                    val res = api.getChannelsByUrl(fileName)
+                    val rawChannels = (res["channels"] as? List<Map<String, Any>>) 
+                        ?: (res["categories"] as? List<Map<String, Any>>)?.flatMap { it["channels"] as List<Map<String, Any>> }
+                    
+                    rawChannels?.forEach { ch ->
+                        masterList.add(Channel(
+                            id = (ch["id"] as? String) ?: "",
+                            name = (ch["name"] as? String) ?: "No Name",
+                            logoUrl = (ch["logoUrl"] as? String) ?: "",
+                            streamUrl = (ch["streamUrl"] as? String) ?: "",
+                            category = catName,
+                            isFeatured = (ch["isFeatured"] as? Boolean) ?: false
+                        ))
+                    }
+                } catch (e: Exception) { Log.e("API", "Error parsing category: $catName", e) }
+            }
+            allChannels.value = masterList
+            categories.value = listOf("All") + masterList.map { it.category }.distinct()
+            isLoading = false
+        } catch (e: Exception) { 
+            Log.e("API", "Error fetching index", e)
+            isLoading = false 
         }
     }
-    
-    val channelsToShow = if (selectedCategory == "All") allChannels.value else allChannels.value.filter { it.category == selectedCategory }
+
+    // Animated Aurora Background
+    val infiniteTransition = rememberInfiniteTransition(label = "aurora_bg_transition")
+    val color1 by infiniteTransition.animateColor(initialValue = Color(0xFF3B82F6), targetValue = Color(0xFF9333EA), animationSpec = infiniteRepeatable(tween(5000), RepeatMode.Reverse), label = "aurora_color1")
+    val color2 by infiniteTransition.animateColor(initialValue = Color(0xFFEC4899), targetValue = Color(0xFF10B981), animationSpec = infiniteRepeatable(tween(7000), RepeatMode.Reverse), label = "aurora_color2")
+    val bgBrush = Brush.linearGradient(listOf(color1, color2))
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("StreamX Ultra", fontWeight = FontWeight.ExtraBold) },
-                actions = {
-                    IconButton(onClick = { navController.navigate("multi_view") }) {
-                        Icon(Icons.Default.Dashboard, contentDescription = "Multi-View")
-                    }
-                    IconButton(onClick = { /* TODO: Navigate to Search Screen */ }) {
-                        Icon(Icons.Default.Search, contentDescription = "Search")
-                    }
-                    IconButton(onClick = { /* TODO: Navigate to Notifications Screen */ }) {
-                        Icon(Icons.Default.Notifications, contentDescription = "Notifications")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+            CenterAlignedTopAppBar(
+                title = { Text("STREAMX ULTRA", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                actions = { IconButton(onClick = { /* TODO: Navigate to Search Screen */ }) { Icon(Icons.Default.Search, null, tint = Color.White) } },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent, titleContentColor = Color.White)
             )
-        }
+        },
+        containerColor = Color.Transparent
     ) { padding ->
-        if (isLoading.value) {
-            LoadingShimmerEffect(padding)
-        } else if (errorState.value != null) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text(errorState.value!!, textAlign = TextAlign.Center, modifier = Modifier.padding(16.dp))
-            }
-        } else {
-            LazyColumn(modifier = Modifier.padding(padding), contentPadding = PaddingValues(bottom = 16.dp)) {
-                
-                if (liveEvents.value.isNotEmpty()) {
-                    item { LiveEventsSection(navController, liveEvents.value) }
-                }
+        Box(modifier = Modifier.fillMaxSize().background(Color(0xFF020617))) {
+            // Blurred Aurora Background
+            Box(modifier = Modifier.fillMaxSize().blur(150.dp).background(bgBrush))
 
-                if (featuredChannels.value.isNotEmpty()) {
-                    item { FeaturedSection(navController, featuredChannels.value) }
-                }
-
-                item {
-                    CategoryTabs(categories.value, selectedCategory) { newCategory ->
-                        selectedCategory = newCategory
+            if (isLoading) {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Cyan)
+            } else {
+                LazyColumn(modifier = Modifier.padding(padding)) {
+                    item { Spacer(modifier = Modifier.height(16.dp)) }
+                    
+                    // Featured Carousel Section
+                    val featured = allChannels.value.filter { it.isFeatured }
+                    if (featured.isNotEmpty()) {
+                        item { FeaturedCarousel(featured, navController) }
                     }
-                }
-
-                // চ্যানেল গ্রিড
-                val chunkedChannels = channelsToShow.chunked(3)
-                items(chunkedChannels.size) { index ->
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        chunkedChannels[index].forEach { channel ->
-                            Box(modifier = Modifier.weight(1f)) {
-                                ChannelGridCard(channel = channel, onClick = {
-                                    val encodedUrl = encodeUrl(channel.streamUrl)
-                                    // FIXED: Navigation route matches AppNavigation
-                                    navController.navigate("player/${channel.id}/$encodedUrl")
-                                })
+                    
+                    // Category Tabs Section
+                    item { CategoryTabs(categories.value, selectedCategory) { selectedCategory = it } }
+                    
+                    // Channels Grid Section
+                    val filteredChannels = if (selectedCategory == "All") allChannels.value else allChannels.value.filter { it.category == selectedCategory }
+                    itemsIndexed(filteredChannels.chunked(3)) { index, rowChannels ->
+                        // Animated entry for each row
+                        val animation = tween<Float>(durationMillis = 300, delayMillis = index * 100)
+                        var isVisible by remember { mutableStateOf(false) }
+                        LaunchedEffect(Unit) { isVisible = true }
+                        
+                        val alpha by animateFloatAsState(targetValue = if(isVisible) 1f else 0f, animationSpec = animation)
+                        val offsetY by animateDpAsState(targetValue = if(isVisible) 0.dp else 50.dp, animationSpec = animation)
+                        
+                        Row(
+                            Modifier
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .graphicsLayer { this.alpha = alpha; this.translationY = offsetY.toPx() },
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            rowChannels.forEach { channel -> 
+                                ChannelCard(channel, Modifier.weight(1f)) {
+                                    val encodedUrl = URLEncoder.encode(channel.streamUrl, "UTF-8")
+                                    navController.navigate("player/$encodedUrl")
+                                }
+                            }
+                            // Add spacers to keep the layout consistent if a row has less than 3 items
+                            if (rowChannels.size < 3) {
+                                repeat(3 - rowChannels.size) { Spacer(Modifier.weight(1f)) }
                             }
                         }
-                        // রো-তে ৩টির কম আইটেম থাকলে খালি জায়গা যোগ করা হচ্ছে
-                        repeat(3 - chunkedChannels[index].size) {
-                            Spacer(modifier = Modifier.weight(1f))
-                        }
                     }
                 }
             }
@@ -148,117 +175,106 @@ fun HomeScreen(navController: NavController) {
 }
 
 @Composable
-fun LiveEventsSection(navController: NavController, events: List<LiveEvent>) {
-    Column {
-        Text("Live Now 🔥", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 12.dp))
-        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            items(events, key = { it.id }) { event ->
-                // FIXED: Navigation route matches AppNavigation (added ID)
-                LiveEventCard(event = event, onClick = { navController.navigate("player/${event.id}/${encodeUrl(event.streamUrl)}") })
-            }
+fun ChannelCard(channel: Channel, modifier: Modifier, onClick: () -> Unit) {
+    Column(
+        modifier = modifier.clickable { onClick() },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White.copy(0.1f)) // Glassmorphism effect
+                .border(Brush.horizontalGradient(listOf(Color.White.copy(0.2f), Color.Transparent)), 1.dp, RoundedCornerShape(24.dp))
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(model = channel.logoUrl, contentDescription = channel.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
         }
+        Text(channel.name, color = Color.White.copy(0.8f), fontSize = 12.sp, maxLines = 1, modifier = Modifier.padding(top = 8.dp))
     }
 }
 
 @Composable
-fun LiveEventCard(event: LiveEvent, onClick: () -> Unit) {
-    Card(modifier = Modifier.width(280.dp).height(160.dp).clickable(onClick = onClick), shape = RoundedCornerShape(16.dp)) {
-        Box(contentAlignment = Alignment.BottomStart) {
-            AsyncImage(model = ImageRequest.Builder(LocalContext.current).data(event.thumbnailUrl).crossfade(true).build(), contentDescription = event.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f)))))
+fun CategoryTabs(categories: List<String>, selected: String, onSelect: (String) -> Unit) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(categories) { cat ->
+            val isSelected = cat == selected
+            val brush = if (isSelected) Brush.horizontalGradient(listOf(Color(0xFF3B82F6), Color.Cyan)) else Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f)))
             
-            Row(modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(Color.Red.copy(alpha = 0.8f), CircleShape).padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                PulsatingLiveIndicator()
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("LIVE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
-
-            Text(event.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(12.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-@Composable
-fun PulsatingLiveIndicator() {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulsating")
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600),
-            repeatMode = RepeatMode.Reverse
-        ), label = "pulsating_scale"
-    )
-    Box(modifier = Modifier.size(6.dp).graphicsLayer { scaleX = scale; scaleY = scale }.clip(CircleShape).background(Color.White))
-}
-
-@Composable
-fun FeaturedSection(navController: NavController, channels: List<Channel>) {
-    Column {
-        Text("Featured Channels", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 12.dp))
-        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            items(channels, key = { it.id }) { channel ->
-                // FIXED: Navigation route matches AppNavigation (added ID)
-                Card(modifier = Modifier.width(240.dp).height(140.dp).clickable { navController.navigate("player/${channel.id}/${encodeUrl(channel.streamUrl)}") }, shape = RoundedCornerShape(16.dp)) {
-                    Box(contentAlignment = Alignment.BottomStart) {
-                        AsyncImage(model = ImageRequest.Builder(LocalContext.current).data(channel.logoUrl).crossfade(true).build(), contentDescription = channel.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                        Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f)))))
-                        Text(channel.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(12.dp))
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun CategoryTabs(categories: List<String>, selectedCategory: String, onCategorySelected: (String) -> Unit) {
-    ScrollableTabRow(selectedTabIndex = categories.indexOf(selectedCategory), modifier = Modifier.fillMaxWidth().padding(top = 24.dp), edgePadding = 16.dp, divider = {})
-    {
-        categories.forEach { category ->
-            Tab(selected = category == selectedCategory, onClick = { onCategorySelected(category) },
-                text = { Text(category, fontWeight = if (category == selectedCategory) FontWeight.Bold else FontWeight.Normal) }
+            Text(
+                cat, 
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(brush)
+                    .clickable { onSelect(cat) }
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                color = if (isSelected) Color.Black else Color.White,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                fontSize = 14.sp
             )
         }
     }
 }
 
+@OptIn(ExperimentalPagerApi::class)
 @Composable
-fun ChannelGridCard(channel: Channel, onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth().aspectRatio(1f).clickable(onClick = onClick), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            AsyncImage(model = ImageRequest.Builder(LocalContext.current).data(channel.logoUrl).crossfade(true).build(), contentDescription = channel.name, modifier = Modifier.weight(1f).padding(12.dp), contentScale = ContentScale.Fit)
-            Text(text = channel.name, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
-        }
-    }
-}
-
-@Composable
-fun LoadingShimmerEffect(padding: PaddingValues) {
-    val shimmerBrush = Brush.linearGradient(
-        colors = listOf(
-            Color.Gray.copy(alpha = 0.5f),
-            Color.Gray.copy(alpha = 0.2f),
-            Color.Gray.copy(alpha = 0.5f),
+fun FeaturedCarousel(featured: List<Channel>, navController: NavController) {
+    val pagerState = rememberPagerState()
+    
+    Column {
+        Text(
+            "Featured", 
+            style = MaterialTheme.typography.titleLarge, 
+            fontWeight = FontWeight.Bold, 
+            color = Color.White, 
+            modifier = Modifier.padding(start = 16.dp, bottom = 12.dp)
         )
-    )
-    LazyColumn(modifier = Modifier.padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        // Shimmer for Featured Section
-        item {
-            // FIXED: Removed brush param from shimmer(), applied it via background()
-            Spacer(modifier = Modifier.fillMaxWidth().height(160.dp).shimmer().background(shimmerBrush, RoundedCornerShape(16.dp)))
-        }
-        // Shimmer for Grid Section
-        item {
-            Spacer(modifier = Modifier.height(32.dp)) // For CategoryTabs
-        }
-        items(2) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                repeat(3) {
-                    // FIXED: Removed brush param from shimmer(), applied it via background()
-                    Spacer(modifier = Modifier.weight(1f).aspectRatio(1f).shimmer().background(shimmerBrush, RoundedCornerShape(16.dp)))
+        HorizontalPager(
+            count = featured.size,
+            state = pagerState,
+            contentPadding = PaddingValues(horizontal = 48.dp)
+        ) { page ->
+            val pageOffset = calculateCurrentOffsetForPage(page).absoluteValue
+            val scale = lerp(1f, 0.85f, pageOffset)
+            
+            Card(
+                modifier = Modifier
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        alpha = lerp(1f, 0.5f, pageOffset)
+                    }
+                    .width(300.dp)
+                    .height(160.dp)
+                    .clickable { 
+                        val encodedUrl = URLEncoder.encode(featured[page].streamUrl, "UTF-8")
+                        navController.navigate("player/$encodedUrl")
+                    },
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Box {
+                    AsyncImage(model = featured[page].logoUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black))))
+                    Text(
+                        featured[page].name, 
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(16.dp), 
+                        color = Color.White, 
+                        fontWeight = FontWeight.Bold, 
+                        fontSize = 18.sp
+                    )
                 }
             }
         }
     }
+}
+
+// Linear interpolation function for smooth animations
+fun lerp(start: Float, stop: Float, fraction: Float): Float {
+    return (1 - fraction) * start + fraction * stop
 }
