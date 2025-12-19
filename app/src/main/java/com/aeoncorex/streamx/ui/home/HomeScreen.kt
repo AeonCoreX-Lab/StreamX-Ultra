@@ -1,5 +1,4 @@
 package com.aeoncorex.streamx.ui.home
-import androidx.compose.material.icons.filled.Dashboard
 
 import android.util.Log
 import androidx.compose.animation.core.*
@@ -132,6 +131,7 @@ fun HomeScreen(navController: NavController) {
                             Box(modifier = Modifier.weight(1f)) {
                                 ChannelGridCard(channel = channel, onClick = {
                                     val encodedUrl = encodeUrl(channel.streamUrl)
+                                    // FIXED: Navigation route matches AppNavigation
                                     navController.navigate("player/${channel.id}/$encodedUrl")
                                 })
                             }
@@ -153,7 +153,8 @@ fun LiveEventsSection(navController: NavController, events: List<LiveEvent>) {
         Text("Live Now 🔥", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 12.dp))
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             items(events, key = { it.id }) { event ->
-                LiveEventCard(event = event, onClick = { navController.navigate("player/${encodeUrl(event.streamUrl)}") })
+                // FIXED: Navigation route matches AppNavigation (added ID)
+                LiveEventCard(event = event, onClick = { navController.navigate("player/${event.id}/${encodeUrl(event.streamUrl)}") })
             }
         }
     }
@@ -197,7 +198,8 @@ fun FeaturedSection(navController: NavController, channels: List<Channel>) {
         Text("Featured Channels", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 12.dp))
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             items(channels, key = { it.id }) { channel ->
-                Card(modifier = Modifier.width(240.dp).height(140.dp).clickable { navController.navigate("player/${encodeUrl(channel.streamUrl)}") }, shape = RoundedCornerShape(16.dp)) {
+                // FIXED: Navigation route matches AppNavigation (added ID)
+                Card(modifier = Modifier.width(240.dp).height(140.dp).clickable { navController.navigate("player/${channel.id}/${encodeUrl(channel.streamUrl)}") }, shape = RoundedCornerShape(16.dp)) {
                     Box(contentAlignment = Alignment.BottomStart) {
                         AsyncImage(model = ImageRequest.Builder(LocalContext.current).data(channel.logoUrl).crossfade(true).build(), contentDescription = channel.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                         Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f)))))
@@ -243,7 +245,8 @@ fun LoadingShimmerEffect(padding: PaddingValues) {
     LazyColumn(modifier = Modifier.padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         // Shimmer for Featured Section
         item {
-            Spacer(modifier = Modifier.fillMaxWidth().height(160.dp).shimmer(brush = shimmerBrush).background(Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(16.dp)))
+            // FIXED: Removed brush param from shimmer(), applied it via background()
+            Spacer(modifier = Modifier.fillMaxWidth().height(160.dp).shimmer().background(shimmerBrush, RoundedCornerShape(16.dp)))
         }
         // Shimmer for Grid Section
         item {
@@ -252,7 +255,8 @@ fun LoadingShimmerEffect(padding: PaddingValues) {
         items(2) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 repeat(3) {
-                    Spacer(modifier = Modifier.weight(1f).aspectRatio(1f).shimmer(brush = shimmerBrush).background(Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(16.dp)))
+                    // FIXED: Removed brush param from shimmer(), applied it via background()
+                    Spacer(modifier = Modifier.weight(1f).aspectRatio(1f).shimmer().background(shimmerBrush, RoundedCornerShape(16.dp)))
                 }
             }
         }

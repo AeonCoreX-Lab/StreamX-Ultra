@@ -27,13 +27,20 @@ fun AppNavigation() {
         composable("home") {
             HomeScreen(navController)
         }
+        // FIXED: Route now accepts channelId AND streamUrl
         composable(
-            route = "player/{streamUrl}",
-            arguments = listOf(navArgument("streamUrl") { type = NavType.StringType })
+            route = "player/{channelId}/{streamUrl}",
+            arguments = listOf(
+                navArgument("channelId") { type = NavType.StringType },
+                navArgument("streamUrl") { type = NavType.StringType }
+            )
         ) { backStackEntry ->
+            val channelId = backStackEntry.arguments?.getString("channelId") ?: ""
             val encodedUrl = backStackEntry.arguments?.getString("streamUrl") ?: ""
             val decodedUrl = URLDecoder.decode(encodedUrl, StandardCharsets.UTF_8.toString())
-            PlayerScreen(navController, decodedUrl)
+            
+            // FIXED: Passed both required parameters to PlayerScreen
+            PlayerScreen(navController, channelId, decodedUrl)
         }
     }
 }
