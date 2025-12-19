@@ -1,13 +1,9 @@
 package com.aeoncorex.streamx.ui.home
 
+import android.content.Context
 import android.util.Log
-import androidx.compose.animation.animateColor
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,10 +11,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,9 +28,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringSetPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.aeoncorex.streamx.model.Channel
@@ -40,6 +43,8 @@ import com.google.accompanist.pager.ExperimentalPagerApi
 import com.google.accompanist.pager.HorizontalPager
 import com.google.accompanist.pager.calculateCurrentOffsetForPage
 import com.google.accompanist.pager.rememberPagerState
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
@@ -47,7 +52,10 @@ import retrofit2.http.Url
 import java.net.URLEncoder
 import kotlin.math.absoluteValue
 
-// Retrofit API setup
+// DataStore Setup for Persistence
+private val Context.dataStore by preferencesDataStore(name = "favorites_prefs")
+private val FAVORITES_KEY = stringSetPreferencesKey("favorite_ids")
+
 interface IPTVApi {
     @GET("index.json")
     suspend fun getIndex(): Map<String, Any>
@@ -58,10 +66,21 @@ interface IPTVApi {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalPagerApi::class)
 @Composable
 fun HomeScreen(navController: NavController) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
+    // States
     val allChannels = remember { mutableStateOf<List<Channel>>(emptyList()) }
-    val categories = remember { mutableStateOf<List<String>>(listOf("All")) }
+    val categories = remember { mutableStateOf(listOf("All", "Favorites")) }
     var selectedCategory by remember { mutableStateOf("All") }
     var isLoading by remember { mutableStateOf(true) }
+    var searchQuery by remember { mutableStateOf("") }
+    var isSearchActive by remember { mutableStateOf(false) }
+
+    // Persistent Favorites logic using DataStore
+    val favoriteIds by context.dataStore.data
+        .map { preferences -> preferences[FAVORITES_KEY] ?: emptySet() }
+        .collectAsState(initial = emptySet())
 
     LaunchedEffect(Unit) {
         try {
@@ -84,7 +103,7 @@ fun HomeScreen(navController: NavController) {
                     
                     rawChannels?.forEach { ch ->
                         masterList.add(Channel(
-                            id = (ch["id"] as? String) ?: "",
+                            id = (ch["id"] as? String) ?: ch["streamUrl"].hashCode().toString(),
                             name = (ch["name"] as? String) ?: "No Name",
                             logoUrl = (ch["logoUrl"] as? String) ?: "",
                             streamUrl = (ch["streamUrl"] as? String) ?: "",
@@ -92,83 +111,92 @@ fun HomeScreen(navController: NavController) {
                             isFeatured = (ch["isFeatured"] as? Boolean) ?: false
                         ))
                     }
-                } catch (e: Exception) { Log.e("API", "Error parsing category: $catName", e) }
+                } catch (e: Exception) { Log.e("API", "Error: $catName") }
             }
             allChannels.value = masterList
-            categories.value = listOf("All") + masterList.map { it.category }.distinct()
+            categories.value = listOf("All", "Favorites") + masterList.map { it.category }.distinct()
             isLoading = false
-        } catch (e: Exception) { 
-            Log.e("API", "Error fetching index", e)
-            isLoading = false 
-        }
+        } catch (e: Exception) { isLoading = false }
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "aurora_bg_transition")
-    val color1 by infiniteTransition.animateColor(initialValue = Color(0xFF3B82F6), targetValue = Color(0xFF9333EA), animationSpec = infiniteRepeatable(tween(5000), RepeatMode.Reverse), label = "aurora_color1")
-    val color2 by infiniteTransition.animateColor(initialValue = Color(0xFFEC4899), targetValue = Color(0xFF10B981), animationSpec = infiniteRepeatable(tween(7000), RepeatMode.Reverse), label = "aurora_color2")
-    val bgBrush = Brush.linearGradient(listOf(color1, color2))
+    // Animated Background
+    val infiniteTransition = rememberInfiniteTransition(label = "aurora")
+    val color1 by infiniteTransition.animateColor(
+        initialValue = Color(0xFF1E1B4B), targetValue = Color(0xFF312E81), 
+        animationSpec = infiniteRepeatable(tween(10000), RepeatMode.Reverse), label = ""
+    )
 
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("STREAMX ULTRA", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
-                actions = { IconButton(onClick = { /* TODO: Search */ }) { Icon(Icons.Default.Search, null, tint = Color.White) } },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent, titleContentColor = Color.White)
-            )
-        },
-        containerColor = Color.Transparent
-    ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().background(Color(0xFF020617))) {
-            Box(modifier = Modifier.fillMaxSize().blur(150.dp).background(bgBrush))
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF020617))) {
+        Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(color1, Color(0xFF020617)))).blur(80.dp))
 
-            if (isLoading) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Cyan)
-            } else {
-                LazyColumn(modifier = Modifier.padding(padding)) {
-                    item { Spacer(modifier = Modifier.height(16.dp)) }
-                    
-                    val featured = allChannels.value.filter { it.isFeatured }
-                    if (featured.isNotEmpty()) {
-                        item { FeaturedCarousel(featured, navController) }
+        Scaffold(
+            topBar = {
+                Column {
+                    CenterAlignedTopAppBar(
+                        title = { if (!isSearchActive) Text("STREAMX ULTRA", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 2.sp)) },
+                        actions = { 
+                            IconButton(onClick = { isSearchActive = !isSearchActive; if (!isSearchActive) searchQuery = "" }) { 
+                                Icon(if (isSearchActive) Icons.Default.Close else Icons.Default.Search, null, tint = Color.Cyan) 
+                            } 
+                        },
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                    )
+                    AnimatedVisibility(visible = isSearchActive, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
+                        SearchBar(query = searchQuery, onQueryChange = { searchQuery = it }, onClear = { searchQuery = "" })
                     }
-                    
-                    item { CategoryTabs(categories.value, selectedCategory) { selectedCategory = it } }
-                    
-                    val filteredChannels = if (selectedCategory == "All") allChannels.value else allChannels.value.filter { it.category == selectedCategory }
-                    itemsIndexed(filteredChannels.chunked(3)) { index, rowChannels ->
-                        var isVisible by remember { mutableStateOf(false) }
-                        LaunchedEffect(Unit) { isVisible = true }
-                        
-                        [span_1](start_span)// FIX: Explicitly specified generic types for tween animations[span_1](end_span)
-                        val alpha by animateFloatAsState(
-                            targetValue = if(isVisible) 1f else 0f, 
-                            animationSpec = tween<Float>(durationMillis = 300, delayMillis = index * 100)
-                        )
-                        val offsetY by animateDpAsState(
-                            targetValue = if(isVisible) 0.dp else 50.dp, 
-                            animationSpec = tween<androidx.compose.ui.unit.Dp>(durationMillis = 300, delayMillis = index * 100)
-                        )
-                        
-                        Row(
-                            Modifier
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                                .graphicsLayer { 
-                                    this.alpha = alpha
-                                    this.translationY = offsetY.toPx() 
-                                },
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            rowChannels.forEach { channel -> 
-                                ChannelCard(channel, Modifier.weight(1f)) {
-                                    val encodedUrl = URLEncoder.encode(channel.streamUrl, "UTF-8")
-                                    navController.navigate("player/$encodedUrl")
+                }
+            },
+            containerColor = Color.Transparent
+        ) { padding ->
+            if (isLoading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color.Cyan) }
+            } else {
+                val filteredChannels = allChannels.value.filter { channel ->
+                    val matchesSearch = channel.name.contains(searchQuery, ignoreCase = true)
+                    val matchesCategory = when (selectedCategory) {
+                        "All" -> true
+                        "Favorites" -> channel.id in favoriteIds
+                        else -> channel.category == selectedCategory
+                    }
+                    matchesSearch && matchesCategory
+                }
+
+                LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
+                    if (searchQuery.isEmpty()) {
+                        val featured = allChannels.value.filter { it.isFeatured }
+                        if (featured.isNotEmpty()) item { FeaturedCarousel(featured, navController) }
+                        item { CategoryTabs(categories.value, selectedCategory) { selectedCategory = it } }
+                    }
+
+                    if (filteredChannels.isEmpty()) {
+                        item { EmptyState(isFavorites = selectedCategory == "Favorites") }
+                    } else {
+                        items(filteredChannels.chunked(3)) { rowItems ->
+                            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), Arrangement.spacedBy(16.dp)) {
+                                rowItems.forEach { channel ->
+                                    ChannelCard(
+                                        channel = channel,
+                                        isFavorite = channel.id in favoriteIds,
+                                        modifier = Modifier.weight(1f),
+                                        onFavoriteToggle = {
+                                            scope.launch {
+                                                context.dataStore.edit { prefs ->
+                                                    val current = prefs[FAVORITES_KEY] ?: emptySet()
+                                                    prefs[FAVORITES_KEY] = if (channel.id in current) current - channel.id else current + channel.id
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            val encodedUrl = URLEncoder.encode(channel.streamUrl, "UTF-8")
+                                            navController.navigate("player/$encodedUrl")
+                                        }
+                                    )
                                 }
-                            }
-                            if (rowChannels.size < 3) {
-                                repeat(3 - rowChannels.size) { Spacer(Modifier.weight(1f)) }
+                                repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
                             }
                         }
                     }
+                    item { Spacer(modifier = Modifier.height(100.dp)) }
                 }
             }
         }
@@ -176,51 +204,40 @@ fun HomeScreen(navController: NavController) {
 }
 
 @Composable
-fun ChannelCard(channel: Channel, modifier: Modifier, onClick: () -> Unit) {
-    Column(
-        modifier = modifier.clickable { onClick() },
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            modifier = Modifier
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color.White.copy(0.1f))
-                .border(
-                    width = 1.dp, 
-                    brush = Brush.horizontalGradient(listOf(Color.White.copy(0.2f), Color.Transparent)), 
-                    shape = RoundedCornerShape(24.dp)
-                )
-                .padding(16.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            AsyncImage(model = channel.logoUrl, contentDescription = channel.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+fun SearchBar(query: String, onQueryChange: (String) -> Unit, onClear: () -> Unit) {
+    Box(Modifier.fillMaxWidth().padding(16.dp).clip(RoundedCornerShape(16.dp)).background(Color.White.copy(0.05f)).border(1.dp, Color.White.copy(0.1f), RoundedCornerShape(16.dp))) {
+        TextField(
+            value = query, onValueChange = onQueryChange,
+            placeholder = { Text("Search TV Channels...", color = Color.White.copy(0.3f)) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, cursorColor = Color.Cyan, focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
+            singleLine = true,
+            trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = onClear) { Icon(Icons.Default.Close, null, tint = Color.White.copy(0.5f)) } }
+        )
+    }
+}
+
+@Composable
+fun ChannelCard(channel: Channel, isFavorite: Boolean, modifier: Modifier, onFavoriteToggle: () -> Unit, onClick: () -> Unit) {
+    Column(modifier = modifier.clickable { onClick() }, horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(modifier = Modifier.aspectRatio(1f).clip(RoundedCornerShape(28.dp)).background(Color.White.copy(0.03f)).border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(28.dp)), contentAlignment = Alignment.Center) {
+            AsyncImage(model = channel.logoUrl, contentDescription = null, modifier = Modifier.fillMaxSize(0.65f), contentScale = ContentScale.Fit)
+            Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(32.dp).clip(CircleShape).background(Color.Black.copy(0.3f)).clickable { onFavoriteToggle() }, contentAlignment = Alignment.Center) {
+                Icon(if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, tint = if (isFavorite) Color.Red else Color.White, modifier = Modifier.size(16.dp))
+            }
         }
-        Text(channel.name, color = Color.White.copy(0.8f), fontSize = 12.sp, maxLines = 1, modifier = Modifier.padding(top = 8.dp))
+        Text(channel.name, color = Color.White.copy(0.7f), fontSize = 11.sp, maxLines = 1, modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.Medium)
     }
 }
 
 @Composable
 fun CategoryTabs(categories: List<String>, selected: String, onSelect: (String) -> Unit) {
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
+    LazyRow(contentPadding = PaddingValues(horizontal = 24.dp, vertical = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         items(categories) { cat ->
             val isSelected = cat == selected
-            val brush = if (isSelected) Brush.horizontalGradient(listOf(Color(0xFF3B82F6), Color.Cyan)) else Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f)))
-            
-            Text(
-                cat, 
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(brush)
-                    .clickable { onSelect(cat) }
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                color = if (isSelected) Color.Black else Color.White,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                fontSize = 14.sp
-            )
+            Box(modifier = Modifier.clip(CircleShape).background(if (isSelected) Color.Cyan else Color.White.copy(0.05f)).clickable { onSelect(cat) }.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                Text(cat, color = if (isSelected) Color.Black else Color.White.copy(0.6f), fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Normal, fontSize = 13.sp)
+            }
         }
     }
 }
@@ -229,54 +246,33 @@ fun CategoryTabs(categories: List<String>, selected: String, onSelect: (String) 
 @Composable
 fun FeaturedCarousel(featured: List<Channel>, navController: NavController) {
     val pagerState = rememberPagerState()
-    
-    Column {
-        Text(
-            "Featured", 
-            style = MaterialTheme.typography.titleLarge, 
-            fontWeight = FontWeight.Bold, 
-            color = Color.White, 
-            modifier = Modifier.padding(start = 16.dp, bottom = 12.dp)
-        )
-        HorizontalPager(
-            count = featured.size,
-            state = pagerState,
-            contentPadding = PaddingValues(horizontal = 48.dp)
-        ) { page ->
-            val pageOffset = calculateCurrentOffsetForPage(page).absoluteValue
-            val scale = lerp(1f, 0.85f, pageOffset)
-            
-            Card(
-                modifier = Modifier
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        alpha = lerp(1f, 0.5f, pageOffset)
-                    }
-                    .width(300.dp)
-                    .height(160.dp)
-                    .clickable { 
-                        val encodedUrl = URLEncoder.encode(featured[page].streamUrl, "UTF-8")
-                        navController.navigate("player/$encodedUrl")
-                    },
-                shape = RoundedCornerShape(20.dp)
-            ) {
-                Box {
-                    AsyncImage(model = featured[page].logoUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black))))
-                    Text(
-                        featured[page].name, 
-                        modifier = Modifier.align(Alignment.BottomStart).padding(16.dp), 
-                        color = Color.White, 
-                        fontWeight = FontWeight.Bold, 
-                        fontSize = 18.sp
-                    )
-                }
+    HorizontalPager(count = featured.size, state = pagerState, contentPadding = PaddingValues(horizontal = 40.dp), modifier = Modifier.padding(top = 12.dp)) { page ->
+        val pageOffset = calculateCurrentOffsetForPage(page).absoluteValue
+        Card(
+            modifier = Modifier.graphicsLayer {
+                val scale = lerp(0.85f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
+                scaleX = scale; scaleY = scale; alpha = lerp(0.5f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
+            }.fillMaxWidth().height(170.dp).clickable { 
+                val encodedUrl = URLEncoder.encode(featured[page].streamUrl, "UTF-8")
+                navController.navigate("player/$encodedUrl") 
+            },
+            shape = RoundedCornerShape(32.dp)
+        ) {
+            Box {
+                AsyncImage(model = featured[page].logoUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.85f)))))
+                Text(featured[page].name, color = Color.White, fontWeight = FontWeight.Black, fontSize = 20.sp, modifier = Modifier.align(Alignment.BottomStart).padding(20.dp))
             }
         }
     }
 }
 
-fun lerp(start: Float, stop: Float, fraction: Float): Float {
-    return (1 - fraction) * start + fraction * stop
+@Composable
+fun EmptyState(isFavorites: Boolean) {
+    Box(Modifier.fillMaxWidth().padding(top = 80.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(if (isFavorites) "Your favorites list is empty" else "No matching channels", color = Color.White.copy(0.4f), fontSize = 15.sp)
+            Text(if (isFavorites) "Tap the heart to save channels" else "Try another search term", color = Color.Cyan.copy(0.3f), fontSize = 12.sp)
+        }
+    }
 }
