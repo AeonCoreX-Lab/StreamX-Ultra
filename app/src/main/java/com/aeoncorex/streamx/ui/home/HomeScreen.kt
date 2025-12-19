@@ -1,4 +1,5 @@
 package com.aeoncorex.streamx.ui.home
+import androidx.compose.material.icons.filled.Dashboard
 
 import android.util.Log
 import androidx.compose.animation.core.*
@@ -242,7 +243,7 @@ fun LoadingShimmerEffect(padding: PaddingValues) {
     LazyColumn(modifier = Modifier.padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         // Shimmer for Featured Section
         item {
-            Spacer(modifier = Modifier.fillMaxWidth().height(160.dp).shimmer(customBrush = shimmerBrush).background(Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(16.dp)))
+            Spacer(modifier = Modifier.fillMaxWidth().height(160.dp).shimmer(brush = shimmerBrush).background(Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(16.dp)))
         }
         // Shimmer for Grid Section
         item {
@@ -251,7 +252,7 @@ fun LoadingShimmerEffect(padding: PaddingValues) {
         items(2) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 repeat(3) {
-                    Spacer(modifier = Modifier.weight(1f).aspectRatio(1f).shimmer(customBrush = shimmerBrush).background(Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(16.dp)))
+                    Spacer(modifier = Modifier.weight(1f).aspectRatio(1f).shimmer(brush = shimmerBrush).background(Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(16.dp)))
                 }
             }
         }

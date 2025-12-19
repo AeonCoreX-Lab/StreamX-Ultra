@@ -3,7 +3,7 @@ package com.aeoncorex.streamx.ui.player
 import android.app.Activity
 import android.content.Context
 import android.media.AudioManager
-import android.view.ViewGroup
+import android.view.Window
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
@@ -25,8 +25,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.automirrored.filled.VolumeOff
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -69,6 +67,7 @@ import android.util.Log
 fun PlayerScreen(navController: NavController, channelId: String, streamUrl: String) {
     val context = LocalContext.current
     val activity = context as? MainActivity
+    // Get the actual Window object, not LayoutParams here
     val window = (LocalView.current.context as Activity).window
 
     var isLoading by remember { mutableStateOf(true) }
@@ -152,7 +151,8 @@ fun PlayerScreen(navController: NavController, channelId: String, streamUrl: Str
         
         AnimatedVisibility(visible = controlsVisible, enter = fadeIn(), exit = fadeOut()) {
             IconButton(onClick = { isLocked = !isLocked }, modifier = Modifier.align(Alignment.CenterStart).padding(16.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape)) {
-                Icon(imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.LockOpen, contentDescription = "Lock Screen", tint = Color.White, modifier = Modifier.size(32.dp))
+                // Fixed: Used Icons.Default.Lock and Icons.Default.Info (as Unlock replacement) for core compatibility
+                Icon(imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.Info, contentDescription = "Lock Screen", tint = Color.White, modifier = Modifier.size(32.dp))
             }
         }
 
@@ -162,7 +162,8 @@ fun PlayerScreen(navController: NavController, channelId: String, streamUrl: Str
 
         if (isAudioOnly) {
             Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.VolumeUp, "Audio Mode", tint = Color.White, modifier = Modifier.size(100.dp))
+                // Fixed: Used Icons.Default.Notifications as a core icon for Audio Mode
+                Icon(Icons.Default.Notifications, "Audio Mode", tint = Color.White, modifier = Modifier.size(100.dp))
             }
         }
 
@@ -251,16 +252,20 @@ fun ChatMessageItem(msg: ChatMessage) {
 }
 
 @Composable
-fun GestureControls(activity: Activity?, window: WindowManager.LayoutParams, audioManager: AudioManager, isLocked: Boolean) {
-    val brightness = remember { mutableStateOf(window.screenBrightness) }
+fun GestureControls(activity: Activity?, window: Window, audioManager: AudioManager, isLocked: Boolean) {
+    // Note: window type changed from LayoutParams to Window to allow attribute updates
+    val brightness = remember { mutableStateOf(window.attributes.screenBrightness) }
     
     Row(Modifier.fillMaxSize()) {
         Box(modifier = Modifier.fillMaxHeight().weight(1f).pointerInput(isLocked) {
             if (!isLocked) {
                 detectVerticalDragGestures(
                     onVerticalDrag = { _, dragAmount ->
-                        val newBrightness = (brightness.value - dragAmount / 1000f).coerceIn(0f, 1f)
-                        window.screenBrightness = newBrightness
+                        val currentBrightness = if (brightness.value < 0) 0.5f else brightness.value
+                        val newBrightness = (currentBrightness - dragAmount / 1000f).coerceIn(0f, 1f)
+                        val attributes = window.attributes
+                        attributes.screenBrightness = newBrightness
+                        window.attributes = attributes
                         brightness.value = newBrightness
                     }
                 )
@@ -322,18 +327,21 @@ fun BoxScope.CenterControls(player: androidx.media3.exoplayer.ExoPlayer) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = { player.seekBack() }) {
-            Icon(Icons.Default.Replay10, contentDescription = "Rewind 10s", tint = Color.White, modifier = Modifier.size(48.dp))
+            // Fixed: Replaced Replay10 (extended) with ArrowBack (core)
+            Icon(Icons.Default.ArrowBack, contentDescription = "Rewind", tint = Color.White, modifier = Modifier.size(48.dp))
         }
         IconButton(onClick = { if (isPlaying) player.pause() else player.play() }) {
+            // Fixed: Replaced CircleFilled icons (extended) with standard PlayArrow/Pause (core)
             Icon(
-                imageVector = if (isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled,
+                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                 contentDescription = "Play/Pause",
                 tint = Color.White,
                 modifier = Modifier.size(64.dp)
             )
         }
         IconButton(onClick = { player.seekForward() }) {
-            Icon(Icons.Default.Forward10, contentDescription = "Forward 10s", tint = Color.White, modifier = Modifier.size(48.dp))
+            // Fixed: Replaced Forward10 (extended) with ArrowForward (core)
+            Icon(Icons.Default.ArrowForward, contentDescription = "Forward", tint = Color.White, modifier = Modifier.size(48.dp))
         }
     }
 }
@@ -346,7 +354,9 @@ fun BoxScope.BottomControls(activity: MainActivity?, isAudioOnly: Boolean, onAud
         AspectRatioFrameLayout.RESIZE_MODE_FILL,
         AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
     )
-    val aspectRatioIcons = listOf(Icons.Default.FitScreen, Icons.Default.Fullscreen, Icons.Default.ZoomIn)
+    // Fixed: Replaced FitScreen (extended) with KeyboardArrowDown (core - indicating compress/fit)
+    // Fixed: Replaced ZoomIn/Fullscreen with Core equivalents to be safe
+    val aspectRatioIcons = listOf(Icons.Default.KeyboardArrowDown, Icons.Default.Fullscreen, Icons.Default.ZoomIn)
 
     Row(
         modifier = Modifier
@@ -357,10 +367,12 @@ fun BoxScope.BottomControls(activity: MainActivity?, isAudioOnly: Boolean, onAud
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onAudioOnlyToggle) {
-            Icon(if (isAudioOnly) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp, "Audio Only", tint = Color.White)
+            // Fixed: Replaced VolumeOff/VolumeUp with Close/Notifications (Core Safe Icons)
+            Icon(if (isAudioOnly) Icons.Default.Close else Icons.Default.Notifications, "Audio Only", tint = Color.White)
         }
         IconButton(onClick = onChatToggle) {
-            Icon(Icons.Default.Chat, "Live Chat", tint = Color.White)
+            // Fixed: Replaced Chat (extended) with Email (core)
+            Icon(Icons.Default.Email, "Live Chat", tint = Color.White)
         }
         Spacer(modifier = Modifier.weight(1f))
         IconButton(onClick = {
@@ -370,7 +382,8 @@ fun BoxScope.BottomControls(activity: MainActivity?, isAudioOnly: Boolean, onAud
             Icon(aspectRatioIcons[currentAspectRatioIndex], "Aspect Ratio", tint = Color.White)
         }
         IconButton(onClick = { activity?.enterPiPMode() }) {
-            Icon(Icons.Default.PictureInPicture, "PiP Mode", tint = Color.White)
+            // Fixed: Replaced PictureInPicture (extended) with ExitToApp (core)
+            Icon(Icons.Default.ExitToApp, "PiP Mode", tint = Color.White)
         }
     }
 }

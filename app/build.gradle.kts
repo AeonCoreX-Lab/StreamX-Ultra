@@ -74,4 +74,7 @@ dependencies {
     
     // Shimmer Effect এর জন্য এই লাইব্রেরিটি যোগ করুন
     implementation("com.valentinilk.shimmer:compose-shimmer:1.2.0")
+    
+    // এই লাইনটি সব আইকন সমস্যার সমাধান করবে (নিশ্চিত করুন এটি আছে)
+    implementation("androidx.compose.material:material-icons-extended-android:1.6.7")
 }
