@@ -1,19 +1,22 @@
 package com.aeoncorex.streamx.ui.player
 
 import android.app.Activity
+import android.content.Context
+import android.media.AudioManager
 import android.net.Uri
+import android.provider.Settings
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -23,55 +26,72 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-
-// Media3 Imports
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
+import kotlin.math.abs
 
 @OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val activity = context as? Activity
+    val configuration = LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp.dp
     
-    val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+    // ভলিউম এবং ব্রাইটনেস স্টেট
+    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    var currentVolume by remember { mutableStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)) }
+    val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
     
+    var currentBrightness by remember { mutableStateOf(activity?.window?.attributes?.screenBrightness ?: 0.5f) }
+    var gestureInfo by remember { mutableStateOf<String?>(null) }
+    var isGestureVisible by remember { mutableStateOf(false) }
+
+    val userAgent = "Mozilla/5.0 (Linux; Android 11; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
+    var isPlaying by remember { mutableStateOf(true) }
+    var isBuffering by remember { mutableStateOf(true) }
+    var isControlsVisible by remember { mutableStateOf(true) }
+    var aspectRatioMode by remember { mutableStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
+
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
             val dataSourceFactory = DefaultHttpDataSource.Factory()
                 .setUserAgent(userAgent)
                 .setAllowCrossProtocolRedirects(true)
             
-            val mediaSource = HlsMediaSource.Factory(dataSourceFactory)
-                .createMediaSource(MediaItem.fromUri(Uri.parse(streamUrl)))
-            
-            setMediaSource(mediaSource)
+            setMediaSource(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
+                .createMediaSource(MediaItem.fromUri(Uri.parse(streamUrl))))
             prepare()
             playWhenReady = true
         }
     }
 
-    var isControlsVisible by remember { mutableStateOf(true) }
-    var aspectRatioMode by remember { mutableStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
-    
-    LaunchedEffect(isControlsVisible) {
-        if (isControlsVisible) {
-            delay(5000)
-            isControlsVisible = false
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                isBuffering = state == Player.STATE_BUFFERING
+            }
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+            }
         }
+        exoPlayer.addListener(listener)
+        onDispose { exoPlayer.removeListener(listener) }
     }
 
     KeepScreenOn()
@@ -88,6 +108,30 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
         .pointerInput(Unit) {
             detectTapGestures(onTap = { isControlsVisible = !isControlsVisible })
         }
+        .pointerInput(Unit) {
+            detectDragGestures(
+                onDragStart = { isGestureVisible = true },
+                onDragEnd = { isGestureVisible = false },
+                onDrag = { change, dragAmount ->
+                    val isLeftScreen = change.position.x < (size.width / 2)
+                    if (isLeftScreen) {
+                        // ব্রাইটনেস কন্ট্রোল (বাম পাশ)
+                        val delta = -dragAmount.y / size.height
+                        currentBrightness = (currentBrightness + delta).coerceIn(0.01f, 1f)
+                        val layoutParams = activity?.window?.attributes
+                        layoutParams?.screenBrightness = currentBrightness
+                        activity?.window?.attributes = layoutParams
+                        gestureInfo = "Brightness: ${(currentBrightness * 100).toInt()}%"
+                    } else {
+                        // ভলিউম কন্ট্রোল (ডান পাশ)
+                        val delta = if (dragAmount.y > 0) -1 else 1
+                        currentVolume = (currentVolume + delta).coerceIn(0, maxVolume)
+                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, currentVolume, 0)
+                        gestureInfo = "Volume: $currentVolume"
+                    }
+                }
+            )
+        }
     ) {
         AndroidView(
             factory = { ctx ->
@@ -95,116 +139,37 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
                     player = exoPlayer
                     useController = false
                     resizeMode = aspectRatioMode
-                    layoutParams = FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
                 }
             },
             update = { it.resizeMode = aspectRatioMode },
             modifier = Modifier.fillMaxSize()
         )
 
+        // জেসচার ইন্ডিকেটর (মাঝখানে দেখাবে)
+        if (isGestureVisible) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 80.dp)
+                    .background(Color.Black.copy(0.6f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 20.dp, vertical = 10.dp)
+            ) {
+                Text(gestureInfo ?: "", color = Color.Cyan, fontSize = 16.sp)
+            }
+        }
+
+        if (isBuffering) {
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Cyan)
+        }
+
         AnimatedVisibility(visible = isControlsVisible, enter = fadeIn(), exit = fadeOut()) {
             PlayerControls(
                 exoPlayer = exoPlayer,
-                onBack = {
-                    exoPlayer.release()
-                    onBack()
-                },
-                onAspectRatioChange = { mode -> aspectRatioMode = mode },
+                isPlaying = isPlaying,
+                onBack = { exoPlayer.release(); onBack() },
+                onAspectRatioChange = { aspectRatioMode = it },
                 activity = activity
             )
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose { exoPlayer.release() }
-    }
-}
-
-@Composable
-fun PlayerControls(
-    exoPlayer: ExoPlayer,
-    onBack: () -> Unit,
-    onAspectRatioChange: (Int) -> Unit,
-    activity: Activity?
-) {
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))) {
-        Row(
-            modifier = Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack, modifier = Modifier.background(Color.Black.copy(0.5f), CircleShape)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
-            }
-        }
-
-        var isPlaying by remember { mutableStateOf(exoPlayer.isPlaying) }
-        IconButton(
-            onClick = {
-                if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
-                isPlaying = exoPlayer.isPlaying
-            },
-            modifier = Modifier.align(Alignment.Center).size(80.dp).background(Color.Black.copy(0.3f), CircleShape)
-        ) {
-            Icon(
-                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = "Play/Pause",
-                modifier = Modifier.size(50.dp),
-                tint = Color.White
-            )
-        }
-
-        Row(
-            modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp).fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-        ) {
-            val modes = listOf(
-                AspectRatioFrameLayout.RESIZE_MODE_FIT,
-                AspectRatioFrameLayout.RESIZE_MODE_FILL,
-                AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-            )
-            var currentModeIndex by remember { mutableStateOf(0) }
-
-            IconButton(onClick = {
-                currentModeIndex = (currentModeIndex + 1) % modes.size
-                onAspectRatioChange(modes[currentModeIndex])
-            }) {
-                Icon(Icons.Default.AspectRatio, "Aspect Ratio", tint = Color.White)
-            }
-
-            IconButton(onClick = { activity?.enterPictureInPictureMode() }) {
-                Icon(Icons.Default.PictureInPicture, "PiP", tint = Color.White)
-            }
-        }
-    }
-}
-
-@Composable
-private fun KeepScreenOn() {
-    val view = LocalView.current
-    DisposableEffect(Unit) {
-        val window = (view.context as? Activity)?.window
-        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        onDispose {
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-    }
-}
-
-@Composable
-private fun HideSystemUi(activity: Activity?) {
-    val view = activity?.window?.decorView
-    val windowInsetsController = view?.let { WindowCompat.getInsetsController(activity.window, it) }
-
-    DisposableEffect(Unit) {
-        windowInsetsController?.let {
-            it.hide(WindowInsetsCompat.Type.systemBars())
-            it.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
-        onDispose {
-            windowInsetsController?.show(WindowInsetsCompat.Type.systemBars())
         }
     }
 }

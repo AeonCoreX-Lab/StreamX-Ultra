@@ -2,12 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- ইন্টারনেট এবং নোটিফিকেশনের জন্য অনুমতি -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
         android:allowBackup="true"
+        android:usesCleartextTraffic="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
@@ -17,7 +17,6 @@
         android:theme="@style/Theme.StreamXUltra"
         tools:targetApi="31">
         
-        <!-- MainActivity-এর কনফিগারেশন -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
