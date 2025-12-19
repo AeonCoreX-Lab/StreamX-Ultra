@@ -81,6 +81,10 @@ dependencies {
     // Coil for Image Loading
     implementation("io.coil-kt:coil-compose:2.6.0")
     
+    // DataStore Preferences এর জন্য এই দুটি লাইন যোগ করুন
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.6.2")
+    
     // Shimmer Effect
     implementation("com.valentinilk.shimmer:compose-shimmer:1.2.0")
     
