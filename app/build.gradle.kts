@@ -37,7 +37,7 @@ android {
         compose = true
     }
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.8" // Updated for compatibility
+        kotlinCompilerExtensionVersion = "1.5.8"
     }
     packaging {
         resources {
@@ -57,9 +57,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("com.google.accompanist:accompanist-pager:0.23.1") // ক্যারোসেলের জন্য
+    implementation("com.google.accompanist:accompanist-pager:0.23.1")
 
-    
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
@@ -69,16 +68,22 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.android.gms:play-services-auth:21.0.0")
 
-    // Media3 (ExoPlayer) - build.gradle.kts এ এই লাইনটি যোগ করুন
+    // --- MEDIA3 (EXOPLAYER) FIXED DEPENDENCIES ---
+    // Core functionality (Missing in your original code)
+    implementation("androidx.media3:media3-exoplayer:1.3.1")
+    // Common data structures (Missing in your original code)
+    implementation("androidx.media3:media3-common:1.3.1")
+    // HLS Support
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
+    // UI Components
     implementation("androidx.media3:media3-ui:1.3.1")
 
     // Coil for Image Loading
     implementation("io.coil-kt:coil-compose:2.6.0")
     
-    // Shimmer Effect এর জন্য এই লাইব্রেরিটি যোগ করুন
+    // Shimmer Effect
     implementation("com.valentinilk.shimmer:compose-shimmer:1.2.0")
     
-    // এই লাইনটি সব আইকন সমস্যার সমাধান করবে (নিশ্চিত করুন এটি আছে)
+    // Icons
     implementation("androidx.compose.material:material-icons-extended-android:1.6.7")
 }
