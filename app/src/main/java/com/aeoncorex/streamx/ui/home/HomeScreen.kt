@@ -63,7 +63,6 @@ fun HomeScreen(navController: NavController) {
     var selectedCategory by remember { mutableStateOf("All") }
     var isLoading by remember { mutableStateOf(true) }
 
-    // Data fetching logic
     LaunchedEffect(Unit) {
         try {
             val api = Retrofit.Builder()
@@ -104,7 +103,6 @@ fun HomeScreen(navController: NavController) {
         }
     }
 
-    // Animated Aurora Background
     val infiniteTransition = rememberInfiniteTransition(label = "aurora_bg_transition")
     val color1 by infiniteTransition.animateColor(initialValue = Color(0xFF3B82F6), targetValue = Color(0xFF9333EA), animationSpec = infiniteRepeatable(tween(5000), RepeatMode.Reverse), label = "aurora_color1")
     val color2 by infiniteTransition.animateColor(initialValue = Color(0xFFEC4899), targetValue = Color(0xFF10B981), animationSpec = infiniteRepeatable(tween(7000), RepeatMode.Reverse), label = "aurora_color2")
@@ -114,14 +112,13 @@ fun HomeScreen(navController: NavController) {
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("STREAMX ULTRA", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
-                actions = { IconButton(onClick = { /* TODO: Navigate to Search Screen */ }) { Icon(Icons.Default.Search, null, tint = Color.White) } },
+                actions = { IconButton(onClick = { /* TODO: Search */ }) { Icon(Icons.Default.Search, null, tint = Color.White) } },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent, titleContentColor = Color.White)
             )
         },
         containerColor = Color.Transparent
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().background(Color(0xFF020617))) {
-            // Blurred Aurora Background
             Box(modifier = Modifier.fillMaxSize().blur(150.dp).background(bgBrush))
 
             if (isLoading) {
@@ -130,33 +127,35 @@ fun HomeScreen(navController: NavController) {
                 LazyColumn(modifier = Modifier.padding(padding)) {
                     item { Spacer(modifier = Modifier.height(16.dp)) }
                     
-                    // Featured Carousel Section
                     val featured = allChannels.value.filter { it.isFeatured }
                     if (featured.isNotEmpty()) {
                         item { FeaturedCarousel(featured, navController) }
                     }
                     
-                    // Category Tabs Section
                     item { CategoryTabs(categories.value, selectedCategory) { selectedCategory = it } }
                     
-                    // Channels Grid Section
                     val filteredChannels = if (selectedCategory == "All") allChannels.value else allChannels.value.filter { it.category == selectedCategory }
                     itemsIndexed(filteredChannels.chunked(3)) { index, rowChannels ->
-                        // Animated entry for each row
-                        // FIXED: Removed <Float> to allow generic usage for both Float and Dp
-                        val animation = tween(durationMillis = 300, delayMillis = index * 100)
-                        val animationDp = tween<androidx.compose.ui.unit.Dp>(durationMillis = 300, delayMillis = index * 100)
-
                         var isVisible by remember { mutableStateOf(false) }
                         LaunchedEffect(Unit) { isVisible = true }
                         
-                        val alpha by animateFloatAsState(targetValue = if(isVisible) 1f else 0f, animationSpec = animation)
-                        val offsetY by animateDpAsState(targetValue = if(isVisible) 0.dp else 50.dp, animationSpec = animationDp)
+                        [span_1](start_span)// FIX: Explicitly specified generic types for tween animations[span_1](end_span)
+                        val alpha by animateFloatAsState(
+                            targetValue = if(isVisible) 1f else 0f, 
+                            animationSpec = tween<Float>(durationMillis = 300, delayMillis = index * 100)
+                        )
+                        val offsetY by animateDpAsState(
+                            targetValue = if(isVisible) 0.dp else 50.dp, 
+                            animationSpec = tween<androidx.compose.ui.unit.Dp>(durationMillis = 300, delayMillis = index * 100)
+                        )
                         
                         Row(
                             Modifier
                                 .padding(horizontal = 16.dp, vertical = 8.dp)
-                                .graphicsLayer { this.alpha = alpha; this.translationY = offsetY.toPx() },
+                                .graphicsLayer { 
+                                    this.alpha = alpha
+                                    this.translationY = offsetY.toPx() 
+                                },
                             horizontalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
                             rowChannels.forEach { channel -> 
@@ -187,8 +186,11 @@ fun ChannelCard(channel: Channel, modifier: Modifier, onClick: () -> Unit) {
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color.White.copy(0.1f))
-                // FIXED: Explicitly named parameters for border
-                .border(width = 1.dp, brush = Brush.horizontalGradient(listOf(Color.White.copy(0.2f), Color.Transparent)), shape = RoundedCornerShape(24.dp))
+                .border(
+                    width = 1.dp, 
+                    brush = Brush.horizontalGradient(listOf(Color.White.copy(0.2f), Color.Transparent)), 
+                    shape = RoundedCornerShape(24.dp)
+                )
                 .padding(16.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -264,9 +266,7 @@ fun FeaturedCarousel(featured: List<Channel>, navController: NavController) {
                     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black))))
                     Text(
                         featured[page].name, 
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(16.dp), 
+                        modifier = Modifier.align(Alignment.BottomStart).padding(16.dp), 
                         color = Color.White, 
                         fontWeight = FontWeight.Bold, 
                         fontSize = 18.sp
