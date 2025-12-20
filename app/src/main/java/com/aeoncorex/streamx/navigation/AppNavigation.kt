@@ -10,9 +10,6 @@ import com.aeoncorex.streamx.ui.auth.AuthScreen
 import com.aeoncorex.streamx.ui.home.HomeScreen
 import com.aeoncorex.streamx.ui.player.PlayerScreen
 import com.aeoncorex.streamx.ui.splash.SplashScreen
-import java.net.URLDecoder
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 
 @Composable
 fun AppNavigation() {
@@ -27,25 +24,33 @@ fun AppNavigation() {
         composable("home") {
             HomeScreen(navController)
         }
-        // FIXED: Route now accepts only streamUrl as PlayerScreen doesn't use channelId
+        
+        // --- এই অংশটি সম্পূর্ণ আপডেট করা হয়েছে ---
         composable(
-            route = "player/{streamUrl}",
+            // পরিবর্তন ১: Route-এর আর্গুমেন্টের নাম পরিবর্তন করা হলো স্পষ্টতার জন্য
+            route = "player/{encodedUrl}", 
             arguments = listOf(
-                navArgument("streamUrl") { type = NavType.StringType }
+                navArgument("encodedUrl") { type = NavType.StringType }
             )
         ) { backStackEntry ->
-            val encodedUrl = backStackEntry.arguments?.getString("streamUrl") ?: ""
-            val decodedUrl = URLDecoder.decode(encodedUrl, StandardCharsets.UTF_8.toString())
+            // পরিবর্তন ২: এনকোড করা URL সরাসরি গ্রহণ করা হচ্ছে
+            val encodedUrl = backStackEntry.arguments?.getString("encodedUrl") ?: ""
             
-            // FIXED: Removed incorrect arguments. PlayerScreen only takes streamUrl and onBack.
+            // PlayerScreen-কে এখন এনকোড করা URL-টি সরাসরি পাঠানো হচ্ছে
+            // এখানে আর কোনো ডিকোডিং করা হচ্ছে না।
             PlayerScreen(
-                streamUrl = decodedUrl,
+                // পরিবর্তন ৩: সঠিক প্যারামিটারের নাম (encodedUrl) ব্যবহার করা হচ্ছে
+                encodedUrl = encodedUrl, 
                 onBack = { navController.popBackStack() }
             )
         }
     }
 }
 
+// এই ইউটিলিটি ফাংশনটির এখানে প্রয়োজন নেই, কারণ এটি HomeScreen-এ ব্যবহার করা হয়।
+// ফাইলটি পরিষ্কার রাখার জন্য এটি মুছে ফেলতে পারেন অথবা রেখে দিতে পারেন।
+/*
 fun encodeUrl(url: String): String {
     return URLEncoder.encode(url, StandardCharsets.UTF_8.toString())
 }
+*/
