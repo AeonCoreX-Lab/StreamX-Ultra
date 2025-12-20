@@ -34,7 +34,6 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -50,19 +49,22 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showControls by remember { mutableStateOf(true) }
 
-    // HD Streamz-এর মতো উন্নত ExoPlayer ইঞ্জিন
     val exoPlayer = remember {
-        // রিয়েল-টাইম সার্ভার কমিউনিকেশনের জন্য কাস্টম ডাটা সোর্স
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("HDStreamz/3.1.0 (Linux; Android 11; SM-G973F)") // সার্ভারকে বিভ্রান্ত করার জন্য প্রো-ইউজার এজেন্ট
-            .setConnectTimeoutMs(10000) // ১০ সেকেন্ডের মধ্যে কানেক্ট না হলে এরর দিবে
+            .setUserAgent("HDStreamz/3.1.0 (Linux; Android 11; SM-G973F)")
+            .setConnectTimeoutMs(10000)
             .setReadTimeoutMs(10000)
             .setAllowCrossProtocolRedirects(true)
 
+        val mediaSourceFactory = DefaultMediaSourceFactory(context)
+            .setDataSourceFactory(httpDataSourceFactory)
+
         ExoPlayer.Builder(context)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(httpDataSourceFactory))
+            .setMediaSourceFactory(mediaSourceFactory)
             .build().apply {
-                setMediaSource(MediaItem.fromUri(streamUrl))
+                val mediaItem = MediaItem.fromUri(streamUrl)
+                // FIXED: Using setMediaItem instead of setMediaSource to avoid type mismatch
+                setMediaItem(mediaItem)
                 prepare()
                 playWhenReady = true
 
@@ -70,28 +72,21 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
                     override fun onPlaybackStateChanged(state: Int) {
                         isLoading = (state == Player.STATE_BUFFERING)
                         if (state == Player.STATE_READY) {
-                            errorMessage = null // ভিডিও শুরু হলে এরর মেসেজ মুছে যাবে
+                            errorMessage = null
                         }
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
                         isLoading = false
-                        // রিয়েল-টাইম এরর মেসেজ লজিক (HD Streamz Style)
                         val cause = error.cause
                         errorMessage = when {
-                            // সার্ভার যদি রেসপন্স না করে বা ইন্টারনেট না থাকে
                             cause is java.net.ConnectException || cause is java.net.UnknownHostException -> 
                                 "Server communication failed! Please check your internet connection."
-                            
-                            // যদি লিঙ্কটি ব্রোকেন হয় (HTTP 404/403)
                             error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
                             error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ->
-                                "Source Link Broken! This channel is currently offline from server (404)."
-
-                            // যদি সার্ভার খুব স্লো হয় (Timeout)
+                                "Source Link Broken! This channel is currently offline (404)."
                             error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
                                 "Request Timeout! Server is taking too long to respond."
-
                             else -> "Live stream error: ${error.localizedMessage}"
                         }
                     }
@@ -99,13 +94,11 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
             }
     }
 
-    // ব্যাক হ্যান্ডলিং এবং রিসোর্স রিলিজ
     BackHandler {
         exoPlayer.release()
         onBack()
     }
 
-    // ফুলস্ক্রিন এবং স্ক্রিন অন রাখার লজিক
     KeepScreenOn()
     HideSystemUi(activity)
 
@@ -116,7 +109,6 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
             detectTapGestures(onTap = { showControls = !showControls })
         }
     ) {
-        // প্লেয়ার ভিউ
         AndroidView(
             factory = {
                 PlayerView(it).apply {
@@ -132,7 +124,6 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
             modifier = Modifier.fillMaxSize()
         )
 
-        // HD Streamz লোডিং ইন্ডিকেটর (সবুজ রঙের)
         if (isLoading) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.Center),
@@ -141,7 +132,6 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
             )
         }
 
-        // রিয়েল-টাইম এরর মেসেজ ডিসপ্লে
         errorMessage?.let { msg ->
             Box(
                 modifier = Modifier
@@ -150,21 +140,17 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
-                    Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color.Red, size = 60.dp)
+                    // FIXED: Explicitly providing size to the Modifier
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline, 
+                        contentDescription = null, 
+                        tint = Color.Red, 
+                        modifier = Modifier.size(60.dp) 
+                    )
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "ERROR DETECTED",
-                        color = Color.Red,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
+                    Text(text = "ERROR DETECTED", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = msg,
-                        color = Color.White,
-                        textAlign = TextAlign.Center,
-                        fontSize = 14.sp
-                    )
+                    Text(text = msg, color = Color.White, textAlign = TextAlign.Center, fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(24.dp))
                     Button(
                         onClick = { 
@@ -181,9 +167,7 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
             }
         }
 
-        // কাস্টম কন্ট্রোলস (Auto-hide)
         if (showControls && errorMessage == null) {
-            // টপ বার
             Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
                 IconButton(
                     onClick = { 
@@ -195,7 +179,6 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
                 }
 
-                // সেন্টার প্লে/পজ
                 IconButton(
                     onClick = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() },
                     modifier = Modifier
@@ -204,7 +187,7 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
                         .background(Color.Black.copy(0.4f), CircleShape)
                 ) {
                     Icon(
-                        if (exoPlayer.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        imageVector = if (exoPlayer.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = null,
                         tint = Color.White,
                         modifier = Modifier.size(50.dp)
