@@ -40,10 +40,9 @@ import coil.compose.AsyncImage
 import com.aeoncorex.streamx.model.Channel
 import com.aeoncorex.streamx.model.GitHubRelease
 import com.aeoncorex.streamx.services.UpdateChecker
-import com.google.accompanist.pager.ExperimentalPagerApi
-import com.google.accompanist.pager.HorizontalPager
-import com.google.accompanist.pager.calculateCurrentOffsetForPage
-import com.google.accompanist.pager.rememberPagerState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -376,10 +375,10 @@ fun CategoryTabs(categories: List<String>, selected: String, onSelect: (String) 
     }
 }
 
-@OptIn(ExperimentalPagerApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FeaturedCarousel(featured: List<Channel>, navController: NavController) {
-    val pagerState = rememberPagerState()
+    val pagerState = rememberPagerState(pageCount = { featured.size })
 
     LaunchedEffect(pagerState.pageCount) {
         if (pagerState.pageCount > 1) {
@@ -392,17 +391,19 @@ fun FeaturedCarousel(featured: List<Channel>, navController: NavController) {
     }
 
     HorizontalPager(
-        count = featured.size,
         state = pagerState,
         contentPadding = PaddingValues(horizontal = 40.dp),
         modifier = Modifier.padding(top = 12.dp, bottom = 12.dp)
     ) { page ->
-        val pageOffset = calculateCurrentOffsetForPage(page).absoluteValue
+        val pageOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+
         Card(
             modifier = Modifier
                 .graphicsLayer {
-                    val scale = lerp(0.85f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
-                    scaleX = scale; scaleY = scale; alpha = lerp(0.5f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
+                    val scale = lerp(0.85f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f))
+                    scaleX = scale
+                    scaleY = scale
+                    alpha = lerp(0.5f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f))
                 }
                 .fillMaxWidth()
                 .height(170.dp)
