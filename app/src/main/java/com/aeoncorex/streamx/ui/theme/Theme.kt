@@ -1,46 +1,59 @@
 package com.aeoncorex.streamx.ui.theme
 
-import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalView
-import androidx.core.view.WindowCompat
 
-private val DarkColorScheme = darkColorScheme(
-    primary = Color(0xFF3B82F6),
-    secondary = Color(0xFF9333EA),
-    tertiary = Color(0xFFEC4899),
-    background = Color(0xFF0F172A),
-    surface = Color(0xFF1E293B),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFFF1F5F9),
-    onSurface = Color(0xFFF1F5F9),
+// --- নতুন: থিমের নাম এবং কালার স্কিম ---
+enum class ThemeName { ULTRA_VIOLET, OCEANIC_BLUE, CRIMSON_RED }
+
+@Immutable
+data class AppTheme(
+    val name: ThemeName,
+    val colorScheme: ColorScheme
 )
+
+val UltraVioletTheme = AppTheme(
+    name = ThemeName.ULTRA_VIOLET,
+    colorScheme = darkColorScheme(
+        primary = Color(0xFF8B5CF6), // Purple
+        secondary = Color(0xFF00BCD4), // Cyan
+        background = Color(0xFF020617),
+        surface = Color(0xFF1E293B)
+    )
+)
+
+val OceanicBlueTheme = AppTheme(
+    name = ThemeName.OCEANIC_BLUE,
+    colorScheme = darkColorScheme(
+        primary = Color(0xFF38BDF8), // Light Blue
+        secondary = Color(0xFF34D399), // Green
+        background = Color(0xFF0B1120),
+        surface = Color(0xFF1E293B)
+    )
+)
+
+val CrimsonRedTheme = AppTheme(
+    name = ThemeName.CRIMSON_RED,
+    colorScheme = darkColorScheme(
+        primary = Color(0xFFF43F5E), // Red
+        secondary = Color(0xFFFBBF24), // Amber
+        background = Color(0xFF180A0A),
+        surface = Color(0xFF2d1a1a)
+    )
+)
+
+val themes = listOf(UltraVioletTheme, OceanicBlueTheme, CrimsonRedTheme)
 
 @Composable
 fun StreamXUltraTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    appTheme: AppTheme = UltraVioletTheme, // ডিফল্ট থিম
     content: @Composable () -> Unit
 ) {
-    val colorScheme = DarkColorScheme
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        SideEffect {
-            val window = (view.context as Activity).window
-            window.statusBarColor = colorScheme.background.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
-        }
-    }
-
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = appTheme.colorScheme,
         typography = Typography,
         content = content
     )

@@ -1,6 +1,19 @@
 <resources>
+    <!-- অ্যাপের নাম -->
     <string name="app_name">StreamX Ultra</string>
     
-    <!-- এই লাইনটি যোগ করুন এবং আপনার ID দিয়ে প্রতিস্থাপন করুন -->
-    <string name="default_web_client_id">948787109880-b9qkqm2gc4fvjcil49ijpuj4c4li8e90.apps.googleusercontent.com</string>
+    <!-- ====================================================== -->
+    <!-- ============== Google Sign-In-এর জন্য ============== -->
+    <!-- ====================================================== -->
+    <string name="default_web_client_id" translatable="false">948787109880-b9qkqm2gc4fvjcil49ijpuj4c4li8e90.apps.googleusercontent.com</string>
+    
+
+    <!-- ======================================================= -->
+    <!-- ============== Facebook Sign-In-এর জন্য ============== -->
+    <!-- ======================================================= -->
+    <!-- TODO: এই মানগুলো আপনার Facebook App ড্যাশবোর্ড থেকে নিন -->
+    <string name="facebook_app_id" translatable="false">YOUR_FACEBOOK_APP_ID</string>
+    <string name="facebook_client_token" translatable="false">YOUR_FACEBOOK_CLIENT_TOKEN</string>
+    <string name="fb_login_protocol_scheme" translatable="false">fbYOUR_FACEBOOK_APP_ID</string>
+
 </resources>

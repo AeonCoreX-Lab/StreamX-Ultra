@@ -12,18 +12,16 @@ android {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
     }
 
-    // --- এই signingConfigs ব্লকটি চূড়ান্ত এবং সবচেয়ে নির্ভরযোগ্য সংস্করণ ---
     signingConfigs {
         create("release") {
-            // প্রজেক্ট প্রপার্টি অথবা এনভায়রনমেন্ট ভেরিয়েবল থেকে তথ্য পড়ার চেষ্টা করা হচ্ছে
             val storeFileValue = project.findProperty("RELEASE_KEYSTORE_FILE") as? String ?: System.getenv("RELEASE_KEYSTORE_FILE")
             val storePasswordValue = project.findProperty("RELEASE_KEYSTORE_PASSWORD") as? String ?: System.getenv("RELEASE_KEYSTORE_PASSWORD")
             val keyAliasValue = project.findProperty("RELEASE_KEY_ALIAS") as? String ?: System.getenv("RELEASE_KEY_ALIAS")
@@ -76,18 +74,17 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-
-    // Foundation Pager
     implementation("androidx.compose.foundation:foundation:1.6.7")
-
-    // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
     // Firebase
-    implementation(platform("com.google.firebase:firebase-bom:32.7.4"))
+    implementation(platform("com.google.firebase:firebase-bom:32.8.0")) // আপডেটেড
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.android.gms:play-services-auth:21.0.0")
+
+    // --- Facebook Login SDK (নতুন) ---
+    implementation("com.facebook.android:facebook-login:latest.release")
 
     // MEDIA3 (EXOPLAYER)
     implementation("androidx.media3:media3-exoplayer:1.3.1")
@@ -95,16 +92,10 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
 
-    // Coil for Image Loading
+    // Coil, DataStore, Shimmer, Icons
     implementation("io.coil-kt:coil-compose:2.6.0")
-    
-    // DataStore Preferences
     implementation("androidx.datastore:datastore-preferences:1.0.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
-    
-    // Shimmer Effect
     implementation("com.valentinilk.shimmer:compose-shimmer:1.2.0")
-    
-    // Icons
     implementation("androidx.compose.material:material-icons-extended:1.6.7")
 }
