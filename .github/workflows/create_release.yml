@@ -8,10 +8,8 @@ on:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
-    
-    # --- এই নতুন সেকশনটি এখানে যোগ করা হয়েছে ---
     permissions:
-      contents: write # রিলিজ তৈরি করার জন্য 'write' পারমিশন দেওয়া হলো
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -37,6 +35,18 @@ jobs:
       - name: Build Release APK
         run: ./gradlew assembleRelease
 
+      - name: List Release Directory Files for Debugging
+        run: |
+          echo "Listing files in the release directory to find the APK..."
+          ls -R app/build/outputs/apk/release
+
+      # --- নতুন ধাপ: রিলিজ APK ফাইলটিকে Artifact হিসেবে আপলোড করা ---
+      - name: Upload Release APK as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StreamX-Ultra-Release-APK
+          path: app/build/outputs/apk/release/*.apk
+
       - name: Create Release Notes and Get Version Info
         id: create_notes
         run: |
@@ -52,18 +62,17 @@ jobs:
           echo "- Smart In-App Update Checker to always stay on the latest version directly from GitHub." >> release_notes.md
           echo "- Multiple Link Support for each channel with a user-friendly popup selector." >> release_notes.md
           echo "- Advanced Video Player with gesture controls for brightness and volume." >> release_notes.md
-          echo "- A powerful backend script to automatically check and update channel links." >> release_notes.md
+          echo "- A powerful backend script in the data repo to automatically check and update channel links." >> release_notes.md
           echo "" >> release_notes.md
           echo "versionCode: ${VERSION_CODE}" >> release_notes.md
           
           echo "version_name=${VERSION_NAME}" >> $GITHUB_OUTPUT
-          echo "apk_path=app/build/outputs/apk/release/app-release.apk" >> $GITHUB_OUTPUT
           echo "notes_path=release_notes.md" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: ${{ steps.create_notes.outputs.apk_path }}
+          files: app/build/outputs/apk/release/*.apk
           name: "Version ${{ steps.create_notes.outputs.version_name }}"
           tag_name: ${{ github.ref_name }}
           body_path: ${{ steps.create_notes.outputs.notes_path }}
