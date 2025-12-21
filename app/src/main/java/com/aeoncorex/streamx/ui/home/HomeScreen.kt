@@ -37,11 +37,14 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import com.aeoncorex.streamx.model.Channel // আপনাকে এই ডেটা ক্লাসটি তৈরি করতে হবে
+import com.aeoncorex.streamx.model.Channel
+import com.aeoncorex.streamx.model.GitHubRelease
+import com.aeoncorex.streamx.services.UpdateChecker
 import com.google.accompanist.pager.ExperimentalPagerApi
 import com.google.accompanist.pager.HorizontalPager
 import com.google.accompanist.pager.calculateCurrentOffsetForPage
 import com.google.accompanist.pager.rememberPagerState
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import retrofit2.Retrofit
@@ -62,7 +65,7 @@ interface IPTVApi {
     suspend fun getChannelsByUrl(@Url url: String): Map<String, Any>
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalPagerApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(navController: NavController) {
     val context = LocalContext.current
@@ -79,13 +82,27 @@ fun HomeScreen(navController: NavController) {
     // States for Link Selector Dialog
     var showLinkSelectorDialog by remember { mutableStateOf(false) }
     var selectedChannelForLinks by remember { mutableStateOf<Channel?>(null) }
+    
+    // State for the Navigation Drawer
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+
+    // States for Update Dialog
+    var showUpdateDialog by remember { mutableStateOf(false) }
+    var latestReleaseInfo by remember { mutableStateOf<GitHubRelease?>(null) }
 
     val favoriteIds by context.dataStore.data
         .map { preferences -> preferences[FAVORITES_KEY] ?: emptySet() }
         .collectAsState(initial = emptySet())
 
-    // --- সম্পূর্ণ এবং কার্যকরী ডেটা লোডিং লজিক ---
     LaunchedEffect(Unit) {
+        // First, check for updates
+        val release = UpdateChecker.checkForUpdate(context)
+        if (release != null) {
+            latestReleaseInfo = release
+            showUpdateDialog = true
+        }
+        
+        // Then, load channel data
         try {
             val api = Retrofit.Builder()
                 .baseUrl("https://raw.githubusercontent.com/cybernahid-dev/streamx-iptv-data/main/")
@@ -105,7 +122,7 @@ fun HomeScreen(navController: NavController) {
                         ?: (res["categories"] as? List<Map<String, Any>>)?.flatMap { it["channels"] as List<Map<String, Any>> }
 
                     rawChannels?.forEach { ch ->
-                        masterList.add(Channel(
+                         masterList.add(Channel(
                             id = (ch["id"] as? String) ?: (ch["streamUrls"]?.hashCode()?.toString() ?: ""),
                             name = (ch["name"] as? String) ?: "No Name",
                             logoUrl = (ch["logoUrl"] as? String) ?: "",
@@ -124,88 +141,102 @@ fun HomeScreen(navController: NavController) {
             Log.e("API", "Failed to load initial data", e)
         }
     }
+    
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            AppDrawer(
+                navController = navController,
+                onCloseDrawer = { scope.launch { drawerState.close() } }
+            )
+        }
+    ) {
+        FuturisticBackground()
 
-    FuturisticBackground()
-
-    Scaffold(
-        topBar = {
-            Column {
-                CenterAlignedTopAppBar(
-                    title = { if (!isSearchActive) Text("STREAMX ULTRA", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 2.sp)) },
-                    actions = {
-                        IconButton(onClick = { isSearchActive = !isSearchActive; if (!isSearchActive) searchQuery = "" }) {
-                            Icon(if (isSearchActive) Icons.Default.Close else Icons.Default.Search, null, tint = Color.Cyan)
-                        }
-                        IconButton(onClick = { /* navController.navigate("settings") */ }) {
-                            Icon(Icons.Default.Settings, null, tint = Color.White.copy(0.8f))
-                        }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
-                )
-                AnimatedVisibility(visible = isSearchActive) {
-                    SearchBar(query = searchQuery, onQueryChange = { searchQuery = it }, onClear = { searchQuery = "" })
-                }
-            }
-        },
-        containerColor = Color.Transparent
-    ) { padding ->
-        if (isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color.Cyan) }
-        } else {
-            val filteredChannels = remember(searchQuery, selectedCategory, allChannels.value, favoriteIds) {
-                allChannels.value.filter { channel ->
-                    val matchesSearch = channel.name.contains(searchQuery, ignoreCase = true)
-                    val matchesCategory = when (selectedCategory) {
-                        "All" -> true
-                        "Favorites" -> channel.id in favoriteIds
-                        else -> channel.category == selectedCategory
+        Scaffold(
+            topBar = {
+                Column {
+                    CenterAlignedTopAppBar(
+                        title = { if (!isSearchActive) Text("STREAMX ULTRA", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 2.sp)) },
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = { isSearchActive = !isSearchActive; if (!isSearchActive) searchQuery = "" }) {
+                                Icon(if (isSearchActive) Icons.Default.Close else Icons.Default.Search, null, tint = Color.Cyan)
+                            }
+                        },
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                    )
+                    AnimatedVisibility(visible = isSearchActive) {
+                        SearchBar(query = searchQuery, onQueryChange = { searchQuery = it }, onClear = { searchQuery = "" })
                     }
-                    matchesSearch && matchesCategory
                 }
-            }
-
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
-                 if (searchQuery.isEmpty()) {
-                    val featured = allChannels.value.filter { it.isFeatured }
-                    if (featured.isNotEmpty()) item { FeaturedCarousel(featured, navController) }
-                    item { CategoryTabs(categories.value, selectedCategory) { selectedCategory = it } }
+            },
+            containerColor = Color.Transparent
+        ) { padding ->
+            if (isLoading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color.Cyan) }
+            } else {
+                val filteredChannels = remember(searchQuery, selectedCategory, allChannels.value, favoriteIds) {
+                    allChannels.value.filter { channel ->
+                        val matchesSearch = channel.name.contains(searchQuery, ignoreCase = true)
+                        val matchesCategory = when (selectedCategory) {
+                            "All" -> true
+                            "Favorites" -> channel.id in favoriteIds
+                            else -> channel.category == selectedCategory
+                        }
+                        matchesSearch && matchesCategory
+                    }
                 }
 
-                if (filteredChannels.isEmpty()) {
-                    item { EmptyState(isFavorites = selectedCategory == "Favorites") }
-                } else {
-                     items(filteredChannels.chunked(3)) { rowItems ->
-                        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), Arrangement.spacedBy(16.dp)) {
-                            rowItems.forEach { channel ->
-                                ChannelCard(
-                                    channel = channel,
-                                    isFavorite = channel.id in favoriteIds,
-                                    modifier = Modifier.weight(1f),
-                                    onFavoriteToggle = {
-                                        scope.launch {
-                                            context.dataStore.edit { prefs ->
-                                                val current = prefs[FAVORITES_KEY] ?: emptySet()
-                                                prefs[FAVORITES_KEY] = if (channel.id in current) current - channel.id else current + channel.id
+                LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
+                    if (searchQuery.isEmpty()) {
+                        val featured = allChannels.value.filter { it.isFeatured }
+                        if (featured.isNotEmpty()) {
+                            item { FeaturedCarousel(featured, navController) }
+                        }
+                        item { CategoryTabs(categories.value, selectedCategory) { selectedCategory = it } }
+                    }
+                    
+                    if (filteredChannels.isEmpty()) {
+                        item { EmptyState(isFavorites = selectedCategory == "Favorites") }
+                    } else {
+                        items(filteredChannels.chunked(3)) { rowItems ->
+                            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), Arrangement.spacedBy(16.dp)) {
+                                rowItems.forEach { channel ->
+                                    ChannelCard(
+                                        channel = channel,
+                                        isFavorite = channel.id in favoriteIds,
+                                        modifier = Modifier.weight(1f),
+                                        onFavoriteToggle = {
+                                            scope.launch {
+                                                context.dataStore.edit { prefs ->
+                                                    val current = prefs[FAVORITES_KEY] ?: emptySet()
+                                                    prefs[FAVORITES_KEY] = if (channel.id in current) current - channel.id else current + channel.id
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            if (channel.streamUrls.isNotEmpty()) {
+                                                selectedChannelForLinks = channel
+                                                showLinkSelectorDialog = true
                                             }
                                         }
-                                    },
-                                    onClick = {
-                                        if (channel.streamUrls.isNotEmpty()) {
-                                            selectedChannelForLinks = channel
-                                            showLinkSelectorDialog = true
-                                        }
-                                    }
-                                )
+                                    )
+                                }
+                                repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
                             }
-                            repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
+                    item { Spacer(modifier = Modifier.height(100.dp)) }
                 }
-                item { Spacer(modifier = Modifier.height(100.dp)) }
             }
         }
     }
-
+    
     if (showLinkSelectorDialog && selectedChannelForLinks != null) {
         LinkSelectorDialog(
             channel = selectedChannelForLinks!!,
@@ -215,6 +246,70 @@ fun HomeScreen(navController: NavController) {
                 val encodedUrl = URLEncoder.encode(selectedUrl, "UTF-8")
                 navController.navigate("player/$encodedUrl")
             }
+        )
+    }
+
+    if (showUpdateDialog && latestReleaseInfo != null) {
+        UpdateDialog(
+            release = latestReleaseInfo!!,
+            onDismiss = { showUpdateDialog = false },
+            onUpdateClick = {
+                showUpdateDialog = false
+                UpdateChecker.downloadAndInstall(context, latestReleaseInfo!!)
+            }
+        )
+    }
+}
+
+@Composable
+fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
+    ModalDrawerSheet(
+        drawerContainerColor = Color(0xFF0F172A),
+        drawerContentColor = Color.White
+    ) {
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "STREAMX ULTRA",
+            modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold
+        )
+        Divider(color = Color.White.copy(0.2f), modifier = Modifier.padding(horizontal = 28.dp))
+        
+        NavigationDrawerItem(
+            label = { Text("Home") },
+            selected = true,
+            onClick = { onCloseDrawer() },
+            icon = { Icon(Icons.Default.Home, null) },
+            colors = NavigationDrawerItemDefaults.colors(
+                selectedContainerColor = Color.Cyan.copy(0.2f),
+                unselectedContainerColor = Color.Transparent
+            ),
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+        )
+        NavigationDrawerItem(
+            label = { Text("My Account") },
+            selected = false,
+            onClick = { onCloseDrawer(); navController.navigate("account") },
+            icon = { Icon(Icons.Default.Person, null) },
+            colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent),
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+        )
+        NavigationDrawerItem(
+            label = { Text("Settings") },
+            selected = false,
+            onClick = { onCloseDrawer(); navController.navigate("settings") },
+            icon = { Icon(Icons.Default.Settings, null) },
+            colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent),
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+        )
+        NavigationDrawerItem(
+            label = { Text("Theme") },
+            selected = false,
+            onClick = { onCloseDrawer(); navController.navigate("theme") },
+            icon = { Icon(Icons.Default.InvertColors, null) },
+            colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent),
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
         )
     }
 }
@@ -248,7 +343,18 @@ fun SearchBar(query: String, onQueryChange: (String) -> Unit, onClear: () -> Uni
 @Composable
 fun ChannelCard(channel: Channel, isFavorite: Boolean, modifier: Modifier, onFavoriteToggle: () -> Unit, onClick: () -> Unit) {
     Column(modifier = modifier.clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(modifier = Modifier.aspectRatio(1f).clip(RoundedCornerShape(28.dp)).background(Color.White.copy(0.03f)).border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(28.dp)), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Color.White.copy(0.03f))
+                .border(
+                    width = 1.dp,
+                    brush = Brush.horizontalGradient(colors = listOf(Color.White.copy(0.1f), Color.Cyan.copy(0.1f))),
+                    shape = RoundedCornerShape(28.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
             AsyncImage(model = channel.logoUrl, contentDescription = null, modifier = Modifier.fillMaxSize(0.65f), contentScale = ContentScale.Fit)
             Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(32.dp).clip(CircleShape).background(Color.Black.copy(0.3f)).clickable(onClick = onFavoriteToggle), contentAlignment = Alignment.Center) {
                 Icon(if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, tint = if (isFavorite) Color.Red else Color.White, modifier = Modifier.size(16.dp))
@@ -274,18 +380,38 @@ fun CategoryTabs(categories: List<String>, selected: String, onSelect: (String) 
 @Composable
 fun FeaturedCarousel(featured: List<Channel>, navController: NavController) {
     val pagerState = rememberPagerState()
-    HorizontalPager(count = featured.size, state = pagerState, contentPadding = PaddingValues(horizontal = 40.dp), modifier = Modifier.padding(top = 12.dp)) { page ->
+
+    LaunchedEffect(pagerState.pageCount) {
+        if (pagerState.pageCount > 1) {
+            while (true) {
+                delay(5000L)
+                val nextPage = (pagerState.currentPage + 1) % pagerState.pageCount
+                pagerState.animateScrollToPage(nextPage)
+            }
+        }
+    }
+
+    HorizontalPager(
+        count = featured.size,
+        state = pagerState,
+        contentPadding = PaddingValues(horizontal = 40.dp),
+        modifier = Modifier.padding(top = 12.dp, bottom = 12.dp)
+    ) { page ->
         val pageOffset = calculateCurrentOffsetForPage(page).absoluteValue
         Card(
-            modifier = Modifier.graphicsLayer {
-                val scale = lerp(0.85f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
-                scaleX = scale; scaleY = scale; alpha = lerp(0.5f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
-            }.fillMaxWidth().height(170.dp).clickable {
-                if (featured[page].streamUrls.isNotEmpty()) {
-                    val encodedUrl = URLEncoder.encode(featured[page].streamUrls.first(), "UTF-8")
-                    navController.navigate("player/$encodedUrl")
+            modifier = Modifier
+                .graphicsLayer {
+                    val scale = lerp(0.85f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
+                    scaleX = scale; scaleY = scale; alpha = lerp(0.5f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
                 }
-            },
+                .fillMaxWidth()
+                .height(170.dp)
+                .clickable {
+                    if (featured[page].streamUrls.isNotEmpty()) {
+                        val encodedUrl = URLEncoder.encode(featured[page].streamUrls.first(), "UTF-8")
+                        navController.navigate("player/$encodedUrl")
+                    }
+                },
             shape = RoundedCornerShape(32.dp)
         ) {
             Box {
@@ -344,4 +470,18 @@ fun LinkSelectorDialog(
             }
         }
     }
+}
+
+@Composable
+fun UpdateDialog(release: GitHubRelease, onDismiss: () -> Unit, onUpdateClick: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New Update Available! (${release.tag_name})") },
+        text = {
+            val cleanBody = release.body.lines().filterNot { it.startsWith("versionCode:") }.joinToString("\n")
+            Text(cleanBody)
+        },
+        confirmButton = { Button(onClick = onUpdateClick) { Text("Update Now") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Later") } }
+    )
 }
