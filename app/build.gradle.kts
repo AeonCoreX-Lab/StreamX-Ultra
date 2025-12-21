@@ -20,17 +20,16 @@ android {
         }
     }
 
-    // --- নতুন: রিলিজ APK সাইন করার জন্য কনফিগারেশন ---
+    // --- এই signingConfigs ব্লকটি আপনার সমস্যার সমাধান করবে ---
     signingConfigs {
         create("release") {
-            // GitHub Actions থেকে Gradle প্রপার্টি হিসেবে তথ্য নেওয়া হবে
+            // সরাসরি প্রপার্টিগুলো এসাইন করা হচ্ছে, কোনো অতিরিক্ত চেক ছাড়াই।
+            // রিলিজ বিল্ডের সময় এগুলোর মান GitHub Actions থেকে আসবে।
             val storeFileProp = project.findProperty("RELEASE_KEYSTORE_FILE") as String?
-            if (storeFileProp != null && file(storeFileProp).exists()) {
-                storeFile = file(storeFileProp)
-                storePassword = project.findProperty("RELEASE_KEYSTORE_PASSWORD") as String?
-                keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
-                keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
-            }
+            storeFile = storeFileProp?.let { file(it) }
+            storePassword = project.findProperty("RELEASE_KEYSTORE_PASSWORD") as String?
+            keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
+            keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
         }
     }
 
@@ -53,7 +52,6 @@ android {
         compose = true
     }
     composeOptions {
-        // আপডেট করা হয়েছে
         kotlinCompilerExtensionVersion = "1.5.10"
     }
     packaging {
@@ -75,9 +73,8 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
 
-    // --- Accompanist Pager থেকে মাইগ্রেশন ---
-    // implementation("com.google.accompanist:accompanist-pager:0.23.1") // এটি পুরনো, আর ব্যবহার করা হবে না
-    implementation("androidx.compose.foundation:foundation:1.6.7") // নতুন Pager এর অংশ
+    // Foundation Pager
+    implementation("androidx.compose.foundation:foundation:1.6.7")
 
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.7")
@@ -88,7 +85,7 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.android.gms:play-services-auth:21.0.0")
 
-    // --- MEDIA3 (EXOPLAYER) ---
+    // MEDIA3 (EXOPLAYER)
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-common:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
@@ -99,11 +96,11 @@ dependencies {
     
     // DataStore Preferences
     implementation("androidx.datastore:datastore-preferences:1.0.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0") // আপডেটেড
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
     
     // Shimmer Effect
     implementation("com.valentinilk.shimmer:compose-shimmer:1.2.0")
     
     // Icons
-    implementation("androidx.compose.material:material-icons-extended:1.6.7") // আপডেটেড
+    implementation("androidx.compose.material:material-icons-extended:1.6.7")
 }
