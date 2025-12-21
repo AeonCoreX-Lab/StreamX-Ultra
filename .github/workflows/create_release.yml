@@ -59,19 +59,18 @@ jobs:
           VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | sed -n 's/.*versionName = "\(.*\)".*/\1/p')
           VERSION_CODE=$(grep 'versionCode' app/build.gradle.kts | sed -n 's/.*versionCode = \([0-9]*\).*/\1/p')
 
-          echo "## Welcome to the first official stable v1.1 release of StreamX Ultra!" > release_notes.md
+          # --- v1.1-এর জন্য নতুন রিলিজ নোট ---
+          echo "## StreamX Ultra v1.1 - The Ultimate Upgrade!" > release_notes.md
           echo "" >> release_notes.md
-          echo "**Key Features in this Version:**" >> release_notes.md
-          echo "- A completely redesigned, futuristic Home Screen." >> release_notes.md
-          echo "- Auto-sliding Featured Channels banner for a dynamic experience." >> release_notes.md
-          echo "- Functional Navigation Drawer for easy access to Account, Settings, and more." >> release_notes.md
-          echo "- Smart In-App Update Checker to always stay on the latest version directly from GitHub." >> release_notes.md
-          echo "- Multiple Link Support for each channel with a user-friendly popup selector." >> release_notes.md
-          echo "- Advanced Video Player with gesture controls for brightness and volume and also new rotation gesture." >> release_notes.md
-          echo "- New authentication systems are avilable now we give support Google, facebook, github authentication systems." >>
-            release_notes.md
-          echo "- now users can customise their profile username, can change password, app security has been increased.
-          echo "- A powerful backend script in the data repo to automatically check and update channel links." >> release_notes.md
+          echo "**What's New in this Version:**" >> release_notes.md
+          echo "- **Multi-Platform Authentication:** You can now sign in using Google, Facebook, and GitHub!" >> release_notes.md
+          echo "- **Ultimate Auth Screen UI:** A complete redesign of the Login and Sign Up screen for a professional look and feel." >> release_notes.md
+          echo "- **Advanced Player Features:**" >> release_notes.md
+          echo "  - **Rotation Control:** Easily switch between portrait and landscape mode." >> release_notes.md
+          echo "  - **Double-Tap to Seek:** Skip forward or backward 10 seconds just like YouTube." >> release_notes.md
+          echo "  - **Data Usage Stats:** See your live internet speed and total data consumed during a session." >> release_notes.md
+          echo "- **Functional Account & Settings:** Manage your profile, change password, and view login methods." >> release_notes.md
+          echo "- **Copyright & Disclaimer:** Added a new page for legal information." >> release_notes.md
           echo "" >> release_notes.md
           echo "versionCode: ${VERSION_CODE}" >> release_notes.md
           
