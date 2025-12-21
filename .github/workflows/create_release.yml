@@ -21,26 +21,32 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Decode Keystore and Set up for Signing
+      - name: Decode Keystore
         run: |
           echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > ${{ github.workspace }}/release.keystore
-          echo "RELEASE_KEYSTORE_FILE=${{ github.workspace }}/release.keystore" >> $GITHUB_ENV
-          echo "RELEASE_KEYSTORE_PASSWORD=${{ secrets.RELEASE_KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
-          echo "RELEASE_KEY_ALIAS=${{ secrets.RELEASE_KEY_ALIAS }}" >> $GITHUB_ENV
-          echo "RELEASE_KEY_PASSWORD=${{ secrets.RELEASE_KEY_PASSWORD }}" >> $GITHUB_ENV
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build Release APK
-        run: ./gradlew assembleRelease
+      # --- এই ধাপটি চূড়ান্ত এবং সবচেয়ে নির্ভরযোগ্য সংস্করণ ---
+      - name: Build Signed Release APK
+        # তথ্যগুলো এনভায়রনমেন্ট ভেরিয়েবল হিসেবে সেট করা হচ্ছে
+        env:
+          RELEASE_KEYSTORE_FILE: ${{ github.workspace }}/release.keystore
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          # তথ্যগুলো প্রজেক্ট প্রপার্টি হিসেবেও পাস করা হচ্ছে
+          ./gradlew assembleRelease \
+            -PRELEASE_KEYSTORE_FILE=${{ env.RELEASE_KEYSTORE_FILE }} \
+            -PRELEASE_KEYSTORE_PASSWORD=${{ env.RELEASE_KEYSTORE_PASSWORD }} \
+            -PRELEASE_KEY_ALIAS=${{ env.RELEASE_KEY_ALIAS }} \
+            -PRELEASE_KEY_PASSWORD=${{ env.RELEASE_KEY_PASSWORD }}
 
       - name: List Release Directory Files for Debugging
-        run: |
-          echo "Listing files in the release directory to find the APK..."
-          ls -R app/build/outputs/apk/release
-
-      # --- নতুন ধাপ: রিলিজ APK ফাইলটিকে Artifact হিসেবে আপলোড করা ---
+        run: ls -R app/build/outputs/apk/release
+      
       - name: Upload Release APK as Artifact
         uses: actions/upload-artifact@v4
         with:

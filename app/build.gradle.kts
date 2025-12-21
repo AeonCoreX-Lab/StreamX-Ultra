@@ -20,16 +20,21 @@ android {
         }
     }
 
-    // --- এই signingConfigs ব্লকটি আপনার সমস্যার সমাধান করবে ---
+    // --- এই signingConfigs ব্লকটি চূড়ান্ত এবং সবচেয়ে নির্ভরযোগ্য সংস্করণ ---
     signingConfigs {
         create("release") {
-            // সরাসরি প্রপার্টিগুলো এসাইন করা হচ্ছে, কোনো অতিরিক্ত চেক ছাড়াই।
-            // রিলিজ বিল্ডের সময় এগুলোর মান GitHub Actions থেকে আসবে।
-            val storeFileProp = project.findProperty("RELEASE_KEYSTORE_FILE") as String?
-            storeFile = storeFileProp?.let { file(it) }
-            storePassword = project.findProperty("RELEASE_KEYSTORE_PASSWORD") as String?
-            keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
-            keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
+            // প্রজেক্ট প্রপার্টি অথবা এনভায়রনমেন্ট ভেরিয়েবল থেকে তথ্য পড়ার চেষ্টা করা হচ্ছে
+            val storeFileValue = project.findProperty("RELEASE_KEYSTORE_FILE") as? String ?: System.getenv("RELEASE_KEYSTORE_FILE")
+            val storePasswordValue = project.findProperty("RELEASE_KEYSTORE_PASSWORD") as? String ?: System.getenv("RELEASE_KEYSTORE_PASSWORD")
+            val keyAliasValue = project.findProperty("RELEASE_KEY_ALIAS") as? String ?: System.getenv("RELEASE_KEY_ALIAS")
+            val keyPasswordValue = project.findProperty("RELEASE_KEY_PASSWORD") as? String ?: System.getenv("RELEASE_KEY_PASSWORD")
+
+            if (storeFileValue != null) {
+                storeFile = file(storeFileValue)
+                storePassword = storePasswordValue
+                keyAlias = keyAliasValue
+                keyPassword = keyPasswordValue
+            }
         }
     }
 
@@ -37,7 +42,6 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // রিলিজ বিল্ডের জন্য সাইনিং কনফিগারেশন সেট করা হচ্ছে
             signingConfig = signingConfigs.getByName("release")
         }
     }
