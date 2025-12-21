@@ -30,6 +30,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
@@ -259,8 +260,12 @@ fun AuthFooter(text: String, actionText: String, onActionClick: () -> Unit, navC
 
 @Composable
 fun AuthTextField(
-    value: String, onValueChange: (String) -> Unit, label: String, icon: ImageVector,
-    isPassword: Boolean = false, keyboardType: KeyboardType = KeyboardType.Text
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    icon: ImageVector,
+    isPassword: Boolean = false,
+    keyboardType: KeyboardType = KeyboardType.Text
 ) {
     OutlinedTextField(
         value = value,
@@ -270,8 +275,11 @@ fun AuthTextField(
         leadingIcon = { Icon(icon, contentDescription = null) },
         shape = RoundedCornerShape(12.dp),
         singleLine = true,
-        visualTransformation = if (isPassword) PasswordVisualTransformation() else PasswordVisualTransformation.None,
-        keyboardOptions = KeyboardOptions(keyboardType = if (isPassword) KeyboardType.Password else keyboardType)
+        // --- এই লাইনটি ফিক্স করা হয়েছে ---
+        visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = if (isPassword) KeyboardType.Password else keyboardType
+        )
     )
 }
 

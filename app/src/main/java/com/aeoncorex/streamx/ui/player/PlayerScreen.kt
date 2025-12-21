@@ -42,6 +42,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.TransferListener
+import androidx.compose.animation.core.tween
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -74,15 +76,20 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
     val streamUrl = remember { URLDecoder.decode(encodedUrl, "UTF-8") }
 
     val exoPlayer = remember {
-        val dataSourceListener = object : DataSource.Listener {
+        // --- এই অংশটি ফিক্স করা হয়েছে ---
+        // DataSource.Listener-এর পরিবর্তে সঠিক TransferListener ইন্টারফেস ব্যবহার করা হচ্ছে
+        val dataSourceListener = object : TransferListener {
             override fun onBytesTransferred(source: DataSource, dataSpec: com.media3.datasource.DataSpec, isNetwork: Boolean, bytesTransferred: Int) {
-                if (isNetwork) totalDataUsed += bytesTransferred
+                if (isNetwork) {
+                    totalDataUsed += bytesTransferred
+                }
             }
         }
+
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent("HDStreamz/3.1.0 (Linux; Android 11; SM-G973F)")
             .setDefaultRequestProperties(mapOf("Referer" to "https://www.google.com/"))
-            .setTransferListener(dataSourceListener)
+            .setTransferListener(dataSourceListener) // এখন এটি সঠিকভাবে কাজ করবে
         
         val mediaSourceFactory = DefaultMediaSourceFactory(context).setDataSourceFactory(httpDataSourceFactory)
 

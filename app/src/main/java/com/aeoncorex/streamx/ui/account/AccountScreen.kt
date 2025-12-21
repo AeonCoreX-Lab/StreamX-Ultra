@@ -168,7 +168,9 @@ fun AccountScreen(navController: NavController) {
 @Composable
 private fun InfoCard(icon: ImageVector, title: String, subtitle: String, onClick: (() -> Unit)? = null) {
     Card(
-        modifier = Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        modifier = Modifier.fillMaxWidth().let {
+            if (onClick != null) it.clickable(onClick = onClick) else it
+        },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Row(

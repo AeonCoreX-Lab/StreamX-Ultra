@@ -71,22 +71,15 @@ fun HomeScreen(navController: NavController) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // States
     val allChannels = remember { mutableStateOf<List<Channel>>(emptyList()) }
     val categories = remember { mutableStateOf(listOf("All", "Favorites")) }
     var selectedCategory by remember { mutableStateOf("All") }
     var isLoading by remember { mutableStateOf(true) }
     var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
-
-    // States for Link Selector Dialog
     var showLinkSelectorDialog by remember { mutableStateOf(false) }
     var selectedChannelForLinks by remember { mutableStateOf<Channel?>(null) }
-    
-    // State for the Navigation Drawer
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-
-    // States for Update Dialog
     var showUpdateDialog by remember { mutableStateOf(false) }
     var latestReleaseInfo by remember { mutableStateOf<GitHubRelease?>(null) }
 
@@ -153,83 +146,114 @@ fun HomeScreen(navController: NavController) {
 
         Scaffold(
             topBar = {
-                Column {
-                    CenterAlignedTopAppBar(
-                        title = { if (!isSearchActive) Text("STREAMX ULTRA", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 2.sp)) },
-                        navigationIcon = {
-                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { isSearchActive = !isSearchActive; if (!isSearchActive) searchQuery = "" }) {
-                                Icon(if (isSearchActive) Icons.Default.Close else Icons.Default.Search, null, tint = MaterialTheme.colorScheme.secondary)
-                            }
-                        },
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
-                    )
-                    AnimatedVisibility(visible = isSearchActive) {
-                        SearchBar(query = searchQuery, onQueryChange = { searchQuery = it }, onClear = { searchQuery = "" })
-                    }
-                }
+                CenterAlignedTopAppBar(
+                    title = { if (!isSearchActive) Text("STREAMX ULTRA", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 2.sp)) },
+                    navigationIcon = {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                        }
+                    },
+                    actions = {
+                        // সার্চ আইকনে ক্লিক করলে সার্চবার فعال হবে
+                        IconButton(onClick = { isSearchActive = true }) {
+                            Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.secondary)
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                )
             },
             containerColor = Color.Transparent
         ) { padding ->
-            if (isLoading) {
-                LoadingShimmerEffect(modifier = Modifier.padding(padding))
-            } else {
-                val filteredChannels = remember(searchQuery, selectedCategory, allChannels.value, favoriteIds) {
-                    allChannels.value.filter { channel ->
-                        val matchesSearch = channel.name.contains(searchQuery, ignoreCase = true)
-                        val matchesCategory = when (selectedCategory) {
-                            "All" -> true
-                            "Favorites" -> channel.id in favoriteIds
-                            else -> channel.category == selectedCategory
+
+            val filteredChannels = remember(searchQuery, selectedCategory, allChannels.value, favoriteIds) {
+                allChannels.value.filter { channel ->
+                    val matchesSearch = channel.name.contains(searchQuery, ignoreCase = true)
+                    val matchesCategory = when (selectedCategory) {
+                        "All" -> true
+                        "Favorites" -> channel.id in favoriteIds
+                        else -> channel.category == selectedCategory
+                    }
+                    matchesSearch && matchesCategory
+                }
+            }
+
+            // সার্চবার فعال থাকলে পুরো স্ক্রিন জুড়ে দেখাবে
+            if (isSearchActive) {
+                SearchBar(
+                    query = searchQuery,
+                    onQueryChange = { searchQuery = it },
+                    onSearch = { isSearchActive = false }, // সার্চ বাটনে ক্লিক করলে সার্চবার বন্ধ হবে
+                    active = true,
+                    onActiveChange = { isSearchActive = it },
+                    placeholder = { Text("Search TV Channels...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Close, "Clear search") }
                         }
-                        matchesSearch && matchesCategory
+                    },
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    // সার্চ রেজাল্ট দেখানো হচ্ছে
+                    LazyColumn {
+                        items(filteredChannels) { channel ->
+                            ListItem(
+                                headlineContent = { Text(channel.name) },
+                                modifier = Modifier.clickable {
+                                    if (channel.streamUrls.isNotEmpty()) {
+                                        selectedChannelForLinks = channel
+                                        showLinkSelectorDialog = true
+                                        isSearchActive = false // চ্যানেল সিলেক্ট করলে সার্চবার বন্ধ হবে
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
-
-                LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
-                    if (searchQuery.isEmpty()) {
+            } else {
+                // সার্চবার فعال না থাকলে সাধারণ হোম স্ক্রিন দেখাবে
+                if (isLoading) {
+                    LoadingShimmerEffect(modifier = Modifier.padding(padding))
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
                         val featured = allChannels.value.filter { it.isFeatured }
                         if (featured.isNotEmpty()) {
                             item { FeaturedCarousel(featured, navController) }
                         }
                         item { CategoryTabs(categories.value, selectedCategory) { selectedCategory = it } }
-                    }
-                    
-                    if (filteredChannels.isEmpty()) {
-                        item { EmptyState(isFavorites = selectedCategory == "Favorites") }
-                    } else {
-                        items(filteredChannels.chunked(3)) { rowItems ->
-                            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), Arrangement.spacedBy(16.dp)) {
-                                rowItems.forEach { channel ->
-                                    ChannelCard(
-                                        channel = channel,
-                                        isFavorite = channel.id in favoriteIds,
-                                        modifier = Modifier.weight(1f),
-                                        onFavoriteToggle = {
-                                            scope.launch {
-                                                context.dataStore.edit { prefs ->
-                                                    val current = prefs[FAVORDITES_KEY] ?: emptySet()
-                                                    prefs[FAVORDITES_KEY] = if (channel.id in current) current - channel.id else current + channel.id
+                        
+                        if (filteredChannels.isEmpty()) {
+                            item { EmptyState(isFavorites = selectedCategory == "Favorites") }
+                        } else {
+                            items(filteredChannels.chunked(3)) { rowItems ->
+                                Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), Arrangement.spacedBy(16.dp)) {
+                                    rowItems.forEach { channel ->
+                                        ChannelCard(
+                                            channel = channel,
+                                            isFavorite = channel.id in favoriteIds,
+                                            modifier = Modifier.weight(1f),
+                                            onFavoriteToggle = {
+                                                scope.launch {
+                                                    context.dataStore.edit { prefs ->
+                                                        val current = prefs[FAVORITES_KEY] ?: emptySet()
+                                                        prefs[FAVORITES_KEY] = if (channel.id in current) current - channel.id else current + channel.id
+                                                    }
+                                                }
+                                            },
+                                            onClick = {
+                                                if (channel.streamUrls.isNotEmpty()) {
+                                                    selectedChannelForLinks = channel
+                                                    showLinkSelectorDialog = true
                                                 }
                                             }
-                                        },
-                                        onClick = {
-                                            if (channel.streamUrls.isNotEmpty()) {
-                                                selectedChannelForLinks = channel
-                                                showLinkSelectorDialog = true
-                                            }
-                                        }
-                                    )
+                                        )
+                                    }
+                                    repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
                                 }
-                                repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
                             }
                         }
+                        item { Spacer(modifier = Modifier.height(100.dp)) }
                     }
-                    item { Spacer(modifier = Modifier.height(100.dp)) }
                 }
             }
         }
@@ -266,41 +290,13 @@ fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
         drawerContentColor = MaterialTheme.colorScheme.onSurface
     ) {
         Spacer(Modifier.height(24.dp))
-        Text(
-            "STREAMX ULTRA",
-            modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp),
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold
-        )
+        Text("STREAMX ULTRA", modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(0.2f), modifier = Modifier.padding(horizontal = 28.dp))
         
-        NavigationDrawerItem(
-            label = { Text("Home") }, selected = true, onClick = { onCloseDrawer() },
-            icon = { Icon(Icons.Default.Home, null) },
-            colors = NavigationDrawerItemDefaults.colors(
-                selectedContainerColor = MaterialTheme.colorScheme.primary.copy(0.2f),
-                unselectedContainerColor = Color.Transparent
-            ),
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-        )
-        NavigationDrawerItem(
-            label = { Text("My Account") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("account") },
-            icon = { Icon(Icons.Default.Person, null) },
-            colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent),
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-        )
-        NavigationDrawerItem(
-            label = { Text("Settings") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("settings") },
-            icon = { Icon(Icons.Default.Settings, null) },
-            colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent),
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-        )
-        NavigationDrawerItem(
-            label = { Text("Theme") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("theme") },
-            icon = { Icon(Icons.Default.InvertColors, null) },
-            colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent),
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-        )
+        NavigationDrawerItem(label = { Text("Home") }, selected = true, onClick = onCloseDrawer, icon = { Icon(Icons.Default.Home, null) }, colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = MaterialTheme.colorScheme.primary.copy(0.2f), unselectedContainerColor = Color.Transparent), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
+        NavigationDrawerItem(label = { Text("My Account") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("account") }, icon = { Icon(Icons.Default.Person, null) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
+        NavigationDrawerItem(label = { Text("Settings") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("settings") }, icon = { Icon(Icons.Default.Settings, null) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
+        NavigationDrawerItem(label = { Text("Theme") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("theme") }, icon = { Icon(Icons.Default.InvertColors, null) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
     }
 }
 
@@ -308,8 +304,7 @@ fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
 fun FuturisticBackground() {
     val infiniteTransition = rememberInfiniteTransition(label = "")
     val color1 by infiniteTransition.animateColor(
-        initialValue = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-        targetValue = MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f),
+        initialValue = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), targetValue = MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f),
         animationSpec = infiniteRepeatable(tween(12000), RepeatMode.Reverse), label = ""
     )
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -320,51 +315,17 @@ fun FuturisticBackground() {
 @Composable
 fun LoadingShimmerEffect(modifier: Modifier = Modifier) {
     LazyColumn(modifier = modifier, contentPadding = PaddingValues(16.dp)) {
-        item {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(170.dp)
-                    .padding(horizontal = 24.dp, vertical = 12.dp)
-                    .shimmer()
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(32.dp))
-            )
-        }
-        item {
-            LazyRow(contentPadding = PaddingValues(horizontal = 24.dp, vertical = 20.dp)) {
-                items(5) {
-                    Box(modifier = Modifier.padding(end = 10.dp).shimmer().size(width = 100.dp, height = 36.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), CircleShape))
-                }
-            }
-        }
-        items(5) {
-            Row(modifier = Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                repeat(3) {
-                    Column(modifier = Modifier.weight(1f).shimmer(), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(modifier = Modifier.aspectRatio(1f).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(28.dp)))
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Box(modifier = Modifier.height(12.dp).fillMaxWidth(0.7f).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(4.dp)))
-                    }
-                }
-            }
-        }
+        item { Box(modifier = Modifier.fillMaxWidth().height(170.dp).padding(horizontal = 24.dp, vertical = 12.dp).shimmer().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(32.dp))) }
+        item { LazyRow(contentPadding = PaddingValues(horizontal = 24.dp, vertical = 20.dp)) { items(5) { Box(modifier = Modifier.padding(end = 10.dp).shimmer().size(width = 100.dp, height = 36.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), CircleShape)) } } }
+        items(5) { Row(modifier = Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) { repeat(3) { Column(modifier = Modifier.weight(1f).shimmer(), horizontalAlignment = Alignment.CenterHorizontally) { Box(modifier = Modifier.aspectRatio(1f).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(28.dp))); Spacer(modifier = Modifier.height(8.dp)); Box(modifier = Modifier.height(12.dp).fillMaxWidth(0.7f).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(4.dp))) } } } }
     }
 }
-
 
 @Composable
 fun ChannelCard(channel: Channel, isFavorite: Boolean, modifier: Modifier, onFavoriteToggle: () -> Unit, onClick: () -> Unit) {
     Column(modifier = modifier.clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            modifier = Modifier
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(28.dp))
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.3f))
-                .border(
-                    width = 1.dp,
-                    brush = Brush.horizontalGradient(colors = listOf(MaterialTheme.colorScheme.onSurface.copy(0.1f), MaterialTheme.colorScheme.primary.copy(0.2f))),
-                    shape = RoundedCornerShape(28.dp)
-                ),
+            modifier = Modifier.aspectRatio(1f).clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.3f)).border(width = 1.dp, brush = Brush.horizontalGradient(colors = listOf(MaterialTheme.colorScheme.onSurface.copy(0.1f), MaterialTheme.colorScheme.primary.copy(0.2f))), shape = RoundedCornerShape(28.dp)),
             contentAlignment = Alignment.Center
         ) {
             AsyncImage(model = channel.logoUrl, contentDescription = null, modifier = Modifier.fillMaxSize(0.65f), contentScale = ContentScale.Fit)
@@ -394,36 +355,18 @@ fun FeaturedCarousel(featured: List<Channel>, navController: NavController) {
     val pagerState = rememberPagerState(pageCount = { featured.size })
 
     LaunchedEffect(pagerState.pageCount) {
-        if (pagerState.pageCount > 1) {
-            while (true) {
-                delay(5000L)
-                val nextPage = (pagerState.currentPage + 1) % pagerState.pageCount
-                pagerState.animateScrollToPage(nextPage)
-            }
-        }
+        if (pagerState.pageCount > 1) { while (true) { delay(5000L); val nextPage = (pagerState.currentPage + 1) % pagerState.pageCount; pagerState.animateScrollToPage(nextPage) } }
     }
 
-    HorizontalPager(
-        state = pagerState,
-        contentPadding = PaddingValues(horizontal = 40.dp),
-        modifier = Modifier.padding(top = 12.dp, bottom = 12.dp)
-    ) { page ->
+    HorizontalPager(state = pagerState, contentPadding = PaddingValues(horizontal = 40.dp), modifier = Modifier.padding(top = 12.dp, bottom = 12.dp)) { page ->
         val pageOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-
         Card(
             modifier = Modifier
                 .graphicsLayer {
                     val scale = lerp(0.85f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f))
                     scaleX = scale; scaleY = scale; alpha = lerp(0.5f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f))
                 }
-                .fillMaxWidth()
-                .height(170.dp)
-                .clickable {
-                    if (featured[page].streamUrls.isNotEmpty()) {
-                        val encodedUrl = URLEncoder.encode(featured[page].streamUrls.first(), "UTF-8")
-                        navController.navigate("player/$encodedUrl")
-                    }
-                },
+                .fillMaxWidth().height(170.dp).clickable { if (featured[page].streamUrls.isNotEmpty()) { val encodedUrl = URLEncoder.encode(featured[page].streamUrls.first(), "UTF-8"); navController.navigate("player/$encodedUrl") } },
             shape = RoundedCornerShape(32.dp)
         ) {
             Box {
@@ -448,22 +391,14 @@ fun EmptyState(isFavorites: Boolean) {
 @Composable
 fun LinkSelectorDialog(channel: Channel, onDismiss: () -> Unit, onLinkSelected: (String) -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
+        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(modifier = Modifier.padding(vertical = 16.dp)) {
                 Text("Multiple Links Available", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
                 Spacer(modifier = Modifier.height(8.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(0.1f))
                 LazyColumn {
                     itemsIndexed(channel.streamUrls) { index, url ->
-                        Text(
-                            "LINK ${index + 1}",
-                            color = MaterialTheme.colorScheme.onSurface.copy(0.9f),
-                            fontSize = 16.sp,
-                            modifier = Modifier.fillMaxWidth().clickable { onLinkSelected(url) }.padding(horizontal = 24.dp, vertical = 16.dp)
-                        )
+                        Text("LINK ${index + 1}", color = MaterialTheme.colorScheme.onSurface.copy(0.9f), fontSize = 16.sp, modifier = Modifier.fillMaxWidth().clickable { onLinkSelected(url) }.padding(horizontal = 24.dp, vertical = 16.dp))
                     }
                 }
             }
