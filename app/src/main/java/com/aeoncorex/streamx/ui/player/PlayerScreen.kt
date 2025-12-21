@@ -1,4 +1,3 @@
-
 package com.aeoncorex.streamx.ui.player
 
 import android.app.Activity
@@ -12,6 +11,7 @@ import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -41,9 +41,9 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.TransferListener
-import androidx.compose.animation.core.tween
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -60,14 +60,11 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val activity = context as? Activity
 
-    // States
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showControls by remember { mutableStateOf(true) }
     var isLocked by remember { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(true) }
-    
-    // New high-level feature states
     var totalDataUsed by remember { mutableStateOf(0L) }
     var currentSpeed by remember { mutableStateOf("0 KB/s") }
     var showSeekUI by remember { mutableStateOf(SeekDirection.NONE) }
@@ -76,20 +73,19 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
     val streamUrl = remember { URLDecoder.decode(encodedUrl, "UTF-8") }
 
     val exoPlayer = remember {
-        // --- এই অংশটি ফিক্স করা হয়েছে ---
-        // DataSource.Listener-এর পরিবর্তে সঠিক TransferListener ইন্টারফেস ব্যবহার করা হচ্ছে
         val dataSourceListener = object : TransferListener {
-            override fun onBytesTransferred(source: DataSource, dataSpec: com.media3.datasource.DataSpec, isNetwork: Boolean, bytesTransferred: Int) {
-                if (isNetwork) {
-                    totalDataUsed += bytesTransferred
-                }
+            override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+            override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+            override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) {
+                if (isNetwork) totalDataUsed += bytesTransferred
             }
+            override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
         }
-
+        
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent("HDStreamz/3.1.0 (Linux; Android 11; SM-G973F)")
             .setDefaultRequestProperties(mapOf("Referer" to "https://www.google.com/"))
-            .setTransferListener(dataSourceListener) // এখন এটি সঠিকভাবে কাজ করবে
+            .setTransferListener(dataSourceListener)
         
         val mediaSourceFactory = DefaultMediaSourceFactory(context).setDataSourceFactory(httpDataSourceFactory)
 
@@ -109,7 +105,17 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
     }
     
     DisposableEffect(Unit) { onDispose { exoPlayer.release() } }
-    BackHandler { exoPlayer.release(); onBack() }
+    
+    BackHandler {
+        if (isLandscape) {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            isLandscape = false
+        } else {
+            exoPlayer.release()
+            onBack()
+        }
+    }
+    
     KeepScreenOn()
     HideSystemUi(activity)
     
@@ -126,6 +132,13 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
             val speedBytesPerSec = currentData - lastDataUsed
             currentSpeed = formatSpeed(speedBytesPerSec)
             lastDataUsed = currentData
+        }
+    }
+    
+    LaunchedEffect(errorMessage) {
+        if (errorMessage != null) {
+            delay(2500)
+            onBack()
         }
     }
 
@@ -203,10 +216,9 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
 
         AnimatedVisibility(visible = showControls && errorMessage == null && !isLocked, enter = fadeIn(), exit = fadeOut()) {
             PlayerControls(
-                isPlaying = isPlaying,
-                isLandscape = isLandscape,
+                isPlaying = isPlaying, isLandscape = isLandscape,
                 onPlayPauseToggle = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() },
-                onBack = { exoPlayer.release(); onBack() },
+                onBack = { if (isLandscape) { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT; isLandscape = false } else { exoPlayer.release(); onBack() } },
                 onLockToggle = { isLocked = !isLocked },
                 onRotateClick = {
                     isLandscape = !isLandscape

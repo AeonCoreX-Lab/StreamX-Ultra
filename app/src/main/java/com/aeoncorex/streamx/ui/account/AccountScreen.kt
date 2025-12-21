@@ -3,6 +3,8 @@ package com.aeoncorex.streamx.ui.account
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -12,7 +14,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.*
@@ -21,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -30,7 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import com.aeoncorex.streamx.R
+import com.aeoncorex.streamx.R // R ফাইলটি সঠিকভাবে ইম্পোর্ট করা
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
@@ -42,7 +44,6 @@ fun AccountScreen(navController: NavController) {
     val auth = Firebase.auth
     val currentUser = auth.currentUser
 
-    // State for editing name
     var isEditingName by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf(currentUser?.displayName ?: "") }
 
@@ -59,8 +60,7 @@ fun AccountScreen(navController: NavController) {
         }
     ) { padding ->
         if (currentUser == null) {
-            // যদি কোনো কারণে ব্যবহারকারী লগইন করা না থাকে
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Text("No user is logged in.")
             }
             return@Scaffold
@@ -74,11 +74,11 @@ fun AccountScreen(navController: NavController) {
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Profile Picture
             AsyncImage(
                 model = currentUser.photoUrl,
                 contentDescription = "Profile Picture",
-                placeholder = painterResource(id = R.drawable.ic_launcher_foreground), // একটি ডিফল্ট ছবি
+                // ফিক্স ১: R.drawable -> R.mipmap
+                placeholder = painterResource(id = R.mipmap.ic_launcher),
                 modifier = Modifier
                     .size(120.dp)
                     .clip(CircleShape)
@@ -87,15 +87,8 @@ fun AccountScreen(navController: NavController) {
             )
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Name Editing
             if (isEditingName) {
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = { newName = it },
-                    label = { Text("Enter new name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                OutlinedTextField(value = newName, onValueChange = { newName = it }, label = { Text("Enter new name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
                 Row {
                     Button(onClick = {
@@ -120,11 +113,9 @@ fun AccountScreen(navController: NavController) {
             }
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Email (read-only)
             InfoCard(icon = Icons.Default.Email, title = "Email", subtitle = currentUser.email ?: "No email available")
             Spacer(modifier = Modifier.height(16.dp))
             
-            // Authentication Provider
             val providerId = currentUser.providerData.find { it.providerId != "firebase" }?.providerId
             val (providerIcon, providerName) = when (providerId) {
                 "google.com" -> painterResource(id = R.drawable.google_logo) to "Google"
@@ -135,7 +126,6 @@ fun AccountScreen(navController: NavController) {
             ProviderInfoCard(icon = providerIcon, title = "Signed in with", subtitle = providerName)
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Change Password (only for email/password users)
             if (providerId == "password") {
                 InfoCard(icon = Icons.Default.VpnKey, title = "Change Password", subtitle = "Send password reset email", onClick = {
                     auth.sendPasswordResetEmail(currentUser.email!!).addOnCompleteListener { task ->
@@ -146,14 +136,13 @@ fun AccountScreen(navController: NavController) {
                 })
                 Spacer(modifier = Modifier.height(16.dp))
             }
+            
+            Spacer(modifier = Modifier.height(32.dp))
 
-            // Logout Button
             OutlinedButton(
                 onClick = {
                     auth.signOut()
-                    navController.navigate("auth") {
-                        popUpTo("home") { inclusive = true }
-                    }
+                    navController.navigate("auth") { popUpTo("home") { inclusive = true } }
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -168,15 +157,13 @@ fun AccountScreen(navController: NavController) {
 @Composable
 private fun InfoCard(icon: ImageVector, title: String, subtitle: String, onClick: (() -> Unit)? = null) {
     Card(
-        modifier = Modifier.fillMaxWidth().let {
-            if (onClick != null) it.clickable(onClick = onClick) else it
-        },
+        // ফিক্স ২: clickable modifier সঠিকভাবে ব্যবহার করা হয়েছে
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, contentDescription = title, tint = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.width(16.dp))
             Column {
@@ -193,13 +180,10 @@ private fun ProviderInfoCard(icon: Any, title: String, subtitle: String) {
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             if (icon is ImageVector) {
                 Icon(icon, contentDescription = title, tint = MaterialTheme.colorScheme.primary)
-            } else if (icon is androidx.compose.ui.graphics.painter.Painter) {
+            } else if (icon is Painter) {
                 Image(painter = icon, contentDescription = title, modifier = Modifier.size(24.dp))
             }
             Spacer(modifier = Modifier.width(16.dp))
