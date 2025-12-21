@@ -1,0 +1,56 @@
+name: Create New Release
+
+on:
+  push:
+    tags:
+      - 'v*.*' # v1.0, v1.1, v2.0.1 এই ধরনের ট্যাগ পুশ করলেই এই Workflow চলবে
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Decode Keystore and Set up for Signing
+        run: |
+          echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > ${{ github.workspace }}/release.keystore
+          echo "RELEASE_KEYSTORE_FILE=${{ github.workspace }}/release.keystore" >> $GITHUB_ENV
+          echo "RELEASE_KEYSTORE_PASSWORD=${{ secrets.RELEASE_KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
+          echo "RELEASE_KEY_ALIAS=${{ secrets.RELEASE_KEY_ALIAS }}" >> $GITHUB_ENV
+          echo "RELEASE_KEY_PASSWORD=${{ secrets.RELEASE_KEY_PASSWORD }}" >> $GITHUB_ENV
+
+      - name: Build Release APK
+        run: ./gradlew assembleRelease
+
+      - name: Create Release Notes and Get Version Info
+        id: create_notes
+        run: |
+          VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | sed -n 's/.*versionName = "\(.*\)".*/\1/p')
+          VERSION_CODE=$(grep 'versionCode' app/build.gradle.kts | sed -n 's/.*versionCode = \([0-9]*\).*/\1/p')
+
+          echo "## What's New in Version ${VERSION_NAME}" > release_notes.md
+          echo "" >> release_notes.md
+          echo "- New features and improvements." >> release_notes.md
+          echo "- Bug fixes and performance enhancements." >> release_notes.md
+          echo "" >> release_notes.md
+          echo "versionCode: ${VERSION_CODE}" >> release_notes.md
+          
+          echo "version_name=${VERSION_NAME}" >> $GITHUB_OUTPUT
+          echo "apk_path=app/build/outputs/apk/release/app-release.apk" >> $GITHUB_OUTPUT
+          echo "notes_path=release_notes.md" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ steps.create_notes.outputs.apk_path }}
+          name: "Version ${{ steps.create_notes.outputs.version_name }}"
+          tag_name: ${{ github.ref_name }}
+          body_path: ${{ steps.create_notes.outputs.notes_path }}
