@@ -48,8 +48,12 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
     NavHost(navController = navController, startDestination = "splash") {
         
         // --- Bottom Bar ছাড়া স্ক্রিনগুলো ---
-        composable("splash") { SplashScreen(navController) }
-        composable("auth") { AuthScreen(navController) }
+        composable("splash") {
+            SplashScreen(navController)
+        }
+        composable("auth") {
+            AuthScreen(navController)
+        }
         composable(
             route = "player/{encodedUrl}",
             arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
@@ -57,10 +61,26 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             val encodedUrl = backStackEntry.arguments?.getString("encodedUrl") ?: ""
             PlayerScreen(encodedUrl = encodedUrl, onBack = { navController.popBackStack() })
         }
-        composable("settings") { SettingsScreen(navController) }
-        composable("account") { AccountScreen(navController) }
-        composable("theme") { ThemeScreen(navController, themeViewModel = themeViewModel) }
-        composable("copyright") { CopyrightScreen(navController) }
+        composable("settings") {
+            SettingsScreen(navController)
+        }
+        composable("account") {
+            AccountScreen(navController)
+        }
+        composable("theme") {
+            ThemeScreen(navController, themeViewModel = themeViewModel)
+        }
+        composable("copyright") {
+            CopyrightScreen(navController)
+        }
+        
+        // --- এই দুটি রুট আলাদাভাবে লেখা হয়েছে ---
+        composable("about") {
+            AboutScreen(navController)
+        }
+        composable("privacy_policy") {
+            PrivacyPolicyScreen(navController)
+        }
         
         // --- HomeScreen (Hub) এর জন্য নতুন রুট ---
         composable("home_hub") {
@@ -73,7 +93,6 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             MainScreen(mainNavController = navController)
         }
     }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
