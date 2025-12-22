@@ -167,7 +167,7 @@ fun SignUpContent(onSwitchToLogin: () -> Unit, navController: NavController) {
                                 val profileUpdates = UserProfileChangeRequest.Builder().setDisplayName(username).build()
                                 user?.updateProfile(profileUpdates)?.addOnCompleteListener {
                                     isLoading = false
-                                    navController.navigate("home") { popUpTo("auth") { inclusive = true } }
+                                    navController.navigate("main_screen") { popUpTo("auth") { inclusive = true } }
                                 }
                             } else {
                                 isLoading = false
@@ -203,7 +203,7 @@ fun AuthFooter(text: String, actionText: String, onActionClick: () -> Unit, navC
     // Google Sign-In Logic
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
-    ) { result -> handleGoogleSignInResult(result, context) { navController.navigate("home") { popUpTo("auth") { inclusive = true } } } }
+    ) { result -> handleGoogleSignInResult(result, context) { navController.navigate("main_screen") { popUpTo("auth") { inclusive = true } } } }
     
     val googleSignInClient = remember {
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
@@ -221,7 +221,7 @@ fun AuthFooter(text: String, actionText: String, onActionClick: () -> Unit, navC
         LoginManager.getInstance().registerCallback(callbackManager, object : FacebookCallback<LoginResult> {
             override fun onSuccess(result: LoginResult) {
                 handleFacebookAccessToken(result.accessToken) {
-                    navController.navigate("home") { popUpTo("auth") { inclusive = true } }
+                    navController.navigate("main_screen") { popUpTo("auth") { inclusive = true } }
                 }
             }
             override fun onCancel() { Log.w("AuthScreen", "Facebook login canceled.") }
@@ -304,7 +304,7 @@ private fun signInWithGitHub(activity: Activity, navController: NavController) {
     Firebase.auth.startActivityForSignInWithProvider(activity, provider)
         .addOnSuccessListener {
             Log.d("AuthScreen", "GitHub sign-in successful.")
-            navController.navigate("home") { popUpTo("auth") { inclusive = true } }
+            navController.navigate("main_screen") { popUpTo("auth") { inclusive = true } }
         }
         .addOnFailureListener { e ->
             Log.w("AuthScreen", "GitHub sign-in failed.", e)

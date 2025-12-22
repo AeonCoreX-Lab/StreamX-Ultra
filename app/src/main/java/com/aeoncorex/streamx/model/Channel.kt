@@ -1,5 +1,6 @@
 package com.aeoncorex.streamx.model
 
+import com.aeoncorex.streamx.util.ChannelGenre // এই ফাইলটি আমাদের তৈরি করতে হবে
 import com.google.gson.annotations.SerializedName
 
 data class Channel(
@@ -12,19 +13,17 @@ data class Channel(
     @SerializedName("logoUrl")
     val logoUrl: String = "",
 
-    // --- এই অংশটি পরিবর্তন করা হয়েছে ---
-    @SerializedName("streamUrls") // JSON-এর নতুন কী "streamUrls" (plural)
-    val streamUrls: List<String> = emptyList(), // String-এর বদলে এখন List<String>
+    @SerializedName("streamUrls")
+    val streamUrls: List<String> = emptyList(),
 
-    @SerializedName("category")
-    var category: String = "",
+    // --- এই অংশটি পরিবর্তন করা হয়েছে ---
+    @SerializedName("country") // JSON-এও 'country' ব্যবহার করা ভালো
+    var country: String = "",
 
     @SerializedName("isFeatured")
     val isFeatured: Boolean = false,
 
-    @SerializedName("isHD")
-    val isHD: Boolean = false,
-
-    @SerializedName("ageGroup")
-    val ageGroup: String? = null
+    // --- এই নতুন ফিল্ডটি যোগ করা হয়েছে ---
+    @SerializedName("genre")
+    var genre: ChannelGenre = ChannelGenre.UNKNOWN
 )

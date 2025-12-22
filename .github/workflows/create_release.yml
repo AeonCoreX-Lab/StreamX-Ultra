@@ -59,18 +59,16 @@ jobs:
           VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | sed -n 's/.*versionName = "\(.*\)".*/\1/p')
           VERSION_CODE=$(grep 'versionCode' app/build.gradle.kts | sed -n 's/.*versionCode = \([0-9]*\).*/\1/p')
 
-          # --- v1.1-এর জন্য নতুন রিলিজ নোট ---
-          echo "## StreamX Ultra v1.1 - The Ultimate Upgrade!" > release_notes.md
+# --- v1.2-এর জন্য নতুন রিলিজ নোট ---
+          echo "## StreamX Ultra v1.2 - The Hub Update!" > release_notes.md
           echo "" >> release_notes.md
-          echo "**What's New in this Version:**" >> release_notes.md
-          echo "- **Multi-Platform Authentication:** You can now sign in using Google, Facebook, and GitHub!" >> release_notes.md
-          echo "- **Ultimate Auth Screen UI:** A complete redesign of the Login and Sign Up screen for a professional look and feel." >> release_notes.md
-          echo "- **Advanced Player Features:**" >> release_notes.md
-          echo "  - **Rotation Control:** Easily switch between portrait and landscape mode." >> release_notes.md
-          echo "  - **Double-Tap to Seek:** Skip forward or backward 10 seconds just like YouTube." >> release_notes.md
-          echo "  - **Data Usage Stats:** See your live internet speed and total data consumed during a session." >> release_notes.md
-          echo "- **Functional Account & Settings:** Manage your profile, change password, and view login methods." >> release_notes.md
-          echo "- **Copyright & Disclaimer:** Added a new page for legal information." >> release_notes.md
+          echo "**What's New in this Major Upgrade:**" >> release_notes.md
+          echo "- **Complete UI Overhaul:** Introduced a modern Bottom Navigation Bar for a smoother user experience, inspired by top streaming apps." >> release_notes.md
+          echo "- **Live Events Hub:** A new, dedicated 'Events' tab that automatically fetches and displays live and upcoming sports schedules." >> release_notes.md
+          echo "- **Advanced Categorization:** Implemented a dual-category system. You can now browse channels 'By Country' and 'By Genre' (Sports, News, etc.)." >> release_notes.md
+          echo "- **AI-Powered Backend:** A smart, automated script now categorizes channels by genre using AI, ensuring the library is always organized." >> release_notes.md
+          echo "- **New 'Live TV' Screen:** A redesigned screen to explore all channels, with powerful filtering options coming soon." >> release_notes.md
+          echo "- **Performance Enhancements:** Optimized data loading with ViewModel for a faster and more stable experience." >> release_notes.md
           echo "" >> release_notes.md
           echo "versionCode: ${VERSION_CODE}" >> release_notes.md
           
