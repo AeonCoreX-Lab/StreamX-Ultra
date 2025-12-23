@@ -57,7 +57,7 @@ fun AboutScreen(navController: NavController) {
                         modifier = Modifier.padding(24.dp).fillMaxWidth()
                     ) {
                         Image(
-                            painter = painterResource(id = R.mipmap.ic_launcher_round),
+                            painter = painterResource(id = R.mipmap.ic_launcher),
                             contentDescription = "App Icon",
                             modifier = Modifier.size(100.dp)
                         )

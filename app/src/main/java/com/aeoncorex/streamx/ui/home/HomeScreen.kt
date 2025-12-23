@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,6 +15,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -23,12 +23,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -37,7 +37,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
@@ -74,9 +73,10 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import kotlin.math.absoluteValue
 
-// --- CONFIGURATION & DATA ---
+// --- Enums, DataStore, API Interface, ViewModel ---
 
 enum class HomeTab { EVENTS, LIVE_TV, FAVORITES }
+
 private val Context.dataStore by preferencesDataStore(name = "favorites_prefs")
 private val FAVORITES_KEY = stringSetPreferencesKey("favorite_ids")
 
@@ -86,14 +86,8 @@ interface IPTVApi {
     @GET("categories/events.json") suspend fun getEvents(): Map<String, List<Event>>
 }
 
-// --- VIEWMODEL (Embedded) ---
-
 class HomeViewModel : ViewModel() {
-    private val api: IPTVApi = Retrofit.Builder()
-        .baseUrl("https://raw.githubusercontent.com/cybernahid-dev/streamx-iptv-data/main/")
-        .addConverterFactory(GsonConverterFactory.create())
-        .build().create(IPTVApi::class.java)
-
+    private val api: IPTVApi = Retrofit.Builder().baseUrl("https://raw.githubusercontent.com/cybernahid-dev/streamx-iptv-data/main/").addConverterFactory(GsonConverterFactory.create()).build().create(IPTVApi::class.java)
     private val _isLoading = MutableStateFlow(true)
     val isLoading = _isLoading.asStateFlow()
     private val _allChannels = MutableStateFlow<List<Channel>>(emptyList())
@@ -105,14 +99,14 @@ class HomeViewModel : ViewModel() {
 
     init { loadAllData() }
 
-    private fun loadAllData() {
+    fun loadAllData() {
         viewModelScope.launch {
             _isLoading.value = true
             try {
                 val eventsJob = launch { loadEvents() }
                 val channelsJob = launch { loadChannels() }
                 eventsJob.join(); channelsJob.join()
-            } catch (e: Exception) { Log.e("HomeVM", "Error", e) } 
+            } catch (e: Exception) { Log.e("HomeViewModel", "Failed to load data", e) } 
             finally { _isLoading.value = false }
         }
     }
@@ -130,7 +124,7 @@ class HomeViewModel : ViewModel() {
                     startTime.isAfter(now) && ChronoUnit.HOURS.between(now, startTime) < 24 
                  } catch(e:Exception){false}
             }
-        } catch (e: Exception) { Log.e("HomeVM", "Event Error", e) }
+        } catch (e: Exception) { Log.e("HomeViewModel", "Failed to load events", e) }
     }
 
     private suspend fun loadChannels() {
@@ -155,14 +149,14 @@ class HomeViewModel : ViewModel() {
                             isFeatured = (ch["isFeatured"] as? Boolean) ?: false
                         ))
                     }
-                } catch (e: Exception) { Log.e("HomeVM", "Cat Error: $fileName", e) }
+                } catch (e: Exception) { Log.e("HomeViewModel", "Error loading category file: $fileName", e) }
             }
             _allChannels.value = masterList
-        } catch (e: Exception) { Log.e("HomeVM", "Channel Error", e) }
+        } catch (e: Exception) { Log.e("HomeViewModel", "Failed to load channels", e) }
     }
 }
 
-// --- MAIN SCREEN ---
+// --- Main HomeScreen Composable ---
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -174,20 +168,18 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     
-    // UI States
     var currentTab by remember { mutableStateOf(HomeTab.EVENTS) }
     var isSearchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     
-    // Data States
     val isLoading by homeViewModel.isLoading.collectAsState()
     val allChannels by homeViewModel.allChannels.collectAsState()
     
-    // Popups
     var showLinkSelectorDialog by remember { mutableStateOf(false) }
     var selectedChannelForLinks by remember { mutableStateOf<Channel?>(null) }
     var showUpdateDialog by remember { mutableStateOf(false) }
     var latestReleaseInfo by remember { mutableStateOf<GitHubRelease?>(null) }
+    val favoriteIds by context.dataStore.data.map { it[FAVORITES_KEY] ?: emptySet() }.collectAsState(initial = emptySet())
 
     LaunchedEffect(Unit) {
         val release = UpdateChecker.checkForUpdate(context)
@@ -200,22 +192,13 @@ fun HomeScreen(
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             FuturisticBackground()
-            
             Scaffold(
                 topBar = {
                     if (!isSearchActive) {
                         CenterAlignedTopAppBar(
-                            title = { Text("STREAMX ULTRA", fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp, color = Color.White) },
-                            navigationIcon = {
-                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(Icons.Default.Menu, "Menu", tint = Color.Cyan)
-                                }
-                            },
-                            actions = {
-                                IconButton(onClick = { isSearchActive = true }) {
-                                    Icon(Icons.Default.Search, "Search", tint = Color.Cyan)
-                                }
-                            },
+                            title = { Text("STREAMX ULTRA", fontWeight = FontWeight.ExtraBold, color = Color.White) },
+                            navigationIcon = { IconButton(onClick = { scope.launch { drawerState.open() } }) { Icon(Icons.Default.Menu, "Menu", tint = Color.Cyan) } },
+                            actions = { IconButton(onClick = { isSearchActive = true }) { Icon(Icons.Default.Search, "Search", tint = Color.Cyan) } },
                             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
                         )
                     }
@@ -223,7 +206,6 @@ fun HomeScreen(
                 containerColor = Color.Transparent
             ) { padding ->
                 Column(modifier = Modifier.padding(padding)) {
-                    
                     if (isSearchActive) {
                         SearchUI(
                             allChannels = allChannels,
@@ -231,19 +213,16 @@ fun HomeScreen(
                             onChannelClick = { ch -> selectedChannelForLinks = ch; showLinkSelectorDialog = true }
                         )
                     } else {
-                        // Tabs
-                        HomeTabRow(selectedTab = currentTab, onTabSelected = { currentTab = it })
-                        
-                        // Content
+                        HomeTabs(selectedTab = currentTab, onTabSelected = { currentTab = it })
                         AnimatedContent(
                             targetState = currentTab,
-                            label = "TabAnimation",
+                            label = "tab_content",
                             transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) }
                         ) { tab ->
                             when (tab) {
-                                HomeTab.EVENTS -> EventsTabContent(navController, homeViewModel, isLoading) { ch -> selectedChannelForLinks = ch; showLinkSelectorDialog = true }
+                                HomeTab.EVENTS -> EventsContent(navController, homeViewModel, isLoading) { ch -> selectedChannelForLinks = ch; showLinkSelectorDialog = true }
                                 HomeTab.LIVE_TV -> LiveTVTabContent(homeViewModel, isLoading) { ch -> selectedChannelForLinks = ch; showLinkSelectorDialog = true }
-                                HomeTab.FAVORITES -> FavoritesTabContent(homeViewModel) { ch -> selectedChannelForLinks = ch; showLinkSelectorDialog = true }
+                                HomeTab.FAVORITES -> FavoritesTabContent(homeViewModel, favoriteIds) { ch -> selectedChannelForLinks = ch; showLinkSelectorDialog = true }
                             }
                         }
                     }
@@ -251,16 +230,15 @@ fun HomeScreen(
             }
         }
     }
-
-    // Dialogs
-    if (showLinkSelectorDialog && selectedChannelForLinks != null) {
+    
+    if (showLinkSelectorDialog && selectedChannelForLinks != null) { 
         LinkSelectorDialog(selectedChannelForLinks!!, { showLinkSelectorDialog = false }) { url ->
             showLinkSelectorDialog = false
             val encodedUrl = URLEncoder.encode(url, "UTF-8")
             navController.navigate("player/$encodedUrl")
         }
     }
-    if (showUpdateDialog && latestReleaseInfo != null) {
+    if (showUpdateDialog && latestReleaseInfo != null) { 
         UpdateDialog(latestReleaseInfo!!, { showUpdateDialog = false }) {
             showUpdateDialog = false
             UpdateChecker.downloadAndInstall(context, latestReleaseInfo!!)
@@ -268,18 +246,13 @@ fun HomeScreen(
     }
 }
 
-// --- SUB-SCREENS (CONTENT) ---
+// --- TAB CONTENTS ---
 
 @Composable
-fun EventsTabContent(
-    navController: NavController, 
-    viewModel: HomeViewModel, 
-    isLoading: Boolean,
-    onChannelClick: (Channel) -> Unit
-) {
-    val liveEvents by viewModel.liveEvents.collectAsState()
-    val upcomingEvents by viewModel.upcomingEvents.collectAsState()
-    val allChannels by viewModel.allChannels.collectAsState()
+fun EventsContent(navController: NavController, homeViewModel: HomeViewModel, isLoading: Boolean, onChannelClick: (Channel) -> Unit) {
+    val liveEvents by homeViewModel.liveEvents.collectAsState()
+    val upcomingEvents by homeViewModel.upcomingEvents.collectAsState()
+    val allChannels by homeViewModel.allChannels.collectAsState()
 
     if (isLoading && liveEvents.isEmpty() && upcomingEvents.isEmpty()) {
         LoadingShimmer()
@@ -287,7 +260,6 @@ fun EventsTabContent(
         EmptyStateMessage("No Live Events Found")
     } else {
         LazyColumn(contentPadding = PaddingValues(bottom = 20.dp)) {
-            // Featured Carousel at the top of Events tab (like HD Streamz)
             item { 
                 FeaturedCarousel(
                     channels = allChannels.filter { it.isFeatured }, 
@@ -295,7 +267,6 @@ fun EventsTabContent(
                     onChannelClick = onChannelClick
                 ) 
             }
-
             if (liveEvents.isNotEmpty()) {
                 item { SectionHeader("LIVE NOW 🔥") }
                 items(liveEvents) { event -> EventCard(event, allChannels, onChannelClick) }
@@ -309,7 +280,7 @@ fun EventsTabContent(
 }
 
 @Composable
-fun LiveTVContentTab(viewModel: HomeViewModel, isLoading: Boolean, onChannelClick: (Channel) -> Unit) {
+fun LiveTVTabContent(viewModel: HomeViewModel, isLoading: Boolean, onChannelClick: (Channel) -> Unit) {
     val allChannels by viewModel.allChannels.collectAsState()
     val genres = remember { ChannelGenre.values().filterNot { it == ChannelGenre.UNKNOWN } }
     var selectedGenre by remember { mutableStateOf<ChannelGenre?>(null) }
@@ -318,7 +289,6 @@ fun LiveTVContentTab(viewModel: HomeViewModel, isLoading: Boolean, onChannelClic
         LoadingShimmer()
     } else {
         LazyColumn(contentPadding = PaddingValues(bottom = 20.dp)) {
-            // Genre Filter
             item {
                 LazyRow(
                     contentPadding = PaddingValues(16.dp),
@@ -329,14 +299,13 @@ fun LiveTVContentTab(viewModel: HomeViewModel, isLoading: Boolean, onChannelClic
                         FilterChip(
                             selected = isSelected,
                             onClick = { selectedGenre = if (isSelected) null else genre },
-                            label = { Text(genre.name.lowercase().capitalize(), color = if(isSelected) Color.Black else Color.White) },
+                            label = { Text(genre.name.lowercase().replaceFirstChar { it.uppercase() }, color = if(isSelected) Color.Black else Color.White) },
                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color.Cyan, containerColor = Color.White.copy(0.1f))
                         )
                     }
                 }
             }
 
-            // Channels grouped by Country
             val grouped = remember(allChannels, selectedGenre) {
                 val filtered = if (selectedGenre != null) allChannels.filter { it.genre == selectedGenre } else allChannels
                 filtered.groupBy { it.country }
@@ -362,17 +331,8 @@ fun LiveTVContentTab(viewModel: HomeViewModel, isLoading: Boolean, onChannelClic
 }
 
 @Composable
-fun LiveTVTabContent(homeViewModel: HomeViewModel, isLoading: Boolean, onChannelClick: (Channel) -> Unit) {
-    // Just delegating to the function above to keep names consistent
-    LiveTVContentTab(homeViewModel, isLoading, onChannelClick)
-}
-
-
-@Composable
-fun FavoritesContentTab(viewModel: HomeViewModel, onChannelClick: (Channel) -> Unit) {
-    val context = LocalContext.current
+fun FavoritesTabContent(viewModel: HomeViewModel, favoriteIds: Set<String>, onChannelClick: (Channel) -> Unit) {
     val allChannels by viewModel.allChannels.collectAsState()
-    val favoriteIds by context.dataStore.data.map { it[FAVORITES_KEY] ?: emptySet() }.collectAsState(initial = emptySet())
     val favorites = remember(allChannels, favoriteIds) { allChannels.filter { it.id in favoriteIds } }
 
     if (favorites.isEmpty()) {
@@ -389,7 +349,7 @@ fun FavoritesContentTab(viewModel: HomeViewModel, onChannelClick: (Channel) -> U
     }
 }
 
-// --- COMPONENTS ---
+// --- COMPONENTS & HELPERS ---
 
 @Composable
 fun HomeTabRow(selectedTab: HomeTab, onTabSelected: (HomeTab) -> Unit) {
@@ -420,7 +380,6 @@ fun HomeTabRow(selectedTab: HomeTab, onTabSelected: (HomeTab) -> Unit) {
 @Composable
 fun EventCard(event: Event, allChannels: List<Channel>, onChannelClick: (Channel) -> Unit) {
     val channels = remember(event.channelIds, allChannels) { allChannels.filter { it.id in event.channelIds } }
-    
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.08f)),
@@ -428,13 +387,11 @@ fun EventCard(event: Event, allChannels: List<Channel>, onChannelClick: (Channel
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                // Team 1
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
                     AsyncImage(model = event.team1Logo, contentDescription = null, modifier = Modifier.size(40.dp))
                     Text(event.title.split(" vs ").firstOrNull() ?: "", color = Color.White, fontSize = 12.sp, maxLines = 1)
                 }
                 Text("VS", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.padding(horizontal = 8.dp))
-                // Team 2
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
                     AsyncImage(model = event.team2Logo, contentDescription = null, modifier = Modifier.size(40.dp))
                     Text(event.title.split(" vs ").lastOrNull()?.split(",")?.firstOrNull() ?: "", color = Color.White, fontSize = 12.sp, maxLines = 1)
@@ -442,46 +399,15 @@ fun EventCard(event: Event, allChannels: List<Channel>, onChannelClick: (Channel
             }
             Spacer(Modifier.height(8.dp))
             Text(event.tournament, color = Color.Cyan, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
-            
             if (channels.isNotEmpty()) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(0.1f))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(channels) { ch ->
-                        AsyncImage(
-                            model = ch.logoUrl, contentDescription = null,
-                            modifier = Modifier.size(30.dp).clip(CircleShape).clickable { onChannelClick(ch) }
-                        )
+                        AsyncImage(model = ch.logoUrl, contentDescription = null, modifier = Modifier.size(30.dp).clip(CircleShape).clickable { onChannelClick(ch) })
                     }
                 }
             }
         }
-    }
-}
-
-@Composable
-fun SmallChannelCard(channel: Channel, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier.width(100.dp).clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.1f)),
-            modifier = Modifier.size(100.dp).border(1.dp, Color.White.copy(0.1f), RoundedCornerShape(20.dp))
-        ) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                AsyncImage(
-                    model = channel.logoUrl, contentDescription = null,
-                    modifier = Modifier.fillMaxSize(0.7f), contentScale = ContentScale.Fit,
-                    placeholder = painterResource(id = R.mipmap.ic_launcher)
-                )
-            }
-        }
-        Text(
-            text = channel.name, style = MaterialTheme.typography.bodySmall,
-            maxLines = 1, color = Color.White.copy(0.8f),
-            modifier = Modifier.padding(top = 6.dp), textAlign = TextAlign.Center
-        )
     }
 }
 
@@ -490,13 +416,11 @@ fun SmallChannelCard(channel: Channel, onClick: () -> Unit) {
 fun FeaturedCarousel(channels: List<Channel>, navController: NavController, onChannelClick: (Channel) -> Unit) {
     if (channels.isEmpty()) return
     val pagerState = rememberPagerState(pageCount = { channels.size })
-    LaunchedEffect(pagerState.pageCount) {
-        if (pagerState.pageCount > 1) { while(true) { delay(5000); pagerState.animateScrollToPage((pagerState.currentPage + 1) % pagerState.pageCount) } }
-    }
+    LaunchedEffect(pagerState.pageCount) { if (pagerState.pageCount > 1) { while (true) { delay(5000L); pagerState.animateScrollToPage((pagerState.currentPage + 1) % pagerState.pageCount) } } }
     HorizontalPager(state = pagerState, contentPadding = PaddingValues(horizontal = 32.dp), pageSpacing = 16.dp, modifier = Modifier.padding(vertical = 16.dp)) { page ->
         val channel = channels[page]
         Card(
-            modifier = Modifier.fillMaxWidth().height(180.dp).clickable { onChannelClick(channel) },
+            modifier = Modifier.graphicsLayer { val scale = lerp(0.85f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f)); scaleX = scale; scaleY = scale; alpha = lerp(0.5f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f)) }.fillMaxWidth().height(180.dp).clickable { onChannelClick(channel) },
             shape = RoundedCornerShape(24.dp)
         ) {
             Box {
@@ -508,12 +432,27 @@ fun FeaturedCarousel(channels: List<Channel>, navController: NavController, onCh
     }
 }
 
+@Composable
+fun SmallChannelCard(channel: Channel, onClick: () -> Unit) {
+    Column(modifier = Modifier.width(100.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.1f)),
+            modifier = Modifier.size(100.dp).border(1.dp, Color.White.copy(0.1f), RoundedCornerShape(20.dp))
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                AsyncImage(model = channel.logoUrl, contentDescription = channel.name, modifier = Modifier.fillMaxSize(0.7f), contentScale = ContentScale.Fit, placeholder = painterResource(id = R.mipmap.ic_launcher))
+            }
+        }
+        Text(text = channel.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, color = Color.White.copy(0.8f), modifier = Modifier.padding(top = 6.dp), textAlign = TextAlign.Center)
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchUI(allChannels: List<Channel>, onClose: () -> Unit, onChannelClick: (Channel) -> Unit) {
     var query by remember { mutableStateOf("") }
     val filtered = remember(query) { if(query.isEmpty()) emptyList() else allChannels.filter { it.name.contains(query, true) } }
-    
     SearchBar(
         query = query, onQueryChange = { query = it }, onSearch = {}, active = true, onActiveChange = { if(!it) onClose() },
         placeholder = { Text("Search channels...") },
@@ -524,71 +463,6 @@ fun SearchUI(allChannels: List<Channel>, onClose: () -> Unit, onChannelClick: (C
             items(filtered) { ch -> SmallChannelCard(ch) { onChannelClick(ch) } }
         }
     }
-}
-
-// --- HELPERS ---
-
-@Composable
-fun FuturisticBackground() {
-    val infiniteTransition = rememberInfiniteTransition(label = "bg")
-    val color1 by infiniteTransition.animateColor(
-        initialValue = Color(0xFF1A1A2E), targetValue = Color(0xFF16213E),
-        animationSpec = infiniteRepeatable(tween(5000), RepeatMode.Reverse), label = "c1"
-    )
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(color1, Color.Black))))
-}
-
-@Composable
-fun SectionHeader(title: String) {
-    Text(title, fontWeight = FontWeight.Bold, color = Color.Cyan, fontSize = 18.sp, modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 8.dp))
-}
-
-@Composable
-fun EmptyStateMessage(msg: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(msg, color = Color.Gray, fontSize = 16.sp)
-    }
-}
-
-@Composable
-fun LoadingShimmer() {
-    Column(Modifier.padding(16.dp)) {
-        Box(Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(16.dp)).shimmer().background(Color.Gray))
-        Spacer(Modifier.height(16.dp))
-        Row {
-            repeat(3) { Box(Modifier.size(100.dp).clip(RoundedCornerShape(16.dp)).shimmer().background(Color.Gray)); Spacer(Modifier.width(16.dp)) }
-        }
-    }
-}
-
-@Composable
-fun LinkSelectorDialog(channel: Channel, onDismiss: () -> Unit, onLinkSelected: (String) -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
-        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))) {
-            Column(Modifier.padding(16.dp)) {
-                Text(channel.name, color = Color.White, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(16.dp))
-                LazyColumn {
-                    itemsIndexed(channel.streamUrls) { i, url ->
-                        TextButton(onClick = { onLinkSelected(url) }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Link ${i + 1}", color = Color.Cyan)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun UpdateDialog(release: GitHubRelease, onDismiss: () -> Unit, onUpdateClick: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Update Available") },
-        text = { Text("Version ${release.tag_name} is available.") },
-        confirmButton = { Button(onClick = onUpdateClick) { Text("Update") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Later") } }
-    )
 }
 
 @Composable
@@ -603,7 +477,37 @@ fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
     }
 }
 
-// String extension for capitalizing
-fun String.capitalize(): String {
-    return this.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+@Composable
+fun FuturisticBackground() {
+    val infiniteTransition = rememberInfiniteTransition(label = "bg")
+    val color1 by infiniteTransition.animateColor(
+        initialValue = Color(0xFF1A1A2E), targetValue = Color(0xFF16213E),
+        animationSpec = infiniteRepeatable(tween(5000), RepeatMode.Reverse), label = "c1"
+    )
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(color1, Color.Black))))
+}
+
+@Composable
+fun SectionHeader(title: String) { Text(title, fontWeight = FontWeight.Bold, color = Color.Cyan, fontSize = 18.sp, modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 8.dp)) }
+@Composable
+fun EmptyStateMessage(msg: String) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(msg, color = Color.Gray, fontSize = 16.sp) } }
+@Composable
+fun LoadingShimmer() { Column(Modifier.padding(16.dp)) { Box(Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(16.dp)).shimmer().background(Color.Gray)); Spacer(Modifier.height(16.dp)); Row { repeat(3) { Box(Modifier.size(100.dp).clip(RoundedCornerShape(16.dp)).shimmer().background(Color.Gray)); Spacer(Modifier.width(16.dp)) } } } }
+
+@Composable
+fun LinkSelectorDialog(channel: Channel, onDismiss: () -> Unit, onLinkSelected: (String) -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))) {
+            Column(Modifier.padding(16.dp)) {
+                Text(channel.name, color = Color.White, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(16.dp))
+                LazyColumn { itemsIndexed(channel.streamUrls) { i, url -> TextButton(onClick = { onLinkSelected(url) }, modifier = Modifier.fillMaxWidth()) { Text("Link ${i + 1}", color = Color.Cyan) } } }
+            }
+        }
+    }
+}
+
+@Composable
+fun UpdateDialog(release: GitHubRelease, onDismiss: () -> Unit, onUpdateClick: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Update Available") }, text = { Text("Version ${release.tag_name}") }, confirmButton = { Button(onClick = onUpdateClick) { Text("Update") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Later") } })
 }

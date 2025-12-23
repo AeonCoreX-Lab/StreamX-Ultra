@@ -1,25 +1,23 @@
 package com.aeoncorex.streamx.ui.player
 
 import android.app.Activity
-import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.pm.ActivityInfo
-import android.content.res.Configuration
-import android.graphics.Rect
 import android.media.AudioManager
 import android.net.Uri
-import android.os.Build
-import android.util.Rational
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.FrameLayout
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -33,14 +31,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.util.Consumer
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -66,42 +63,25 @@ enum class IndicatorType { NONE, BRIGHTNESS, VOLUME }
 @Composable
 fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
     val context = LocalContext.current
-    val activity = context as? ComponentActivity
+    val activity = context as? Activity
     
-    // Core States
     var isLoading by remember { mutableStateOf(true) }
-    var hasError by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
     var showControls by remember { mutableStateOf(true) }
     var isLocked by remember { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(true) }
-    var isInPipMode by remember { mutableStateOf(false) } // PiP স্টেট
     
-    // Feature States
     var totalDataUsed by remember { mutableStateOf(0L) }
-    var currentSpeedStr by remember { mutableStateOf("0 KB/s") }
+    var currentSpeed by remember { mutableStateOf("0 KB/s") }
     var showSeekUI by remember { mutableStateOf(SeekDirection.NONE) }
     var isLandscape by remember { mutableStateOf(false) }
-    var resizeMode by remember { mutableStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
+    var videoResolution by remember { mutableStateOf<VideoSize?>(null) }
     var showSettingsDialog by remember { mutableStateOf(false) }
 
-    // Gesture States
     var showIndicator by remember { mutableStateOf(IndicatorType.NONE) }
     var indicatorProgress by remember { mutableStateOf(0f) }
 
     val streamUrl = remember { URLDecoder.decode(encodedUrl, "UTF-8") }
-
-    // PiP Listener: PiP মোডে ঢুকলে বা বের হলে এটি ডিটেক্ট করবে
-    DisposableEffect(activity) {
-        val listener = Consumer<androidx.core.app.PictureInPictureModeChangedInfo> { info ->
-            isInPipMode = info.isInPictureInPictureMode
-            // PiP মোডে ঢুকলে কন্ট্রোল লুকিয়ে ফেলা হবে
-            if (isInPipMode) {
-                showControls = false
-            }
-        }
-        activity?.addOnPictureInPictureModeChangedListener(listener)
-        onDispose { activity?.removeOnPictureInPictureModeChangedListener(listener) }
-    }
 
     val exoPlayer = remember {
         val trackSelector = DefaultTrackSelector(context)
@@ -130,11 +110,12 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
                     override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
                     override fun onPlaybackStateChanged(state: Int) { 
                         isLoading = state == Player.STATE_BUFFERING 
-                        if (state == Player.STATE_READY) hasError = false
+                        if (state == Player.STATE_READY) errorMessage = null
                     }
+                    override fun onVideoSizeChanged(size: VideoSize) { videoResolution = size }
                     override fun onPlayerError(error: PlaybackException) { 
                         isLoading = false
-                        hasError = true 
+                        errorMessage = "Error: ${error.message}"
                     }
                 })
             }
@@ -153,32 +134,29 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
     }
     
     KeepScreenOn()
-    if (!isInPipMode) HideSystemUi(activity) // PiP মোডে সিস্টেম UI কন্ট্রোল করার দরকার নেই
+    HideSystemUi(activity)
     
     val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
 
-    // Data Usage Calculator
     LaunchedEffect(Unit) {
         var lastDataUsed = 0L
         while (true) {
             delay(1000)
             val currentData = totalDataUsed
             val diff = currentData - lastDataUsed
-            currentSpeedStr = formatSpeed(diff)
+            currentSpeed = formatSpeed(diff)
             lastDataUsed = currentData
         }
     }
     
-    // Auto-hide controls
     LaunchedEffect(showControls, isLocked) {
-        if (showControls && !isLocked && !hasError) {
+        if (showControls && !isLocked && errorMessage == null) {
             delay(4000)
             showControls = false
         }
     }
     
-    // Indicator hide
     LaunchedEffect(showIndicator) {
         if (showIndicator != IndicatorType.NONE) { delay(1500); showIndicator = IndicatorType.NONE }
     }
@@ -192,7 +170,7 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
             .fillMaxSize()
             .background(Color.Black)
             .pointerInput(Unit) {
-                if (isLocked || isInPipMode) return@pointerInput // PiP মোডে জেসচার কাজ করবে না
+                if (isLocked) return@pointerInput
                 detectTapGestures(
                     onTap = { showControls = !showControls },
                     onDoubleTap = { offset ->
@@ -208,7 +186,7 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
                 )
             }
             .pointerInput(Unit) {
-                if (isLocked || isInPipMode) return@pointerInput
+                if (isLocked) return@pointerInput
                 detectVerticalDragGestures(
                     onDragStart = { showControls = true },
                     onVerticalDrag = { change, dragAmount ->
@@ -233,7 +211,6 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
                 )
             }
     ) {
-        // --- Video Player ---
         AndroidView(
             factory = { 
                 PlayerView(it).apply { 
@@ -242,112 +219,81 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
                     layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 } 
             },
-            update = { 
-                it.resizeMode = resizeMode 
-            },
             modifier = Modifier.fillMaxSize()
         )
 
-        // PiP মোডে থাকলে আমরা কোনো ওভারলে দেখাবো না
-        if (!isInPipMode) {
-            // --- Seek Animation ---
-            SeekAnimationOverlay(showSeekUI)
-            
-            // --- Volume/Brightness Indicator ---
-            VerticalIndicator(showIndicator, indicatorProgress)
+        SeekAnimationOverlay(showSeekUI)
+        VerticalIndicator(showIndicator, indicatorProgress)
+        
+        if (isLoading) {
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Cyan)
+        }
 
-            // --- Loading ---
-            if (isLoading) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Cyan)
-            }
-
-            // --- Error UI ---
-            if (hasError) {
-                Box(
-                    modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.85f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.ErrorOutline, null, tint = Color.Red, modifier = Modifier.size(50.dp))
-                        Text("Some errors occured", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
-                        Button(
-                            onClick = { 
-                                hasError = false; isLoading = true
-                                exoPlayer.prepare(); exoPlayer.play() 
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-                        ) { Text("Retry") }
-                    }
-                }
-            }
-
-            // --- Controls Overlay ---
-            AnimatedVisibility(
-                visible = showControls && !hasError && !isLocked,
-                enter = fadeIn(),
-                exit = fadeOut()
+        errorMessage?.let { msg ->
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.85f)),
+                contentAlignment = Alignment.Center
             ) {
-                PlayerControlsOverlay(
-                    title = "",
-                    isPlaying = isPlaying,
-                    isLandscape = isLandscape,
-                    resizeMode = resizeMode,
-                    totalData = formatBytes(totalDataUsed),
-                    speed = currentSpeedStr,
-                    onBack = { 
-                        if (isLandscape) {
-                            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                            isLandscape = false
-                        } else {
-                            exoPlayer.release()
-                            onBack()
-                        }
-                    },
-                    onPlayPause = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() },
-                    onLock = { isLocked = true },
-                    onRotate = {
-                        isLandscape = !isLandscape
-                        activity?.requestedOrientation = if (isLandscape) 
-                            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE 
-                        else 
-                            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                    },
-                    onResize = {
-                        resizeMode = when (resizeMode) {
-                            AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                            AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-                            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        }
-                    },
-                    onSettings = { showSettingsDialog = true },
-                    onPip = {
-                        // --- PiP ট্রিগার করার লজিক ---
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            val params = PictureInPictureParams.Builder()
-                                .setAspectRatio(Rational(16, 9))
-                                .build()
-                            activity?.enterPictureInPictureMode(params)
-                        }
-                    }
-                )
-            }
-
-            // --- Locked UI ---
-            if (isLocked) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    IconButton(
-                        onClick = { isLocked = false },
-                        modifier = Modifier.size(60.dp).background(Color.White.copy(0.2f), CircleShape).border(1.dp, Color.White, CircleShape)
-                    ) {
-                        Icon(Icons.Default.LockOpen, null, tint = Color.White)
-                    }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.ErrorOutline, null, tint = Color.Red, modifier = Modifier.size(50.dp))
+                    Text("Stream Failed", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+                    Button(
+                        onClick = { 
+                            errorMessage = null; isLoading = true
+                            exoPlayer.prepare(); exoPlayer.play() 
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                    ) { Text("Retry") }
                 }
             }
+        }
 
-            // --- Settings Sheet ---
-            if (showSettingsDialog) {
-                SettingsBottomSheet(exoPlayer) { showSettingsDialog = false }
+        AnimatedVisibility(
+            visible = showControls && errorMessage == null && !isLocked,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            PlayerControlsOverlay(
+                title = "",
+                isPlaying = isPlaying,
+                isLandscape = isLandscape,
+                totalData = formatBytes(totalDataUsed),
+                speed = currentSpeed,
+                onBack = { 
+                    if (isLandscape) {
+                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        isLandscape = false
+                    } else {
+                        exoPlayer.release()
+                        onBack()
+                    }
+                },
+                onPlayPause = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() },
+                onLock = { isLocked = true },
+                onRotate = {
+                    isLandscape = !isLandscape
+                    activity?.requestedOrientation = if (isLandscape) 
+                        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE 
+                    else 
+                        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                },
+                onSettings = { showSettingsDialog = true }
+            )
+        }
+
+        if (isLocked) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                IconButton(
+                    onClick = { isLocked = false },
+                    modifier = Modifier.size(60.dp).background(Color.White.copy(0.2f), CircleShape).border(1.dp, Color.White, CircleShape)
+                ) {
+                    Icon(Icons.Default.LockOpen, null, tint = Color.White)
+                }
             }
+        }
+
+        if (showSettingsDialog) {
+            SettingsBottomSheet(exoPlayer) { showSettingsDialog = false }
         }
     }
 }
@@ -359,16 +305,13 @@ fun PlayerControlsOverlay(
     title: String,
     isPlaying: Boolean,
     isLandscape: Boolean,
-    resizeMode: Int,
     totalData: String,
     speed: String,
     onBack: () -> Unit,
     onPlayPause: () -> Unit,
     onLock: () -> Unit,
     onRotate: () -> Unit,
-    onResize: () -> Unit,
-    onSettings: () -> Unit,
-    onPip: () -> Unit // নতুন প্যারামিটার
+    onSettings: () -> Unit
 ) {
     Column(
         modifier = Modifier.fillMaxSize().background(
@@ -377,7 +320,6 @@ fun PlayerControlsOverlay(
             )
         )
     ) {
-        // Top Bar
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -385,13 +327,8 @@ fun PlayerControlsOverlay(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White) }
-                // PiP বাটন (টপ বারে যোগ করা হয়েছে)
-                IconButton(onClick = onPip) { 
-                    Icon(Icons.Default.PictureInPictureAlt, "PiP", tint = Color.White) 
-                }
+                Text(title, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1)
             }
-            
-            // Data Stats
             Column(horizontalAlignment = Alignment.End) {
                 Text(speed, color = Color.Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Text(totalData, color = Color.White.copy(0.7f), fontSize = 10.sp)
@@ -400,7 +337,6 @@ fun PlayerControlsOverlay(
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // Center Play/Pause
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             IconButton(onClick = onPlayPause, modifier = Modifier.size(72.dp).background(Color.Black.copy(0.4f), CircleShape)) {
                 Icon(
@@ -412,7 +348,6 @@ fun PlayerControlsOverlay(
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // Bottom Bar
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -427,18 +362,7 @@ fun PlayerControlsOverlay(
             IconButton(onClick = onSettings) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.Tune, null, tint = Color.White)
-                    Text("Audio/Sub", fontSize = 10.sp, color = Color.White)
-                }
-            }
-            IconButton(onClick = onResize) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    val icon = when (resizeMode) {
-                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> Icons.Default.ZoomOutMap
-                        AspectRatioFrameLayout.RESIZE_MODE_FILL -> Icons.Default.AspectRatio
-                        else -> Icons.Default.FitScreen
-                    }
-                    Icon(icon, null, tint = Color.White)
-                    Text(if(resizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) "Zoom" else if(resizeMode == AspectRatioFrameLayout.RESIZE_MODE_FILL) "Fill" else "Fit", fontSize = 10.sp, color = Color.White)
+                    Text("Settings", fontSize = 10.sp, color = Color.White)
                 }
             }
             IconButton(onClick = onRotate) {
@@ -450,9 +374,6 @@ fun PlayerControlsOverlay(
         }
     }
 }
-
-// ... (SeekAnimationOverlay, VerticalIndicator, SettingsBottomSheet, Helper Functions আগের মতোই থাকবে)
-// নিশ্চিত করুন নিচের কোডগুলো ফাইলের শেষে আছে
 
 @Composable
 fun SeekAnimationOverlay(direction: SeekDirection) {
@@ -515,14 +436,7 @@ fun BoxScope.VerticalIndicator(type: IndicatorType, progress: Float) {
 @Composable
 fun SettingsBottomSheet(exoPlayer: ExoPlayer, onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState()
-    var tracks by remember { mutableStateOf(exoPlayer.currentTracks) }
-    
-    LaunchedEffect(Unit) {
-        val listener = object : Player.Listener {
-            override fun onTracksChanged(t: Tracks) { tracks = t }
-        }
-        exoPlayer.addListener(listener)
-    }
+    var playbackSpeed by remember { mutableStateOf(exoPlayer.playbackParameters.speed) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -534,43 +448,12 @@ fun SettingsBottomSheet(exoPlayer: ExoPlayer, onDismiss: () -> Unit) {
             Text("Playback Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
             
-            // Audio Tracks
-            Text("Audio", style = MaterialTheme.typography.titleMedium, color = Color.Cyan)
-            val audioGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
-            if (audioGroups.isEmpty()) {
-                Text("Default Audio", color = Color.Gray, fontSize = 14.sp)
-            } else {
-                audioGroups.forEach { group ->
-                    for (i in 0 until group.length) {
-                        val format = group.getTrackFormat(i)
-                        val isSelected = group.isSelected
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                        .buildUpon()
-                                        .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, i))
-                                        .build()
-                                    onDismiss()
-                                }
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(selected = isSelected, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = Color.Cyan))
-                            Text(format.language ?: "Unknown Language", modifier = Modifier.padding(start = 8.dp))
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
             Text("Playback Speed", style = MaterialTheme.typography.titleMedium, color = Color.Cyan)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 listOf(0.5f, 1.0f, 1.5f, 2.0f).forEach { speed ->
                      FilterChip(
-                        selected = exoPlayer.playbackParameters.speed == speed,
-                        onClick = { exoPlayer.setPlaybackSpeed(speed) },
+                        selected = playbackSpeed == speed,
+                        onClick = { exoPlayer.setPlaybackSpeed(speed); playbackSpeed = speed },
                         label = { Text("${speed}x") }
                     )
                 }
