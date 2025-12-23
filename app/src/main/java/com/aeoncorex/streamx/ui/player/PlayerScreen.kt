@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb // Added missing import
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -35,9 +36,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.*
-import androidx.media3.common.C.TRACK_TYPE_AUDIO
-import androidx.media3.common.C.TRACK_TYPE_TEXT
-import androidx.media3.common.C.TRACK_TYPE_VIDEO
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
@@ -47,10 +45,15 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat // Added missing import
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import java.net.URLDecoder
 import java.util.concurrent.TimeUnit
+
+// --- Added Missing Enums ---
+enum class SeekDirection { FORWARD, BACKWARD, NONE }
+enum class IndicatorType { VOLUME, BRIGHTNESS, NONE }
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -78,7 +81,7 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
     var videoResolution by remember { mutableStateOf<VideoSize?>(null) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showIndicator by remember { mutableStateOf(IndicatorType.NONE) }
-    var indicatorProgress by remember { mutableStateOf(0f) }
+    var indicatorProgress by remember { mutableFloatStateOf(0f) } // Changed to Float State
 
     val streamUrl = remember { URLDecoder.decode(encodedUrl, "UTF-8") }
 
@@ -127,7 +130,9 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
 
     DisposableEffect(Unit) { onDispose { exoPlayer.release() } }
     BackHandler { if (isLandscape) { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT; isLandscape = false } else { exoPlayer.release(); onBack() } }
-    KeepScreenOn(); HideSystemUi(activity)
+    
+    KeepScreenOn()
+    HideSystemUi(activity)
     
     val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
@@ -163,7 +168,11 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
                         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
                         indicatorProgress = newVol.toFloat() / maxVolume.toFloat()
                     }
-                })
+                },
+                onDragEnd = {
+                    showIndicator = IndicatorType.NONE
+                }
+            )
         }
     ) {
         AndroidView(factory = { PlayerView(it).apply { 
@@ -173,7 +182,7 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
         update = { it.resizeMode = currentResizeMode },
         modifier = Modifier.fillMaxSize())
         
-        SeekAnimationOverlay(direction = showSeekUI)
+        SeekAnimationOverlay(direction = showSeekUI) { showSeekUI = SeekDirection.NONE }
         VerticalIndicator(type = showIndicator, progress = indicatorProgress)
         
         if (isLoading) CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Cyan)
@@ -267,8 +276,8 @@ fun SettingsBottomSheet(exoPlayer: ExoPlayer, onDismiss: () -> Unit) {
                 SettingsGroup(title = "Subtitle Size: ${subtitleSize.toInt()}sp") {
                     Slider(value = subtitleSize, onValueChange = { 
                         subtitleSize = it
+                        // Added imports for toArgb() and CaptionStyleCompat
                         val style = CaptionStyleCompat(Color.White.toArgb(), Color.Transparent.toArgb(), Color.Transparent.toArgb(), CaptionStyleCompat.EDGE_TYPE_OUTLINE, Color.Black.toArgb(), null)
-                        // Note: For full customization, a custom SubtitleView in AndroidView is needed
                     }, valueRange = 12f..30f)
                 }
             }
@@ -297,4 +306,115 @@ private fun formatTime(ms: Long): String {
     else String.format("%02d:%02d", minutes, seconds)
 }
 
-// Keep older helper components like SeekAnimationOverlay, VerticalIndicator, etc.
+// --- MISSING COMPONENT IMPLEMENTATIONS ---
+
+@Composable
+fun KeepScreenOn() {
+    val currentView = LocalView.current
+    DisposableEffect(Unit) {
+        currentView.keepScreenOn = true
+        onDispose {
+            currentView.keepScreenOn = false
+        }
+    }
+}
+
+@Composable
+fun HideSystemUi(activity: Activity?) {
+    DisposableEffect(Unit) {
+        val window = activity?.window ?: return@DisposableEffect onDispose {}
+        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+        insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        insetsController.hide(WindowInsetsCompat.Type.systemBars())
+        onDispose {
+            insetsController.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+}
+
+@Composable
+fun SeekAnimationOverlay(direction: SeekDirection, onFinished: () -> Unit = {}) {
+    if (direction == SeekDirection.NONE) return
+
+    val icon = if (direction == SeekDirection.FORWARD) Icons.Default.FastForward else Icons.Default.FastRewind
+    
+    // Auto-hide after 600ms
+    LaunchedEffect(direction) {
+        delay(600)
+        onFinished()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.3f)),
+        contentAlignment = if (direction == SeekDirection.FORWARD) Alignment.CenterEnd else Alignment.CenterStart
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(48.dp)
+            )
+            Text(
+                text = if (direction == SeekDirection.FORWARD) "+10s" else "-10s",
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+fun VerticalIndicator(type: IndicatorType, progress: Float) {
+    if (type == IndicatorType.NONE) return
+
+    val icon = if (type == IndicatorType.VOLUME) Icons.Default.VolumeUp else Icons.Default.Brightness6
+    
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.Black.copy(0.6f))
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, null, tint = Color.White)
+            Spacer(modifier = Modifier.width(8.dp))
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.width(100.dp),
+                color = Color.Cyan,
+            )
+        }
+    }
+}
+
+@Composable
+fun DataUsageOverlay(speed: String, buffer: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .padding(top = 16.dp, end = 16.dp)
+            .background(Color.Black.copy(0.5f), RoundedCornerShape(4.dp))
+            .padding(8.dp)
+    ) {
+        Text("Speed: $speed", color = Color.Green, fontSize = 10.sp)
+        Text("Cached: $buffer", color = Color.White, fontSize = 10.sp)
+    }
+}
+
+@Composable
+fun SettingsGroup(title: String, content: @Composable () -> Unit) {
+    Column(modifier = Modifier.padding(vertical = 8.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+        content()
+        HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+    }
+}
