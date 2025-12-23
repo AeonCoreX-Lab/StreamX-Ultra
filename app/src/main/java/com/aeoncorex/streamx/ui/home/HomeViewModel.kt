@@ -17,13 +17,11 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
 class HomeViewModel : ViewModel() {
-
     private val api: IPTVApi = Retrofit.Builder()
         .baseUrl("https://raw.githubusercontent.com/cybernahid-dev/streamx-iptv-data/main/")
         .addConverterFactory(GsonConverterFactory.create())
         .build().create(IPTVApi::class.java)
 
-    // UI-এর জন্য StateFlow
     private val _isLoading = MutableStateFlow(true)
     val isLoading = _isLoading.asStateFlow()
 
@@ -40,15 +38,18 @@ class HomeViewModel : ViewModel() {
         loadAllData()
     }
 
-    fun loadAllData() {
+    private fun loadAllData() {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                // ইভেন্ট এবং চ্যানেল একসাথে লোড করা হবে
-                launch { loadEvents() }
-                launch { loadChannels() }
+                // দুটি কাজ একসাথে শুরু করা হলো
+                val eventsJob = launch { loadEvents() }
+                val channelsJob = launch { loadChannels() }
+                // দুটি কাজ শেষ হওয়ার জন্য অপেক্ষা করা হচ্ছে
+                eventsJob.join()
+                channelsJob.join()
             } catch (e: Exception) {
-                Log.e("HomeViewModel", "Failed to load data", e)
+                Log.e("HomeViewModel", "Failed to load data partitions", e)
             } finally {
                 _isLoading.value = false
             }
@@ -60,13 +61,13 @@ class HomeViewModel : ViewModel() {
             val allEvents = api.getEvents()["events"] ?: emptyList()
             val now = LocalDateTime.now(ZoneId.systemDefault())
             
-            _liveEvents.value = allEvents.filter {
-                val startTime = Instant.parse(it.startTime).atZone(ZoneId.systemDefault()).toLocalDateTime()
+            _liveEvents.value = allEvents.filter { event ->
+                val startTime = Instant.parse(event.startTime).atZone(ZoneId.systemDefault()).toLocalDateTime()
                 startTime.isBefore(now)
             }
             
-            _upcomingEvents.value = allEvents.filter {
-                val startTime = Instant.parse(it.startTime).atZone(ZoneId.systemDefault()).toLocalDateTime()
+            _upcomingEvents.value = allEvents.filter { event ->
+                val startTime = Instant.parse(event.startTime).atZone(ZoneId.systemDefault()).toLocalDateTime()
                 startTime.isAfter(now) && ChronoUnit.HOURS.between(now, startTime) < 4
             }
         } catch (e: Exception) {

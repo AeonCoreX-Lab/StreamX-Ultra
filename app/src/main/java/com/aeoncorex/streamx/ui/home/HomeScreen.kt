@@ -1,8 +1,6 @@
 package com.aeoncorex.streamx.ui.home
 
 import android.content.Context
-import android.util.Log
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColor
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.infiniteRepeatable
@@ -10,7 +8,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,7 +25,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -43,9 +39,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
@@ -54,25 +47,16 @@ import com.aeoncorex.streamx.model.Channel
 import com.aeoncorex.streamx.model.Event
 import com.aeoncorex.streamx.model.GitHubRelease
 import com.aeoncorex.streamx.services.UpdateChecker
-import com.aeoncorex.streamx.util.ChannelCategorizer
 import com.valentinilk.shimmer.shimmer
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Url
 import java.net.URLEncoder
-import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.temporal.ChronoUnit
 import kotlin.math.absoluteValue
 
-// DataStore, API Interface, and ViewModel
+// DataStore and API Interface
 private val Context.dataStore by preferencesDataStore(name = "favorites_prefs")
 private val FAVORITES_KEY = stringSetPreferencesKey("favorite_ids")
 
@@ -84,95 +68,6 @@ interface IPTVApi {
     @GET("categories/events.json")
     suspend fun getEvents(): Map<String, List<Event>>
 }
-
-class HomeViewModel : ViewModel() {
-    private val api: IPTVApi = Retrofit.Builder()
-        .baseUrl("https://raw.githubusercontent.com/cybernahid-dev/streamx-iptv-data/main/")
-        .addConverterFactory(GsonConverterFactory.create())
-        .build().create(IPTVApi::class.java)
-
-    private val _isLoading = MutableStateFlow(true)
-    val isLoading = _isLoading.asStateFlow()
-
-    private val _allChannels = MutableStateFlow<List<Channel>>(emptyList())
-    val allChannels = _allChannels.asStateFlow()
-
-    private val _liveEvents = MutableStateFlow<List<Event>>(emptyList())
-    val liveEvents = _liveEvents.asStateFlow()
-
-    private val _upcomingEvents = MutableStateFlow<List<Event>>(emptyList())
-    val upcomingEvents = _upcomingEvents.asStateFlow()
-
-    init {
-        loadAllData()
-    }
-
-    private fun loadAllData() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                launch { loadEvents() }
-                launch { loadChannels() }
-            } catch (e: Exception) {
-                Log.e("HomeViewModel", "Failed to load data", e)
-            } finally {
-                _isLoading.value = false
-            }
-        }
-    }
-
-    private suspend fun loadEvents() {
-        try {
-            val allEvents = api.getEvents()["events"] ?: emptyList()
-            val now = LocalDateTime.now(ZoneId.systemDefault())
-            
-            _liveEvents.value = allEvents.filter { event ->
-                val startTime = Instant.parse(event.startTime).atZone(ZoneId.systemDefault()).toLocalDateTime()
-                startTime.isBefore(now)
-            }
-            
-            _upcomingEvents.value = allEvents.filter { event ->
-                val startTime = Instant.parse(event.startTime).atZone(ZoneId.systemDefault()).toLocalDateTime()
-                startTime.isAfter(now) && ChronoUnit.HOURS.between(now, startTime) < 4
-            }
-        } catch (e: Exception) {
-            Log.e("HomeViewModel", "Failed to load events", e)
-        }
-    }
-
-    private suspend fun loadChannels() {
-        try {
-            val index = api.getIndex()
-            val cats = index["categories"] as? List<Map<String, Any>>
-            val masterList = mutableListOf<Channel>()
-            cats?.forEach { cat ->
-                val fileName = cat["file"] as String
-                val catName = cat["name"] as String
-                if (fileName.contains("events.json")) return@forEach
-                try {
-                    val res = api.getChannelsByUrl(fileName)
-                    val rawChannels = (res["channels"] as? List<Map<String, Any>>) ?: emptyList()
-                    rawChannels.forEach { ch ->
-                         masterList.add(Channel(
-                            id = (ch["id"] as? String) ?: "",
-                            name = (ch["name"] as? String) ?: "No Name",
-                            logoUrl = (ch["logoUrl"] as? String) ?: "",
-                            streamUrls = (ch["streamUrls"] as? List<String>) ?: emptyList(),
-                            country = catName,
-                            genre = ChannelCategorizer.getGenreFromString(ch["genre"] as? String),
-                            isFeatured = (ch["isFeatured"] as? Boolean) ?: false
-                        ))
-                    }
-                } catch (e: Exception) { Log.e("HomeViewModel", "Error loading category file: $fileName", e) }
-            }
-            _allChannels.value = masterList
-        } catch (e: Exception) {
-            Log.e("HomeViewModel", "Failed to load channels", e)
-        }
-    }
-}
-
-// --- Main HomeScreen Composable ---
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -244,7 +139,7 @@ fun HomeScreen(
                             SectionTitle("Live Now 🔥", onSeeAllClick = { /* navController.navigate("events") */ })
                             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 items(liveEvents) { event ->
-                                    // EventCard(event = event) // TODO: Implement EventCard UI
+                                    // EventCard(event = event)
                                 }
                             }
                         }
@@ -266,7 +161,7 @@ fun HomeScreen(
                             item {
                                 SectionTitle(country, onSeeAllClick = { /* navController.navigate("country_channels/$country") */ })
                                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                    items(channels.take(8)) { channel ->
+                                    items(items = channels.take(8)) { channel ->
                                         SmallChannelCard(channel = channel, onClick = {
                                             if (channel.streamUrls.isNotEmpty()) {
                                                 selectedChannelForLinks = channel
@@ -287,8 +182,6 @@ fun HomeScreen(
     if (showLinkSelectorDialog && selectedChannelForLinks != null) { LinkSelectorDialog(channel = selectedChannelForLinks!!, onDismiss = { showLinkSelectorDialog = false }, onLinkSelected = { selectedUrl -> showLinkSelectorDialog = false; val encodedUrl = URLEncoder.encode(selectedUrl, "UTF-8"); navController.navigate("player/$encodedUrl") }) }
     if (showUpdateDialog && latestReleaseInfo != null) { UpdateDialog(release = latestReleaseInfo!!, onDismiss = { showUpdateDialog = false }, onUpdateClick = { showUpdateDialog = false; UpdateChecker.downloadAndInstall(context, latestReleaseInfo!!) }) }
 }
-
-// --- All other Composables ---
 
 @Composable
 fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
@@ -329,9 +222,7 @@ fun LoadingShimmerEffect(modifier: Modifier = Modifier) {
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 items(5) {
                      Column(modifier = Modifier.width(100.dp).shimmer(), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.size(100.dp)) {
-                            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)))
-                        }
+                        Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.size(100.dp)) { Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))) }
                         Spacer(modifier = Modifier.height(8.dp))
                         Box(modifier = Modifier.height(12.dp).fillMaxWidth(0.8f).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(4.dp)))
                     }
@@ -343,11 +234,7 @@ fun LoadingShimmerEffect(modifier: Modifier = Modifier) {
 
 @Composable
 fun SectionTitle(title: String, onSeeAllClick: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    Row(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(text = title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         TextButton(onClick = onSeeAllClick) { Text("See All") }
     }
@@ -357,7 +244,7 @@ fun SectionTitle(title: String, onSeeAllClick: () -> Unit) {
 fun SmallChannelCard(channel: Channel, onClick: () -> Unit) {
     Column(modifier = Modifier.width(100.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
         Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.size(100.dp), elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
-            AsyncImage(model = channel.logoUrl, contentDescription = channel.name, modifier = Modifier.fillMaxSize().padding(16.dp), contentScale = ContentScale.Fit, placeholder = painterResource(id = R.mipmap.ic_launcher_foreground))
+            AsyncImage(model = channel.logoUrl, contentDescription = channel.name, modifier = Modifier.fillMaxSize().padding(16.dp), contentScale = ContentScale.Fit, placeholder = painterResource(id = R.mipmap.ic_launcher))
         }
         Text(text = channel.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, modifier = Modifier.padding(top = 8.dp))
     }

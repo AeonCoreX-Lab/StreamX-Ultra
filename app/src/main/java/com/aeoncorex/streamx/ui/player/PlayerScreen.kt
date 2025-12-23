@@ -13,10 +13,13 @@ import androidx.annotation.OptIn
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -24,6 +27,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -36,9 +40,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
+import androidx.media3.common.*
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
@@ -46,227 +48,224 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import java.net.URLDecoder
 import kotlin.math.abs
 
+// Enums for State Management
 enum class SeekDirection { NONE, FORWARD, BACKWARD }
+enum class IndicatorType { NONE, BRIGHTNESS, VOLUME }
 
-@OptIn(UnstableApi::class)
+@OptIn(UnstableApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val activity = context as? Activity
-
+    
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showControls by remember { mutableStateOf(true) }
     var isLocked by remember { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(true) }
+    
     var totalDataUsed by remember { mutableStateOf(0L) }
     var currentSpeed by remember { mutableStateOf("0 KB/s") }
     var showSeekUI by remember { mutableStateOf(SeekDirection.NONE) }
     var isLandscape by remember { mutableStateOf(false) }
+    var videoResolution by remember { mutableStateOf<VideoSize?>(null) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+
+    var showIndicator by remember { mutableStateOf(IndicatorType.NONE) }
+    var indicatorProgress by remember { mutableStateOf(0f) }
 
     val streamUrl = remember { URLDecoder.decode(encodedUrl, "UTF-8") }
 
     val exoPlayer = remember {
+        val trackSelector = DefaultTrackSelector(context).apply {
+            setParameters(buildUponParameters().setAllowMultipleAdaptiveSelections(true))
+        }
         val dataSourceListener = object : TransferListener {
             override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
             override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
-            override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) {
-                if (isNetwork) totalDataUsed += bytesTransferred
-            }
+            override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) { if (isNetwork) totalDataUsed += bytesTransferred }
             override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
         }
-        
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("HDStreamz/3.1.0 (Linux; Android 11; SM-G973F)")
-            .setDefaultRequestProperties(mapOf("Referer" to "https://www.google.com/"))
-            .setTransferListener(dataSourceListener)
-        
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory().setUserAgent("HDStreamz/3.1.0 (Linux; Android 11; SM-G973F)").setDefaultRequestProperties(mapOf("Referer" to "https://www.google.com/")).setTransferListener(dataSourceListener)
         val mediaSourceFactory = DefaultMediaSourceFactory(context).setDataSourceFactory(httpDataSourceFactory)
 
-        ExoPlayer.Builder(context).setMediaSourceFactory(mediaSourceFactory).build().apply {
-            setMediaItem(MediaItem.fromUri(streamUrl))
-            playWhenReady = true
-            prepare()
+        ExoPlayer.Builder(context).setTrackSelector(trackSelector).setMediaSourceFactory(mediaSourceFactory).build().apply {
+            setMediaItem(MediaItem.fromUri(streamUrl)); playWhenReady = true; prepare()
             addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
                 override fun onPlaybackStateChanged(state: Int) { isLoading = state == Player.STATE_BUFFERING }
-                override fun onPlayerError(error: PlaybackException) {
-                    isLoading = false
-                    errorMessage = "Sorry, some errors occurred.\nPlease wait..."
-                }
+                override fun onVideoSizeChanged(size: VideoSize) { videoResolution = size }
+                override fun onPlayerError(error: PlaybackException) { isLoading = false; errorMessage = "Sorry, an error occurred. Please try another link." }
             })
         }
     }
     
     DisposableEffect(Unit) { onDispose { exoPlayer.release() } }
+    BackHandler { if (isLandscape) { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT; isLandscape = false } else { exoPlayer.release(); onBack() } }
+    KeepScreenOn(); HideSystemUi(activity)
     
-    BackHandler {
-        if (isLandscape) {
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            isLandscape = false
-        } else {
-            exoPlayer.release()
-            onBack()
-        }
-    }
-    
-    KeepScreenOn()
-    HideSystemUi(activity)
-    
-    var brightness by remember { mutableStateOf(activity?.window?.attributes?.screenBrightness?.takeIf { it > 0 } ?: 0.5f) }
     val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-    var volume by remember { mutableStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)) }
 
-    LaunchedEffect(Unit) {
-        var lastDataUsed = 0L
-        while (true) {
-            delay(1000)
-            val currentData = totalDataUsed
-            val speedBytesPerSec = currentData - lastDataUsed
-            currentSpeed = formatSpeed(speedBytesPerSec)
-            lastDataUsed = currentData
-        }
-    }
-    
-    LaunchedEffect(errorMessage) {
-        if (errorMessage != null) {
-            delay(2500)
-            onBack()
-        }
-    }
+    LaunchedEffect(Unit) { var lastDataUsed = 0L; while (true) { delay(1000); val currentData = totalDataUsed; val speedBytesPerSec = currentData - lastDataUsed; currentSpeed = formatSpeed(speedBytesPerSec); lastDataUsed = currentData } }
+    LaunchedEffect(showControls, isLocked) { if (showControls && !isLocked) { delay(5000); showControls = false } }
+    LaunchedEffect(showIndicator) { if (showIndicator != IndicatorType.NONE) { delay(1200); showIndicator = IndicatorType.NONE } }
+    LaunchedEffect(showSeekUI) { if (showSeekUI != SeekDirection.NONE) { delay(800); showSeekUI = SeekDirection.NONE } }
+    LaunchedEffect(errorMessage) { if (errorMessage != null) { delay(3000); onBack() } }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
+        modifier = Modifier.fillMaxSize().background(Color.Black).pointerInput(Unit) { if (isLocked) return@pointerInput; detectTapGestures(onTap = { showControls = !showControls }, onDoubleTap = { offset -> showControls = true; if (offset.x > size.width / 2) { exoPlayer.seekForward(); showSeekUI = SeekDirection.FORWARD } else { exoPlayer.seekBack(); showSeekUI = SeekDirection.BACKWARD } }) }
             .pointerInput(Unit) {
                 if (isLocked) return@pointerInput
-                detectTapGestures(
-                    onTap = { showControls = !showControls },
-                    onDoubleTap = { offset ->
-                        showControls = true
-                        if (offset.x > size.width / 2) {
-                            exoPlayer.seekForward()
-                            showSeekUI = SeekDirection.FORWARD
-                        } else {
-                            exoPlayer.seekBack()
-                            showSeekUI = SeekDirection.BACKWARD
-                        }
-                    }
-                )
-            }
-            .pointerInput(Unit) {
-                if (isLocked) return@pointerInput
-                var dragStartedOnLeft = false
-                var verticalDragTotal = 0f
                 detectVerticalDragGestures(
-                    onDragStart = { offset -> verticalDragTotal = 0f; dragStartedOnLeft = offset.x < size.width / 2 },
+                    onDragStart = { showControls = true },
                     onVerticalDrag = { _, dragAmount ->
-                        verticalDragTotal += dragAmount
-                        if (abs(verticalDragTotal) > 15f) {
-                            if (dragStartedOnLeft) {
-                                val newBrightness = (brightness - (verticalDragTotal / (size.height * 0.7f))).coerceIn(0.05f, 1.0f)
-                                activity?.window?.let { val attributes = it.attributes; attributes.screenBrightness = newBrightness; it.attributes = attributes; brightness = newBrightness }
-                            } else {
-                                val delta = -(verticalDragTotal / (size.height * 0.7f)) * maxVolume
-                                val newVolume = (volume + delta.toInt()).coerceIn(0, maxVolume)
-                                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVolume, 0)
-                                volume = newVolume
+                        val isLeft = currentPosition.x < size.width / 2
+                        if (isLeft) {
+                            showIndicator = IndicatorType.BRIGHTNESS
+                            activity?.window?.let { window ->
+                                val currentBrightness = window.attributes.screenBrightness.takeIf { it > 0 } ?: 0.5f
+                                val newBrightness = (currentBrightness - dragAmount / size.height).coerceIn(0.05f, 1.0f)
+                                window.attributes = window.attributes.apply { screenBrightness = newBrightness }
+                                indicatorProgress = newBrightness
                             }
-                            verticalDragTotal = 0f
+                        } else {
+                            showIndicator = IndicatorType.VOLUME
+                            val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                            val delta = -(dragAmount * maxVolume / size.height.toFloat())
+                            val newVolume = (currentVolume + delta).toInt().coerceIn(0, maxVolume)
+                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVolume, 0)
+                            indicatorProgress = newVolume.toFloat() / maxVolume.toFloat()
                         }
                     }
                 )
             }
     ) {
-        AndroidView(
-            factory = { PlayerView(it).apply { player = exoPlayer; useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT } },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        SeekIndicator(direction = showSeekUI)
-
-        LaunchedEffect(showSeekUI) {
-            if (showSeekUI != SeekDirection.NONE) {
-                delay(600)
-                showSeekUI = SeekDirection.NONE
-            }
-        }
-
-        if (isLoading) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Cyan)
-        }
-
-        errorMessage?.let { msg ->
-            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.8f)), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
-                    Text(text = msg, color = Color.White, fontSize = 16.sp, textAlign = TextAlign.Center, lineHeight = 24.sp)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    LinearProgressIndicator(color = Color.White, modifier = Modifier.fillMaxWidth(0.6f))
-                }
-            }
-        }
+        AndroidView(factory = { PlayerView(it).apply { player = exoPlayer; useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT } }, modifier = Modifier.fillMaxSize())
+        
+        SeekAnimationOverlay(direction = showSeekUI)
+        VerticalIndicator(type = showIndicator, progress = indicatorProgress)
+        
+        if (isLoading) CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Cyan)
+        errorMessage?.let { msg -> Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.8f)), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) { Text(text = msg, color = Color.White, textAlign = TextAlign.Center); Spacer(Modifier.height(8.dp)); LinearProgressIndicator(color = Color.White) } } }
 
         AnimatedVisibility(visible = showControls && errorMessage == null && !isLocked, enter = fadeIn(), exit = fadeOut()) {
-            PlayerControls(
-                isPlaying = isPlaying, isLandscape = isLandscape,
-                onPlayPauseToggle = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() },
-                onBack = { if (isLandscape) { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT; isLandscape = false } else { exoPlayer.release(); onBack() } },
-                onLockToggle = { isLocked = !isLocked },
-                onRotateClick = {
-                    isLandscape = !isLandscape
-                    activity?.requestedOrientation = if (isLandscape) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                }
-            )
+            PlayerControls(isPlaying = isPlaying, isLandscape = isLandscape, videoResolution = videoResolution, onPlayPauseToggle = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() }, onBack = { if (isLandscape) { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT; isLandscape = false } else { exoPlayer.release(); onBack() } }, onLockToggle = { isLocked = !isLocked }, onRotateClick = { isLandscape = !isLandscape; activity?.requestedOrientation = if (isLandscape) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }, onSettingsClick = { showSettingsDialog = true })
             DataUsageOverlay(totalData = formatBytes(totalDataUsed), speed = currentSpeed, modifier = Modifier.align(Alignment.TopEnd))
         }
         
-        AnimatedVisibility(visible = isLocked, enter = fadeIn(), exit = fadeOut()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                IconButton(onClick = { isLocked = false }, modifier = Modifier.size(70.dp).background(Color.Black.copy(0.5f), CircleShape)) {
-                    Icon(Icons.Default.LockOpen, "Unlock", tint = Color.White, modifier = Modifier.size(35.dp))
-                }
-            }
-        }
+        if (isLocked) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { IconButton(onClick = { isLocked = false }, modifier = Modifier.size(70.dp).background(Color.Black.copy(0.5f), CircleShape)) { Icon(Icons.Default.LockOpen, "Unlock", tint = Color.White, modifier = Modifier.size(35.dp)) } } }
+        if (showSettingsDialog) { SettingsBottomSheet(exoPlayer = exoPlayer, onDismiss = { showSettingsDialog = false }) }
     }
-    
-    LaunchedEffect(showControls, isLocked) {
-        if (showControls && !isLocked) {
-            delay(5000)
-            showControls = false
+}
+
+@Composable
+fun PlayerControls(isPlaying: Boolean, isLandscape: Boolean, videoResolution: VideoSize?, onPlayPauseToggle: () -> Unit, onBack: () -> Unit, onLockToggle: () -> Unit, onRotateClick: () -> Unit, onSettingsClick: () -> Unit) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f))) {
+        Row(Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
+            videoResolution?.let { Text("${it.height}p", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+            IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Tune, "Settings", tint = Color.White) }
+        }
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { IconButton(onClick = onPlayPauseToggle, modifier = Modifier.size(70.dp)) { Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, "Play/Pause", tint = Color.White, modifier = Modifier.size(50.dp)) } }
+        Row(Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.End) {
+            IconButton(onClick = onLockToggle) { Icon(Icons.Default.Lock, "Lock", tint = Color.White) }; IconButton(onClick = onRotateClick) { Icon(if (isLandscape) Icons.Default.FullscreenExit else Icons.Default.Fullscreen, "Rotate", tint = Color.White) }
         }
     }
 }
 
 @Composable
-fun PlayerControls(
-    isPlaying: Boolean, isLandscape: Boolean,
-    onPlayPauseToggle: () -> Unit, onBack: () -> Unit, onLockToggle: () -> Unit, onRotateClick: () -> Unit
-) {
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))) {
-        Row(Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
+fun BoxScope.SeekAnimationOverlay(direction: SeekDirection) {
+    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        AnimatedVisibility(visible = direction == SeekDirection.BACKWARD, enter = fadeIn() + slideInHorizontally(), exit = fadeOut() + slideOutHorizontally(), modifier = Modifier.weight(1f)) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Icon(Icons.Default.FastRewind, "Rewind", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(60.dp)) }
         }
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            IconButton(onClick = onPlayPauseToggle, modifier = Modifier.size(70.dp)) {
-                Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, "Play/Pause", tint = Color.White, modifier = Modifier.size(50.dp))
+        Spacer(modifier = Modifier.weight(1f))
+        AnimatedVisibility(visible = direction == SeekDirection.FORWARD, enter = fadeIn() + slideInHorizontally { it }, exit = fadeOut() + slideOutHorizontally { it }, modifier = Modifier.weight(1f)) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Icon(Icons.Default.FastForward, "Forward", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(60.dp)) }
+        }
+    }
+}
+
+@Composable
+fun BoxScope.VerticalIndicator(type: IndicatorType, progress: Float) {
+    AnimatedVisibility(
+        visible = type != IndicatorType.NONE,
+        modifier = Modifier.align(if (type == IndicatorType.BRIGHTNESS) Alignment.CenterStart else Alignment.CenterEnd).padding(horizontal = 24.dp, vertical = 60.dp).width(40.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.5f)),
+        enter = fadeIn(), exit = fadeOut()
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center, modifier = Modifier.padding(vertical = 16.dp)) {
+            Icon(if (type == IndicatorType.BRIGHTNESS) Icons.Default.BrightnessMedium else Icons.Default.VolumeUp, null, tint = Color.White)
+            Spacer(modifier = Modifier.height(8.dp))
+            LinearProgressIndicator(progress = { progress }, modifier = Modifier.height(120.dp).width(4.dp).clip(RoundedCornerShape(2.dp)), color = Color.White, trackColor = Color.White.copy(alpha = 0.3f))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsBottomSheet(exoPlayer: ExoPlayer, onDismiss: () -> Unit) {
+    val sheetState = rememberModalBottomSheetState()
+    var tracks by remember { mutableStateOf(exoPlayer.currentTracks) }
+    var playbackSpeed by remember { mutableStateOf(exoPlayer.playbackParameters.speed) }
+    
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener { override fun onTracksChanged(t: Tracks) { tracks = t } }
+        exoPlayer.addListener(listener)
+        onDispose { exoPlayer.removeListener(listener) }
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        LazyColumn(contentPadding = PaddingValues(bottom = 32.dp)) {
+            item { Text("Playback Settings", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp)) }
+
+            item { SettingsGroup(title = "Speed") { val speeds = listOf(0.5f, 1.0f, 1.5f, 2.0f); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { speeds.forEach { speed -> FilterChip(selected = playbackSpeed == speed, onClick = { exoPlayer.setPlaybackSpeed(speed); playbackSpeed = speed }, label = { Text("${speed}x") }) } } } }
+            
+            val videoTracks = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO && it.isSupported }
+            videoTracks?.let { item { SettingsGroup(title = "Quality") { TrackSelectionMenu(it, exoPlayer) { fmt -> "${fmt.height}p" } } } }
+            
+            val audioTracks = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.isSupported }
+            audioTracks?.let { item { SettingsGroup(title = "Audio") { TrackSelectionMenu(it, exoPlayer) { fmt -> fmt.label ?: fmt.language ?: "Track" } } } }
+            
+            val textTracks = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_TEXT && it.isSupported }
+            textTracks?.let { item { SettingsGroup(title = "Subtitles") { TrackSelectionMenu(it, exoPlayer, showOffOption = true) { fmt -> fmt.label ?: fmt.language ?: "Track" } } } }
+        }
+    }
+}
+
+@Composable
+fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.height(8.dp)); content()
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TrackSelectionMenu(trackGroup: Tracks.Group, player: Player, showOffOption: Boolean = false, labelBuilder: (Format) -> String) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedIndex = trackGroup.selectedTrackIndex
+    val selectedFormat = if (selectedIndex != -1) trackGroup.getTrackFormat(selectedIndex) else null
+    val currentLabel = if (selectedFormat != null && trackGroup.isSelected) labelBuilder(selectedFormat) else "Off"
+
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
+        OutlinedTextField(value = currentLabel, onValue-change = {}, readOnly = true, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }, modifier = Modifier.menuAnchor().fillMaxWidth())
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (showOffOption) {
+                DropdownMenuItem(text = { Text("Off") }, onClick = { player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearTrackOverrides(trackGroup.mediaTrackGroup).build(); expanded = false })
             }
-        }
-        Row(
-            Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onLockToggle) { Icon(Icons.Default.Lock, "Lock", tint = Color.White) }
-            IconButton(onClick = onRotateClick) {
-                Icon(if (isLandscape) Icons.Default.FullscreenExit else Icons.Default.Fullscreen, "Rotate", tint = Color.White)
+            for (i in 0 until trackGroup.length) {
+                if (trackGroup.isTrackSupported(i)) {
+                    val format = trackGroup.getTrackFormat(i)
+                    DropdownMenuItem(text = { Text(labelBuilder(format)) }, onClick = { player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackOverride(TrackSelectionOverride(trackGroup.mediaTrackGroup, i)).build(); expanded = false })
+                }
             }
         }
     }
@@ -275,33 +274,7 @@ fun PlayerControls(
 @Composable
 fun DataUsageOverlay(totalData: String, speed: String, modifier: Modifier = Modifier) {
     Row(modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(text = speed, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(text = totalData, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-fun BoxScope.SeekIndicator(direction: SeekDirection) {
-    Row(
-        Modifier.fillMaxSize(),
-        horizontalArrangement = Arrangement.SpaceAround,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        AnimatedVisibility(
-            visible = direction == SeekDirection.BACKWARD,
-            enter = fadeIn(animationSpec = tween(200)) + scaleIn(),
-            exit = fadeOut(animationSpec = tween(400)) + scaleOut(),
-        ) {
-            Icon(Icons.Default.FastRewind, "Rewind", tint = Color.White, modifier = Modifier.size(60.dp))
-        }
-        AnimatedVisibility(
-            visible = direction == SeekDirection.FORWARD,
-            enter = fadeIn(animationSpec = tween(200)) + scaleIn(),
-            exit = fadeOut(animationSpec = tween(400)) + scaleOut(),
-        ) {
-            Icon(Icons.Default.FastForward, "Forward", tint = Color.White, modifier = Modifier.size(60.dp))
-        }
+        Text(text = speed, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.width(8.dp)); Text(text = totalData, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }
 

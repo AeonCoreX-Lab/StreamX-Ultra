@@ -23,8 +23,8 @@ import com.aeoncorex.streamx.R
 fun AboutScreen(navController: NavController) {
     val context = LocalContext.current
     val packageInfo = getPackageInfo(context)
-    val versionName = packageInfo?.versionName ?: "N/A"
-    val versionCode = packageInfo?.versionCode ?: 0
+    val versionName = packageInfo?.versionName ?: "1.2"
+    val versionCode = packageInfo?.versionCode ?: 3
 
     Scaffold(
         topBar = {
@@ -48,7 +48,7 @@ fun AboutScreen(navController: NavController) {
         ) {
             // অ্যাপের আইকন
             Image(
-                painter = painterResource(id = R.mipmap.ic_launcher_round),
+                painter = painterResource(id = R.mipmap.ic_launcher),
                 contentDescription = "App Icon",
                 modifier = Modifier.size(120.dp)
             )
@@ -73,7 +73,7 @@ fun AboutScreen(navController: NavController) {
             
             // কপিরাইট তথ্য
             Text(
-                text = "© 2025 CyberNahid Dev. All rights reserved.",
+                text = "© 2025 AeonCorex.StreamX. All rights reserved.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

@@ -14,6 +14,7 @@ import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
+import androidx.navigation.navArgument
 import com.aeoncorex.streamx.ui.account.AccountScreen
 import com.aeoncorex.streamx.ui.auth.AuthScreen
 import com.aeoncorex.streamx.ui.copyright.CopyrightScreen
@@ -82,7 +83,7 @@ fun MainScreen(mainNavController: NavController) {
                 CenterAlignedTopAppBar(
                     title = { Text("STREAMX ULTRA") },
                     navigationIcon = { IconButton(onClick = { scope.launch { drawerState.open() } }) { Icon(Icons.Default.Menu, "Menu") } },
-                    actions = { IconButton(onClick = { /*TODO: Navigate to a dedicated search screen*/ }) { Icon(Icons.Default.Search, "Search") } }
+                    actions = { IconButton(onClick = { /*TODO*/ }) { Icon(Icons.Default.Search, "Search") } }
                 )
             },
             bottomBar = { AppBottomNavBar(navController = bottomNavController) }
@@ -90,7 +91,7 @@ fun MainScreen(mainNavController: NavController) {
             NavHost(bottomNavController, startDestination = Screen.Events.route, Modifier.padding(padding)) {
                 composable(Screen.Events.route) { EventsScreen(mainNavController) }
                 composable(Screen.LiveTV.route) { LiveTVScreen(mainNavController) }
-                // composable(Screen.Favorites.route) { FavoritesScreen(mainNavController) } // TODO
+                // composable(Screen.Favorites.route) { FavoritesScreen(mainNavController) } 
             }
         }
     }

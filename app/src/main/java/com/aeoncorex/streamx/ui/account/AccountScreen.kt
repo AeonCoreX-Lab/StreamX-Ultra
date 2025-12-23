@@ -62,7 +62,7 @@ fun AccountScreen(navController: NavController) {
             AsyncImage(
                 model = currentUser.photoUrl,
                 contentDescription = "Profile Picture",
-                placeholder = painterResource(id = R.mipmap.ic_launcher_foreground),
+                placeholder = painterResource(id = R.mipmap.ic_launcher),
                 modifier = Modifier.size(120.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant),
                 contentScale = ContentScale.Crop
             )
