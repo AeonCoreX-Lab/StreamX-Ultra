@@ -247,14 +247,15 @@ fun SettingsBottomSheet(exoPlayer: ExoPlayer, onDismiss: () -> Unit) {
 
             item { SettingsGroup(title = "Speed") { val speeds = listOf(0.5f, 1.0f, 1.5f, 2.0f); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { speeds.forEach { speed -> FilterChip(selected = playbackSpeed == speed, onClick = { exoPlayer.setPlaybackSpeed(speed); playbackSpeed = speed }, label = { Text("${speed}x") }) } } } }
             
-            val videoTracks = tracks.groups.firstOrNull { it.type == TRACK_TYPE_VIDEO && it.isSupported }
-            videoTracks?.let { item { SettingsGroup(title = "Quality") { TrackSelectionMenu(it, exoPlayer) { fmt -> "${fmt.height}p" } } } }
+            // Fix: Filter correctly for media3 tracks
+            val videoGroup = tracks.groups.firstOrNull { it.type == TRACK_TYPE_VIDEO && it.isSupported }
+            videoGroup?.let { item { SettingsGroup(title = "Quality") { TrackSelectionMenu(it, exoPlayer) { fmt -> "${fmt.height}p" } } } }
             
-            val audioTracks = tracks.groups.firstOrNull { it.type == TRACK_TYPE_AUDIO && it.isSupported }
-            audioTracks?.let { item { SettingsGroup(title = "Audio") { TrackSelectionMenu(it, exoPlayer) { fmt -> fmt.label ?: fmt.language ?: "Track" } } } }
+            val audioGroup = tracks.groups.firstOrNull { it.type == TRACK_TYPE_AUDIO && it.isSupported }
+            audioGroup?.let { item { SettingsGroup(title = "Audio") { TrackSelectionMenu(it, exoPlayer) { fmt -> fmt.label ?: fmt.language ?: "Track" } } } }
             
-            val textTracks = tracks.groups.firstOrNull { it.type == TRACK_TYPE_TEXT && it.isSupported }
-            textTracks?.let { item { SettingsGroup(title = "Subtitles") { TrackSelectionMenu(it, exoPlayer, showOffOption = true) { fmt -> fmt.label ?: fmt.language ?: "Track" } } } }
+            val textGroup = tracks.groups.firstOrNull { it.type == TRACK_TYPE_TEXT && it.isSupported }
+            textGroup?.let { item { SettingsGroup(title = "Subtitles") { TrackSelectionMenu(it, exoPlayer, showOffOption = true) { fmt -> fmt.label ?: fmt.language ?: "Track" } } } }
         }
     }
 }
@@ -270,34 +271,42 @@ fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
 @Composable
 fun TrackSelectionMenu(trackGroup: Tracks.Group, player: Player, showOffOption: Boolean = false, labelBuilder: (Format) -> String) {
     var expanded by remember { mutableStateOf(false) }
-    val selectedTrack = trackGroup.tracks.find { it.isSelected }
-    val currentLabel = if (selectedTrack != null) labelBuilder(selectedTrack.format) else "Off"
+    
+    // Find selected track logic adjusted for Tracks.Group
+    var selectedFormatName = "Off"
+    for (i in 0 until trackGroup.length) {
+        if (trackGroup.isTrackSelected(i)) {
+            selectedFormatName = labelBuilder(trackGroup.getTrackFormat(i))
+            break
+        }
+    }
 
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
         OutlinedTextField(
-            value = currentLabel,
+            value = selectedFormatName,
             onValueChange = {},
             readOnly = true,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier.menuAnchor().fillMaxWidth()
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (showOffOption && selectedTrack != null) {
+            if (showOffOption) {
                 DropdownMenuItem(text = { Text("Off") }, onClick = {
                     player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                        .setTrackSelectionOverrides(player.trackSelectionParameters.overrides.buildUpon().remove(trackGroup.mediaTrackGroup).build())
+                        .setOverrideForType(TrackSelectionOverride(trackGroup.mediaTrackGroup, listOf())) // Empty list to disable
                         .build()
                     expanded = false
                 })
             }
-            trackGroup.tracks.forEachIndexed { index, track ->
-                if (track.isSupported) {
-                    val format = track.format
+            // Loop through tracks in the group
+            for (i in 0 until trackGroup.length) {
+                if (trackGroup.isTrackSupported(i)) {
+                    val format = trackGroup.getTrackFormat(i)
                     DropdownMenuItem(
                         text = { Text(labelBuilder(format)) },
                         onClick = {
                             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                                .setTrackSelectionOverrides(player.trackSelectionParameters.overrides.buildUpon().add(TrackSelectionOverride(trackGroup.mediaTrackGroup, index)).build())
+                                .setOverrideForType(TrackSelectionOverride(trackGroup.mediaTrackGroup, i))
                                 .build()
                             expanded = false
                         }

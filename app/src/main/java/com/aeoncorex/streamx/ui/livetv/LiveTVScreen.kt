@@ -26,6 +26,16 @@ fun LiveTVScreen(
     val genres = remember { ChannelGenre.values().filterNot { it == ChannelGenre.UNKNOWN } }
     var selectedGenre by remember { mutableStateOf<ChannelGenre?>(null) }
 
+    // Pre-calculate derived state so we don't do complex logic inside the LazyColumn composition
+    val channelsByCountry = remember(allChannels, selectedGenre) {
+        val filteredChannels = if (selectedGenre != null) {
+            allChannels.filter { it.genre == selectedGenre }
+        } else {
+            allChannels
+        }
+        filteredChannels.groupBy { it.country }
+    }
+
     Scaffold(
         topBar = { TopAppBar(title = { Text("Live TV") }) }
     ) { padding ->
@@ -43,15 +53,7 @@ fun LiveTVScreen(
                 }
             }
 
-            val channelsByCountry = remember(allChannels, selectedGenre) {
-                val filteredChannels = if (selectedGenre != null) {
-                    allChannels.filter { it.genre == selectedGenre }
-                } else {
-                    allChannels
-                }
-                filteredChannels.groupBy { it.country }
-            }
-
+            // Iterate over the map directly in the LazyColumn scope
             channelsByCountry.forEach { (country, channels) ->
                 if (channels.isNotEmpty()) {
                     item {

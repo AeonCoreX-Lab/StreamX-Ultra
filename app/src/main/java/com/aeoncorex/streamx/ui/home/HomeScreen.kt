@@ -16,7 +16,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -155,7 +154,9 @@ fun HomeScreen(
                         }
                     }
 
-                    val channelsByCountry = remember(allChannels) { allChannels.groupBy { it.country } }
+                    // Removed logic inside remember block that returns composable, handling list logic first
+                    val channelsByCountry = allChannels.groupBy { it.country }
+                    
                     channelsByCountry.forEach { (country, channels) ->
                         if (channels.isNotEmpty()) {
                             item {
@@ -218,13 +219,19 @@ fun LoadingShimmerEffect(modifier: Modifier = Modifier) {
         item { Box(modifier = Modifier.fillMaxWidth().height(170.dp).padding(horizontal = 24.dp, vertical = 12.dp).shimmer().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(32.dp))) }
         item { Spacer(modifier = Modifier.height(40.dp)) }
         items(3) {
-            SectionTitle("Loading...", onSeeAllClick = {})
-            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                items(5) {
-                     Column(modifier = Modifier.width(100.dp).shimmer(), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.size(100.dp)) { Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))) }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Box(modifier = Modifier.height(12.dp).fillMaxWidth(0.8f).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(4.dp)))
+            // Replaced manual SectionTitle call with Column to fit structure if needed, but logic here is for shimmer
+            Column {
+                // Mimicking Section Title Shimmer
+                Row(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.height(20.dp).width(120.dp).shimmer().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(4.dp)))
+                }
+                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    items(5) {
+                         Column(modifier = Modifier.width(100.dp).shimmer(), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.size(100.dp)) { Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))) }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(modifier = Modifier.height(12.dp).fillMaxWidth(0.8f).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(4.dp)))
+                        }
                     }
                 }
             }
