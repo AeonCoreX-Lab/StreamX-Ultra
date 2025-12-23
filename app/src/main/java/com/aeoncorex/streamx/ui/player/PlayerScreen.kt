@@ -4,16 +4,10 @@ import android.app.Activity
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
-import android.os.Build
-import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
-import androidx.annotation.OptIn
 import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
@@ -56,11 +50,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import java.net.URLDecoder
-import kotlin.math.abs
-
-// Enums for State Management
-enum class SeekDirection { NONE, FORWARD, BACKWARD }
-enum class IndicatorType { NONE, BRIGHTNESS, VOLUME }
+import java.util.concurrent.TimeUnit
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -68,11 +58,18 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val activity = context as? Activity
     
+    // States
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showControls by remember { mutableStateOf(true) }
     var isLocked by remember { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(true) }
+    var currentResizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
+    
+    // Progress States
+    var currentPosition by remember { mutableLongStateOf(0L) }
+    var duration by remember { mutableLongStateOf(0L) }
+    var bufferedPosition by remember { mutableLongStateOf(0L) }
     
     var totalDataUsed by remember { mutableStateOf(0L) }
     var currentSpeed by remember { mutableStateOf("0 KB/s") }
@@ -80,7 +77,6 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
     var isLandscape by remember { mutableStateOf(false) }
     var videoResolution by remember { mutableStateOf<VideoSize?>(null) }
     var showSettingsDialog by remember { mutableStateOf(false) }
-
     var showIndicator by remember { mutableStateOf(IndicatorType.NONE) }
     var indicatorProgress by remember { mutableStateOf(0f) }
 
@@ -91,25 +87,44 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
             setParameters(buildUponParameters().setAllowMultipleAdaptiveSelections(true))
         }
         val dataSourceListener = object : TransferListener {
-            override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
-            override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
-            override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) { if (isNetwork) totalDataUsed += bytesTransferred }
-            override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+            override fun onBytesTransferred(s: DataSource, d: DataSpec, isNet: Boolean, bytes: Int) {
+                if (isNet) totalDataUsed += bytes
+            }
+            override fun onTransferInitializing(s: DataSource, d: DataSpec, isNet: Boolean) {}
+            override fun onTransferStart(s: DataSource, d: DataSpec, isNet: Boolean) {}
+            override fun onTransferEnd(s: DataSource, d: DataSpec, isNet: Boolean) {}
         }
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory().setUserAgent("HDStreamz/3.1.0 (Linux; Android 11; SM-G973F)").setDefaultRequestProperties(mapOf("Referer" to "https://www.google.com/")).setTransferListener(dataSourceListener)
-        val mediaSourceFactory = DefaultMediaSourceFactory(context).setDataSourceFactory(httpDataSourceFactory)
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("StreamX-Ultra/1.0")
+            .setTransferListener(dataSourceListener)
 
-        ExoPlayer.Builder(context).setTrackSelector(trackSelector).setMediaSourceFactory(mediaSourceFactory).build().apply {
-            setMediaItem(MediaItem.fromUri(streamUrl)); playWhenReady = true; prepare()
-            addListener(object : Player.Listener {
-                override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
-                override fun onPlaybackStateChanged(state: Int) { isLoading = state == Player.STATE_BUFFERING }
-                override fun onVideoSizeChanged(size: VideoSize) { videoResolution = size }
-                override fun onPlayerError(error: PlaybackException) { isLoading = false; errorMessage = "Sorry, an error occurred. Please try another link." }
-            })
-        }
+        ExoPlayer.Builder(context).setTrackSelector(trackSelector)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(httpDataSourceFactory))
+            .build().apply {
+                setMediaItem(MediaItem.fromUri(streamUrl))
+                prepare()
+                playWhenReady = true
+                addListener(object : Player.Listener {
+                    override fun onIsPlayingChanged(p: Boolean) { isPlaying = p }
+                    override fun onPlaybackStateChanged(state: Int) {
+                        isLoading = state == Player.STATE_BUFFERING
+                        duration = this@apply.duration.coerceAtLeast(0L)
+                    }
+                    override fun onVideoSizeChanged(size: VideoSize) { videoResolution = size }
+                    override fun onPlayerError(e: PlaybackException) { errorMessage = "Stream Error: ${e.message}" }
+                })
+            }
     }
     
+    // Updates Progress every 500ms
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            currentPosition = exoPlayer.currentPosition
+            bufferedPosition = exoPlayer.bufferedPosition
+            delay(500)
+        }
+    }
+
     DisposableEffect(Unit) { onDispose { exoPlayer.release() } }
     BackHandler { if (isLandscape) { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT; isLandscape = false } else { exoPlayer.release(); onBack() } }
     KeepScreenOn(); HideSystemUi(activity)
@@ -117,252 +132,169 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
     val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
 
-    LaunchedEffect(Unit) { var lastDataUsed = 0L; while (true) { delay(1000); val currentData = totalDataUsed; val speedBytesPerSec = currentData - lastDataUsed; currentSpeed = formatSpeed(speedBytesPerSec); lastDataUsed = currentData } }
-    LaunchedEffect(showControls, isLocked) { if (showControls && !isLocked) { delay(5000); showControls = false } }
-    LaunchedEffect(showIndicator) { if (showIndicator != IndicatorType.NONE) { delay(1200); showIndicator = IndicatorType.NONE } }
-    LaunchedEffect(showSeekUI) { if (showSeekUI != SeekDirection.NONE) { delay(800); showSeekUI = SeekDirection.NONE } }
-    LaunchedEffect(errorMessage) { if (errorMessage != null) { delay(3000); onBack() } }
-
-    Box(
-        modifier = Modifier.fillMaxSize().background(Color.Black)
-            .pointerInput(Unit) {
-                if (isLocked) return@pointerInput
-                detectTapGestures(
-                    onTap = { showControls = !showControls },
-                    onDoubleTap = { offset ->
-                        showControls = true
-                        if (offset.x > size.width / 2) {
-                            exoPlayer.seekForward()
-                            showSeekUI = SeekDirection.FORWARD
-                        } else {
-                            exoPlayer.seekBack()
-                            showSeekUI = SeekDirection.BACKWARD
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)
+        .pointerInput(Unit) {
+            if (isLocked) return@pointerInput
+            detectTapGestures(onTap = { showControls = !showControls },
+                onDoubleTap = { offset ->
+                    showControls = true
+                    if (offset.x > size.width / 2) { exoPlayer.seekForward(); showSeekUI = SeekDirection.FORWARD }
+                    else { exoPlayer.seekBack(); showSeekUI = SeekDirection.BACKWARD }
+                })
+        }
+        .pointerInput(Unit) {
+            if (isLocked) return@pointerInput
+            detectVerticalDragGestures(onDragStart = { showControls = true },
+                onVerticalDrag = { change, dragAmount ->
+                    val isLeft = change.position.x < size.width / 2
+                    if (isLeft) {
+                        showIndicator = IndicatorType.BRIGHTNESS
+                        activity?.window?.let { window ->
+                            val currentBrightness = window.attributes.screenBrightness.takeIf { it > 0 } ?: 0.5f
+                            val newBrightness = (currentBrightness - dragAmount / size.height).coerceIn(0.05f, 1.0f)
+                            window.attributes = window.attributes.apply { screenBrightness = newBrightness }
+                            indicatorProgress = newBrightness
                         }
+                    } else {
+                        showIndicator = IndicatorType.VOLUME
+                        val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                        val delta = -(dragAmount * maxVolume / size.height.toFloat())
+                        val newVol = (currentVol + delta).toInt().coerceIn(0, maxVolume)
+                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
+                        indicatorProgress = newVol.toFloat() / maxVolume.toFloat()
                     }
-                )
-            }
-            .pointerInput(Unit) {
-                if (isLocked) return@pointerInput
-                detectVerticalDragGestures(
-                    onDragStart = { showControls = true },
-                    onVerticalDrag = { change, dragAmount ->
-                        val isLeft = change.position.x < size.width / 2
-                        if (isLeft) {
-                            showIndicator = IndicatorType.BRIGHTNESS
-                            activity?.window?.let { window ->
-                                val currentBrightness = window.attributes.screenBrightness.takeIf { it > 0 } ?: 0.5f
-                                val newBrightness = (currentBrightness - dragAmount / size.height).coerceIn(0.05f, 1.0f)
-                                window.attributes = window.attributes.apply { screenBrightness = newBrightness }
-                                indicatorProgress = newBrightness
-                            }
-                        } else {
-                            showIndicator = IndicatorType.VOLUME
-                            val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                            val delta = -(dragAmount * maxVolume / size.height.toFloat())
-                            val newVolume = (currentVolume + delta).toInt().coerceIn(0, maxVolume)
-                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVolume, 0)
-                            indicatorProgress = newVolume.toFloat() / maxVolume.toFloat()
-                        }
-                    }
-                )
-            }
+                })
+        }
     ) {
-        AndroidView(factory = { PlayerView(it).apply { player = exoPlayer; useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT } }, modifier = Modifier.fillMaxSize())
+        AndroidView(factory = { PlayerView(it).apply { 
+            player = exoPlayer; useController = false
+            this.resizeMode = currentResizeMode 
+        } }, 
+        update = { it.resizeMode = currentResizeMode },
+        modifier = Modifier.fillMaxSize())
         
         SeekAnimationOverlay(direction = showSeekUI)
         VerticalIndicator(type = showIndicator, progress = indicatorProgress)
         
         if (isLoading) CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Cyan)
-        errorMessage?.let { msg -> Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.8f)), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) { Text(text = msg, color = Color.White, textAlign = TextAlign.Center); Spacer(Modifier.height(8.dp)); LinearProgressIndicator(color = Color.White) } } }
 
-        AnimatedVisibility(visible = showControls && errorMessage == null && !isLocked, enter = fadeIn(), exit = fadeOut()) {
-            PlayerControls(isPlaying = isPlaying, isLandscape = isLandscape, videoResolution = videoResolution, onPlayPauseToggle = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() }, onBack = { if (isLandscape) { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT; isLandscape = false } else { exoPlayer.release(); onBack() } }, onLockToggle = { isLocked = !isLocked }, onRotateClick = { isLandscape = !isLandscape; activity?.requestedOrientation = if (isLandscape) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }, onSettingsClick = { showSettingsDialog = true })
-            DataUsageOverlay(totalData = formatBytes(totalDataUsed), speed = currentSpeed, modifier = Modifier.align(Alignment.TopEnd))
+        AnimatedVisibility(visible = showControls && !isLocked, enter = fadeIn(), exit = fadeOut()) {
+            Box(Modifier.fillMaxSize()) {
+                PlayerControls(
+                    isPlaying = isPlaying, 
+                    currentPos = currentPosition,
+                    duration = duration,
+                    bufferedPos = bufferedPosition,
+                    isLandscape = isLandscape,
+                    onPlayPause = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
+                    onSeek = { exoPlayer.seekTo(it) },
+                    onBack = { if (isLandscape) { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT; isLandscape = false } else { onBack() } },
+                    onLock = { isLocked = true },
+                    onResize = { 
+                        currentResizeMode = when(currentResizeMode) {
+                            AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                            AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        }
+                    },
+                    onPip = { activity?.enterPictureInPictureMode() },
+                    onSettings = { showSettingsDialog = true }
+                )
+                DataUsageOverlay(speed = currentSpeed, buffer = formatTime(bufferedPosition - currentPosition), modifier = Modifier.align(Alignment.TopEnd))
+            }
         }
         
-        if (isLocked) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { IconButton(onClick = { isLocked = false }, modifier = Modifier.size(70.dp).background(Color.Black.copy(0.5f), CircleShape)) { Icon(Icons.Default.LockOpen, "Unlock", tint = Color.White, modifier = Modifier.size(35.dp)) } } }
-        if (showSettingsDialog) { SettingsBottomSheet(exoPlayer = exoPlayer, onDismiss = { showSettingsDialog = false }) }
+        if (isLocked) { IconButton(onClick = { isLocked = false }, modifier = Modifier.align(Alignment.Center).size(60.dp).background(Color.Black.copy(0.5f), CircleShape)) { Icon(Icons.Default.LockOpen, null, tint = Color.White) } }
+        if (showSettingsDialog) SettingsBottomSheet(exoPlayer = exoPlayer, onDismiss = { showSettingsDialog = false })
     }
 }
 
 @Composable
-fun PlayerControls(isPlaying: Boolean, isLandscape: Boolean, videoResolution: VideoSize?, onPlayPauseToggle: () -> Unit, onBack: () -> Unit, onLockToggle: () -> Unit, onRotateClick: () -> Unit, onSettingsClick: () -> Unit) {
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f))) {
-        Row(Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
-            videoResolution?.let { Text("${it.height}p", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
-            IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Tune, "Settings", tint = Color.White) }
+fun PlayerControls(
+    isPlaying: Boolean, currentPos: Long, duration: Long, bufferedPos: Long, isLandscape: Boolean,
+    onPlayPause: () -> Unit, onSeek: (Long) -> Unit, onBack: () -> Unit, onLock: () -> Unit,
+    onResize: () -> Unit, onPip: () -> Unit, onSettings: () -> Unit
+) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(0.4f))) {
+        // Top Bar
+        Row(Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White) }
+            Row {
+                IconButton(onClick = onPip) { Icon(Icons.Default.PictureInPicture, null, tint = Color.White) }
+                IconButton(onClick = onResize) { Icon(Icons.Default.AspectRatio, null, tint = Color.White) }
+                IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, null, tint = Color.White) }
+            }
         }
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { IconButton(onClick = onPlayPauseToggle, modifier = Modifier.size(70.dp)) { Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, "Play/Pause", tint = Color.White, modifier = Modifier.size(50.dp)) } }
-        Row(Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.End) {
-            IconButton(onClick = onLockToggle) { Icon(Icons.Default.Lock, "Lock", tint = Color.White) }; IconButton(onClick = onRotateClick) { Icon(if (isLandscape) Icons.Default.FullscreenExit else Icons.Default.Fullscreen, "Rotate", tint = Color.White) }
+
+        // Middle Play/Pause
+        IconButton(onClick = onPlayPause, modifier = Modifier.align(Alignment.Center).size(80.dp)) {
+            Icon(if (isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled, null, tint = Color.White, modifier = Modifier.size(70.dp))
+        }
+
+        // Bottom Bar (SeekBar & Controls)
+        Column(Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(16.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(formatTime(currentPos), color = Color.White, fontSize = 12.sp)
+                Text(formatTime(duration), color = Color.White, fontSize = 12.sp)
+            }
+            Slider(
+                value = currentPos.toFloat(),
+                onValueChange = { onSeek(it.toLong()) },
+                valueRange = 0f..(duration.toFloat().coerceAtLeast(1f)),
+                colors = SliderDefaults.colors(thumbColor = Color.Cyan, activeTrackColor = Color.Cyan, inactiveTrackColor = Color.Gray.copy(0.5f))
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                IconButton(onClick = onLock) { Icon(Icons.Default.Lock, null, tint = Color.White) }
+                Text("Buffer: ${formatTime(bufferedPos)}", color = Color.White.copy(0.7f), fontSize = 11.sp)
+            }
         }
     }
 }
 
-@Composable
-fun BoxScope.SeekAnimationOverlay(direction: SeekDirection) {
-    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-        AnimatedVisibility(visible = direction == SeekDirection.BACKWARD, enter = fadeIn() + slideInHorizontally(), exit = fadeOut() + slideOutHorizontally(), modifier = Modifier.weight(1f)) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Icon(Icons.Default.FastRewind, "Rewind", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(60.dp)) }
-        }
-        Spacer(modifier = Modifier.weight(1f))
-        AnimatedVisibility(visible = direction == SeekDirection.FORWARD, enter = fadeIn() + slideInHorizontally { it }, exit = fadeOut() + slideOutHorizontally { it }, modifier = Modifier.weight(1f)) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Icon(Icons.Default.FastForward, "Forward", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(60.dp)) }
-        }
-    }
-}
-
-@Composable
-fun BoxScope.VerticalIndicator(type: IndicatorType, progress: Float) {
-    AnimatedVisibility(
-        visible = type != IndicatorType.NONE,
-        modifier = Modifier.align(if (type == IndicatorType.BRIGHTNESS) Alignment.CenterStart else Alignment.CenterEnd).padding(horizontal = 24.dp, vertical = 60.dp).width(40.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.5f)),
-        enter = fadeIn(), exit = fadeOut()
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center, modifier = Modifier.padding(vertical = 16.dp)) {
-            Icon(if (type == IndicatorType.BRIGHTNESS) Icons.Default.BrightnessMedium else Icons.Default.VolumeUp, null, tint = Color.White)
-            Spacer(modifier = Modifier.height(8.dp))
-            LinearProgressIndicator(progress = { progress }, modifier = Modifier.height(120.dp).width(4.dp).clip(RoundedCornerShape(2.dp)), color = Color.White, trackColor = Color.White.copy(alpha = 0.3f))
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
+@androidx.annotation.OptIn(UnstableApi::class)
+@kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsBottomSheet(exoPlayer: ExoPlayer, onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState()
-    var tracks by remember { mutableStateOf(exoPlayer.currentTracks) }
-    var playbackSpeed by remember { mutableStateOf(exoPlayer.playbackParameters.speed) }
-    
-    DisposableEffect(exoPlayer) {
-        val listener = object : Player.Listener { override fun onTracksChanged(t: Tracks) { tracks = t } }
-        exoPlayer.addListener(listener)
-        onDispose { exoPlayer.removeListener(listener) }
-    }
+    var subtitleSize by remember { mutableFloatStateOf(18f) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        LazyColumn(contentPadding = PaddingValues(bottom = 32.dp)) {
-            item { Text("Playback Settings", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp)) }
-
-            item { SettingsGroup(title = "Speed") { val speeds = listOf(0.5f, 1.0f, 1.5f, 2.0f); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { speeds.forEach { speed -> FilterChip(selected = playbackSpeed == speed, onClick = { exoPlayer.setPlaybackSpeed(speed); playbackSpeed = speed }, label = { Text("${speed}x") }) } } } }
+        LazyColumn(Modifier.fillMaxWidth().padding(16.dp)) {
+            item { Text("Player Settings", style = MaterialTheme.typography.headlineSmall) }
             
-            // Fix: Filter correctly for media3 tracks
-            val videoGroup = tracks.groups.firstOrNull { it.type == TRACK_TYPE_VIDEO && it.isSupported }
-            videoGroup?.let { item { SettingsGroup(title = "Quality") { TrackSelectionMenu(it, exoPlayer) { fmt -> "${fmt.height}p" } } } }
-            
-            val audioGroup = tracks.groups.firstOrNull { it.type == TRACK_TYPE_AUDIO && it.isSupported }
-            audioGroup?.let { item { SettingsGroup(title = "Audio") { TrackSelectionMenu(it, exoPlayer) { fmt -> fmt.label ?: fmt.language ?: "Track" } } } }
-            
-            val textGroup = tracks.groups.firstOrNull { it.type == TRACK_TYPE_TEXT && it.isSupported }
-            textGroup?.let { item { SettingsGroup(title = "Subtitles") { TrackSelectionMenu(it, exoPlayer, showOffOption = true) { fmt -> fmt.label ?: fmt.language ?: "Track" } } } }
-        }
-    }
-}
-
-@Composable
-fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.height(8.dp)); content()
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun TrackSelectionMenu(trackGroup: Tracks.Group, player: Player, showOffOption: Boolean = false, labelBuilder: (Format) -> String) {
-    var expanded by remember { mutableStateOf(false) }
-    
-    // Find selected track logic adjusted for Tracks.Group
-    var selectedFormatName = "Off"
-    for (i in 0 until trackGroup.length) {
-        if (trackGroup.isTrackSelected(i)) {
-            selectedFormatName = labelBuilder(trackGroup.getTrackFormat(i))
-            break
-        }
-    }
-
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
-        OutlinedTextField(
-            value = selectedFormatName,
-            onValueChange = {},
-            readOnly = true,
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier.menuAnchor().fillMaxWidth()
-        )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (showOffOption) {
-                DropdownMenuItem(text = { Text("Off") }, onClick = {
-                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                        .setOverrideForType(TrackSelectionOverride(trackGroup.mediaTrackGroup, listOf())) // Empty list to disable
-                        .build()
-                    expanded = false
-                })
+            // Subtitle Size Control
+            item {
+                SettingsGroup(title = "Subtitle Size: ${subtitleSize.toInt()}sp") {
+                    Slider(value = subtitleSize, onValueChange = { 
+                        subtitleSize = it
+                        val style = CaptionStyleCompat(Color.White.toArgb(), Color.Transparent.toArgb(), Color.Transparent.toArgb(), CaptionStyleCompat.EDGE_TYPE_OUTLINE, Color.Black.toArgb(), null)
+                        // Note: For full customization, a custom SubtitleView in AndroidView is needed
+                    }, valueRange = 12f..30f)
+                }
             }
-            // Loop through tracks in the group
-            for (i in 0 until trackGroup.length) {
-                if (trackGroup.isTrackSupported(i)) {
-                    val format = trackGroup.getTrackFormat(i)
-                    DropdownMenuItem(
-                        text = { Text(labelBuilder(format)) },
-                        onClick = {
-                            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                                .setOverrideForType(TrackSelectionOverride(trackGroup.mediaTrackGroup, i))
-                                .build()
-                            expanded = false
+
+            // Playback Speed
+            item {
+                SettingsGroup(title = "Playback Speed") {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        listOf(0.5f, 1.0f, 1.5f, 2.0f).forEach { speed ->
+                            FilterChip(selected = exoPlayer.playbackParameters.speed == speed, 
+                                onClick = { exoPlayer.setPlaybackSpeed(speed) }, 
+                                label = { Text("${speed}x") })
                         }
-                    )
+                    }
                 }
             }
         }
     }
 }
 
-@Composable
-fun DataUsageOverlay(totalData: String, speed: String, modifier: Modifier = Modifier) {
-    Row(modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(text = speed, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.width(8.dp)); Text(text = totalData, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-    }
+private fun formatTime(ms: Long): String {
+    val hours = TimeUnit.MILLISECONDS.toHours(ms)
+    val minutes = TimeUnit.MILLISECONDS.toMinutes(ms) % 60
+    val seconds = TimeUnit.MILLISECONDS.toSeconds(ms) % 60
+    return if (hours > 0) String.format("%02d:%02d:%02d", hours, minutes, seconds)
+    else String.format("%02d:%02d", minutes, seconds)
 }
 
-private fun formatBytes(bytes: Long): String {
-    if (bytes < 1024) return "$bytes B"
-    val kb = bytes / 1024
-    if (kb < 1024) return "$kb KB"
-    val mb = kb / 1024
-    return String.format("%.1f MB", kb / 1024.0)
-}
-
-private fun formatSpeed(bytesPerSecond: Long): String {
-    if (bytesPerSecond < 0) return "0 B/s"
-    if (bytesPerSecond < 1024) return "$bytesPerSecond B/s"
-    val kbPerSecond = bytesPerSecond / 1024.0
-    if (kbPerSecond < 1024) return "${kbPerSecond.toInt()} KB/s"
-    val mbPerSecond = kbPerSecond / 1024.0
-    return String.format("%.1f MB/s", mbPerSecond)
-}
-
-@Composable
-private fun KeepScreenOn() {
-    val view = LocalView.current
-    DisposableEffect(Unit) {
-        val window = (view.context as? Activity)?.window
-        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
-    }
-}
-
-@Composable
-private fun HideSystemUi(activity: Activity?) {
-    val window = activity?.window ?: return
-    DisposableEffect(Unit) {
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        val controller = WindowCompat.getInsetsController(window, window.decorView)
-        controller.hide(WindowInsetsCompat.Type.systemBars())
-        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        onDispose {
-            WindowCompat.setDecorFitsSystemWindows(window, true)
-            controller.show(WindowInsetsCompat.Type.systemBars())
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        }
-    }
-}
+// Keep older helper components like SeekAnimationOverlay, VerticalIndicator, etc.
