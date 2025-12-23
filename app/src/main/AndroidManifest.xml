@@ -19,6 +19,7 @@
         android:usesCleartextTraffic="true"
         tools:targetApi="31">
 
+        <!-- MainActivity Declaration -->
         <activity
             android:name=".MainActivity"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden|uiMode"
@@ -31,6 +32,7 @@
             </intent-filter>
         </activity>
 
+        <!-- FileProvider Declaration -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"
@@ -41,13 +43,16 @@
                 android:resource="@xml/provider_paths" />
         </provider>
 
+        <!-- Facebook Meta-Data (Application ট্যাগ-এর ভেতরে থাকবে, Activity-এর বাইরে) -->
         <meta-data
             android:name="com.facebook.sdk.ApplicationId"
-            android:value="@string/facebook_app_id" />
+            android:value="@string/facebook_app_id"
+            tools:replace="android:value" />
         <meta-data
             android:name="com.facebook.sdk.ClientToken"
             android:value="@string/facebook_client_token" />
 
+        <!-- Facebook Activities -->
         <activity
             android:name="com.facebook.FacebookActivity"
             android:configChanges="keyboard|keyboardHidden|screenLayout|screenSize|orientation"
