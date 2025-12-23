@@ -3,89 +3,77 @@ package com.aeoncorex.streamx.ui.about
 import android.content.Context
 import android.content.pm.PackageInfo
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.aeoncorex.streamx.R
+import com.aeoncorex.streamx.ui.home.FuturisticBackground
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(navController: NavController) {
     val context = LocalContext.current
     val packageInfo = getPackageInfo(context)
-    val versionName = packageInfo?.versionName ?: "1.2"
-    val versionCode = packageInfo?.versionCode ?: 3
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("About StreamX Ultra") },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+    val versionName = packageInfo?.versionName ?: "N/A"
+    
+    Box(modifier = Modifier.fillMaxSize()) {
+        FuturisticBackground()
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { Text("About", color = Color.White, fontWeight = FontWeight.Bold) },
+                    navigationIcon = { IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) } },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                )
+            },
+            containerColor = Color.Transparent
+        ) { padding ->
+            Column(
+                modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.1f)),
+                    modifier = Modifier.fillMaxWidth().padding(16.dp)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(24.dp).fillMaxWidth()
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.mipmap.ic_launcher_round),
+                            contentDescription = "App Icon",
+                            modifier = Modifier.size(100.dp)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("StreamX Ultra", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Version $versionName", color = Color.Cyan)
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text("© 2025 CyberNahid Dev", color = Color.White.copy(0.7f))
                     }
                 }
-            )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            // অ্যাপের আইকন
-            Image(
-                painter = painterResource(id = R.mipmap.ic_launcher),
-                contentDescription = "App Icon",
-                modifier = Modifier.size(120.dp)
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // অ্যাপের নাম
-            Text(
-                text = "StreamX Ultra",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // সংস্করণ তথ্য
-            Text(
-                text = "Version $versionName (Build $versionCode)",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            // কপিরাইট তথ্য
-            Text(
-                text = "© 2025 AeonCorex.StreamX. All rights reserved.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            }
         }
     }
 }
 
-// এই Helper ফাংশনটি অ্যাপের প্যাকেজ তথ্য এনে দেয়
 private fun getPackageInfo(context: Context): PackageInfo? {
-    return try {
-        context.packageManager.getPackageInfo(context.packageName, 0)
-    } catch (e: Exception) {
-        null
-    }
+    return try { context.packageManager.getPackageInfo(context.packageName, 0) } catch (e: Exception) { null }
 }

@@ -6,16 +6,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.aeoncorex.streamx.ui.home.FuturisticBackground
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.URL
@@ -24,42 +23,37 @@ import java.net.URL
 @Composable
 fun PrivacyPolicyScreen(navController: NavController) {
     val privacyPolicyUrl = "https://raw.githubusercontent.com/cybernahid-dev/StreamX-Ultra/main/PRIVACY_POLICY.md"
-    val policyText = remember { mutableStateOf<String?>(null) }
-    val isLoading = remember { mutableStateOf(true) }
+    var policyText by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
-        isLoading.value = true
-        try {
-            policyText.value = withContext(Dispatchers.IO) { URL(privacyPolicyUrl).readText() }
-        } catch (e: Exception) {
-            policyText.value = "Failed to load Privacy Policy. Please check your internet connection."
-        } finally {
-            isLoading.value = false
-        }
+        try { policyText = withContext(Dispatchers.IO) { URL(privacyPolicyUrl).readText() } } 
+        catch (e: Exception) { policyText = "Error loading policy." } 
+        finally { isLoading = false }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Privacy Policy") },
-                navigationIcon = { IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }
-            )
-        }
-    ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (isLoading.value) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+    Box(modifier = Modifier.fillMaxSize()) {
+        FuturisticBackground()
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { Text("Privacy Policy", color = Color.White, fontWeight = FontWeight.Bold) },
+                    navigationIcon = { IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) } },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                )
+            },
+            containerColor = Color.Transparent
+        ) { padding ->
+            if (isLoading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color.Cyan) }
             } else {
-                policyText.value?.let { text ->
-                    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-                        text.lines().forEach { line ->
-                            when {
-                                line.startsWith("# ") -> Text(line.removePrefix("# "), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
-                                line.startsWith("## ") -> Text(line.removePrefix("## "), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
-                                line.startsWith("*   ") -> Text("• ${line.removePrefix("*   ")}", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 8.dp, bottom = 4.dp))
-                                line.isBlank() -> Spacer(modifier = Modifier.height(8.dp))
-                                else -> Text(line, style = MaterialTheme.typography.bodyLarge, lineHeight = 22.sp)
-                            }
+                Column(modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp)) {
+                    policyText?.lines()?.forEach { line ->
+                        when {
+                            line.startsWith("# ") -> Text(line.removePrefix("# "), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 8.dp))
+                            line.startsWith("## ") -> Text(line.removePrefix("## "), style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                            line.startsWith("* ") -> Text("• ${line.removePrefix("* ")}", color = Color.White.copy(0.8f), modifier = Modifier.padding(start = 8.dp))
+                            else -> Text(line, color = Color.White.copy(0.7f), lineHeight = 20.sp)
                         }
                     }
                 }
