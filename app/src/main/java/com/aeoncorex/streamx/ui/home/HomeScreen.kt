@@ -55,12 +55,10 @@ import com.aeoncorex.streamx.model.Event
 import com.aeoncorex.streamx.model.GitHubRelease
 import com.aeoncorex.streamx.services.UpdateChecker
 import com.aeoncorex.streamx.util.ChannelCategorizer
-import com.aeoncorex.streamx.util.ChannelGenre
 import com.valentinilk.shimmer.shimmer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -81,9 +79,12 @@ private val Context.dataStore by preferencesDataStore(name = "favorites_prefs")
 private val FAVORITES_KEY = stringSetPreferencesKey("favorite_ids")
 
 interface IPTVApi {
-    @GET("index.json") suspend fun getIndex(): Map<String, Any>
-    @GET suspend fun getChannelsByUrl(@Url url: String): Map<String, Any>
-    @GET("categories/events.json") suspend fun getEvents(): Map<String, List<Event>>
+    @GET("index.json")
+    suspend fun getIndex(): Map<String, Any>
+    @GET
+    suspend fun getChannelsByUrl(@Url url: String): Map<String, Any>
+    @GET("categories/events.json")
+    suspend fun getEvents(): Map<String, List<Event>>
 }
 
 class HomeViewModel : ViewModel() {
@@ -106,7 +107,7 @@ class HomeViewModel : ViewModel() {
                 val eventsJob = launch { loadEvents() }
                 val channelsJob = launch { loadChannels() }
                 eventsJob.join(); channelsJob.join()
-            } catch (e: Exception) { Log.e("HomeViewModel", "Failed to load data", e) } 
+            } catch (e: Exception) { Log.e("HomeViewModel", "Failed to load data", e) }
             finally { _isLoading.value = false }
         }
     }
@@ -116,7 +117,7 @@ class HomeViewModel : ViewModel() {
             val allEvents = api.getEvents()["events"] ?: emptyList()
             val now = LocalDateTime.now(ZoneId.systemDefault())
             _liveEvents.value = allEvents.filter { event -> 
-                try { Instant.parse(event.startTime).atZone(ZoneId.systemDefault()).toLocalDateTime().isBefore(now) } catch(e:Exception){false}
+                try { Instant.parse(event.startTime).atZone(ZoneId.systemDefault()).toLocalDateTime().isBefore(now) } catch(e:Exception){false} 
             }
             _upcomingEvents.value = allEvents.filter { event -> 
                  try {
@@ -170,25 +171,25 @@ fun HomeScreen(
     
     var currentTab by remember { mutableStateOf(HomeTab.EVENTS) }
     var isSearchActive by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
-    
-    val isLoading by homeViewModel.isLoading.collectAsState()
-    val allChannels by homeViewModel.allChannels.collectAsState()
-    
     var showLinkSelectorDialog by remember { mutableStateOf(false) }
     var selectedChannelForLinks by remember { mutableStateOf<Channel?>(null) }
     var showUpdateDialog by remember { mutableStateOf(false) }
     var latestReleaseInfo by remember { mutableStateOf<GitHubRelease?>(null) }
-    val favoriteIds by context.dataStore.data.map { it[FAVORITES_KEY] ?: emptySet() }.collectAsState(initial = emptySet())
-
+    
+    val isLoading by homeViewModel.isLoading.collectAsState()
+    val allChannels by homeViewModel.allChannels.collectAsState()
+    
     LaunchedEffect(Unit) {
         val release = UpdateChecker.checkForUpdate(context)
-        if (release != null) { latestReleaseInfo = release; showUpdateDialog = true }
+        if (release != null) {
+            latestReleaseInfo = release
+            showUpdateDialog = true
+        }
     }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        drawerContent = { AppDrawer(navController, onCloseDrawer = { scope.launch { drawerState.close() } }) }
+        drawerContent = { AppDrawer(navController = navController, onCloseDrawer = { scope.launch { drawerState.close() } }) }
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             FuturisticBackground()
@@ -196,9 +197,13 @@ fun HomeScreen(
                 topBar = {
                     if (!isSearchActive) {
                         CenterAlignedTopAppBar(
-                            title = { Text("STREAMX ULTRA", fontWeight = FontWeight.ExtraBold, color = Color.White) },
-                            navigationIcon = { IconButton(onClick = { scope.launch { drawerState.open() } }) { Icon(Icons.Default.Menu, "Menu", tint = Color.Cyan) } },
-                            actions = { IconButton(onClick = { isSearchActive = true }) { Icon(Icons.Default.Search, "Search", tint = Color.Cyan) } },
+                            title = { Text("STREAMX ULTRA", fontWeight = FontWeight.Black, color = Color.White) },
+                            navigationIcon = {
+                                IconButton(onClick = { scope.launch { drawerState.open() } }) { Icon(Icons.Default.Menu, "Menu", tint = Color.Cyan) }
+                            },
+                            actions = {
+                                IconButton(onClick = { isSearchActive = true }) { Icon(Icons.Default.Search, "Search", tint = Color.Cyan) }
+                            },
                             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
                         )
                     }
@@ -221,8 +226,8 @@ fun HomeScreen(
                         ) { tab ->
                             when (tab) {
                                 HomeTab.EVENTS -> EventsContent(navController, homeViewModel, isLoading) { ch -> selectedChannelForLinks = ch; showLinkSelectorDialog = true }
-                                HomeTab.LIVE_TV -> LiveTVTabContent(homeViewModel, isLoading) { ch -> selectedChannelForLinks = ch; showLinkSelectorDialog = true }
-                                HomeTab.FAVORITES -> FavoritesTabContent(homeViewModel, favoriteIds) { ch -> selectedChannelForLinks = ch; showLinkSelectorDialog = true }
+                                HomeTab.LIVE_TV -> LiveTVContent(homeViewModel, isLoading) { ch -> selectedChannelForLinks = ch; showLinkSelectorDialog = true }
+                                HomeTab.FAVORITES -> FavoritesContent(homeViewModel) { ch -> selectedChannelForLinks = ch; showLinkSelectorDialog = true }
                             }
                         }
                     }
@@ -246,10 +251,15 @@ fun HomeScreen(
     }
 }
 
-// --- TAB CONTENTS ---
+// --- Content Components ---
 
 @Composable
-fun EventsContent(navController: NavController, homeViewModel: HomeViewModel, isLoading: Boolean, onChannelClick: (Channel) -> Unit) {
+fun EventsContent(
+    navController: NavController, 
+    homeViewModel: HomeViewModel, 
+    isLoading: Boolean,
+    onChannelClick: (Channel) -> Unit
+) {
     val liveEvents by homeViewModel.liveEvents.collectAsState()
     val upcomingEvents by homeViewModel.upcomingEvents.collectAsState()
     val allChannels by homeViewModel.allChannels.collectAsState()
@@ -280,10 +290,14 @@ fun EventsContent(navController: NavController, homeViewModel: HomeViewModel, is
 }
 
 @Composable
-fun LiveTVTabContent(viewModel: HomeViewModel, isLoading: Boolean, onChannelClick: (Channel) -> Unit) {
-    val allChannels by viewModel.allChannels.collectAsState()
-    val genres = remember { ChannelGenre.values().filterNot { it == ChannelGenre.UNKNOWN } }
-    var selectedGenre by remember { mutableStateOf<ChannelGenre?>(null) }
+fun LiveTVContent(
+    homeViewModel: HomeViewModel, 
+    isLoading: Boolean, 
+    onChannelClick: (Channel) -> Unit
+) {
+    val allChannels by homeViewModel.allChannels.collectAsState()
+    val genres = remember { com.aeoncorex.streamx.util.ChannelGenre.values().filterNot { it == com.aeoncorex.streamx.util.ChannelGenre.UNKNOWN } }
+    var selectedGenre by remember { mutableStateOf<com.aeoncorex.streamx.util.ChannelGenre?>(null) }
 
     if (isLoading && allChannels.isEmpty()) {
         LoadingShimmer()
@@ -331,8 +345,10 @@ fun LiveTVTabContent(viewModel: HomeViewModel, isLoading: Boolean, onChannelClic
 }
 
 @Composable
-fun FavoritesTabContent(viewModel: HomeViewModel, favoriteIds: Set<String>, onChannelClick: (Channel) -> Unit) {
-    val allChannels by viewModel.allChannels.collectAsState()
+fun FavoritesContent(homeViewModel: HomeViewModel, onChannelClick: (Channel) -> Unit) {
+    val context = LocalContext.current
+    val allChannels by homeViewModel.allChannels.collectAsState()
+    val favoriteIds by context.dataStore.data.map { it[FAVORITES_KEY] ?: emptySet() }.collectAsState(initial = emptySet())
     val favorites = remember(allChannels, favoriteIds) { allChannels.filter { it.id in favoriteIds } }
 
     if (favorites.isEmpty()) {
@@ -349,7 +365,7 @@ fun FavoritesTabContent(viewModel: HomeViewModel, favoriteIds: Set<String>, onCh
     }
 }
 
-// --- COMPONENTS & HELPERS ---
+// --- COMPONENTS ---
 
 @Composable
 fun HomeTabRow(selectedTab: HomeTab, onTabSelected: (HomeTab) -> Unit) {
@@ -373,6 +389,37 @@ fun HomeTabRow(selectedTab: HomeTab, onTabSelected: (HomeTab) -> Unit) {
                 text = { Text(tab.name.replace("_", " "), fontWeight = FontWeight.Bold) },
                 unselectedContentColor = Color.White.copy(0.6f)
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun FeaturedCarousel(channels: List<Channel>, navController: NavController, onChannelClick: (Channel) -> Unit) {
+    if (channels.isEmpty()) return
+    val pagerState = rememberPagerState(pageCount = { channels.size })
+    LaunchedEffect(pagerState.pageCount) { if (pagerState.pageCount > 1) { while (true) { delay(5000L); pagerState.animateScrollToPage((pagerState.currentPage + 1) % pagerState.pageCount) } } }
+    
+    HorizontalPager(state = pagerState, contentPadding = PaddingValues(horizontal = 32.dp), pageSpacing = 16.dp, modifier = Modifier.padding(vertical = 16.dp)) { page ->
+        // --- ফিক্স: pageOffset ক্যালকুলেশন ---
+        val pageOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+        val channel = channels[page]
+        Card(
+            modifier = Modifier
+                .graphicsLayer { 
+                    val scale = lerp(0.85f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f))
+                    scaleX = scale; scaleY = scale
+                    alpha = lerp(0.5f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f)) 
+                }
+                .fillMaxWidth().height(180.dp)
+                .clickable { onChannelClick(channel) },
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Box {
+                AsyncImage(model = channel.logoUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.9f)))))
+                Text(channel.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.align(Alignment.BottomStart).padding(16.dp))
+            }
         }
     }
 }
@@ -411,27 +458,6 @@ fun EventCard(event: Event, allChannels: List<Channel>, onChannelClick: (Channel
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun FeaturedCarousel(channels: List<Channel>, navController: NavController, onChannelClick: (Channel) -> Unit) {
-    if (channels.isEmpty()) return
-    val pagerState = rememberPagerState(pageCount = { channels.size })
-    LaunchedEffect(pagerState.pageCount) { if (pagerState.pageCount > 1) { while (true) { delay(5000L); pagerState.animateScrollToPage((pagerState.currentPage + 1) % pagerState.pageCount) } } }
-    HorizontalPager(state = pagerState, contentPadding = PaddingValues(horizontal = 32.dp), pageSpacing = 16.dp, modifier = Modifier.padding(vertical = 16.dp)) { page ->
-        val channel = channels[page]
-        Card(
-            modifier = Modifier.graphicsLayer { val scale = lerp(0.85f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f)); scaleX = scale; scaleY = scale; alpha = lerp(0.5f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f)) }.fillMaxWidth().height(180.dp).clickable { onChannelClick(channel) },
-            shape = RoundedCornerShape(24.dp)
-        ) {
-            Box {
-                AsyncImage(model = channel.logoUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.9f)))))
-                Text(channel.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.align(Alignment.BottomStart).padding(16.dp))
-            }
-        }
-    }
-}
-
 @Composable
 fun SmallChannelCard(channel: Channel, onClick: () -> Unit) {
     Column(modifier = Modifier.width(100.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -465,6 +491,7 @@ fun SearchUI(allChannels: List<Channel>, onClose: () -> Unit, onChannelClick: (C
     }
 }
 
+// --- HELPERS ---
 @Composable
 fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
     ModalDrawerSheet(drawerContainerColor = Color(0xFF121212)) {
