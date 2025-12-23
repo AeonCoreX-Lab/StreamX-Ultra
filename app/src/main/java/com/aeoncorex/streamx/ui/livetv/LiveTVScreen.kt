@@ -10,7 +10,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
-import com.aeoncorex.streamx.model.Channel
 import com.aeoncorex.streamx.ui.home.HomeViewModel
 import com.aeoncorex.streamx.ui.home.SectionTitle
 import com.aeoncorex.streamx.ui.home.SmallChannelCard
@@ -28,23 +27,16 @@ fun LiveTVScreen(
     var selectedGenre by remember { mutableStateOf<ChannelGenre?>(null) }
 
     Scaffold(
-        topBar = {
-            TopAppBar(title = { Text("Live TV") })
-        }
+        topBar = { TopAppBar(title = { Text("Live TV") }) }
     ) { padding ->
         LazyColumn(contentPadding = padding) {
             item {
                 SectionTitle("Explore by Genre", onSeeAllClick = {})
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(genres) { genre ->
+                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(items = genres, key = { it.name }) { genre ->
                         FilterChip(
                             selected = selectedGenre == genre,
-                            onClick = {
-                                selectedGenre = if (selectedGenre == genre) null else genre
-                            },
+                            onClick = { selectedGenre = if (selectedGenre == genre) null else genre },
                             label = { Text(genre.name.lowercase().replaceFirstChar { it.uppercase() }) }
                         )
                     }
@@ -63,17 +55,10 @@ fun LiveTVScreen(
             channelsByCountry.forEach { (country, channels) ->
                 if (channels.isNotEmpty()) {
                     item {
-                        SectionTitle(country, onSeeAllClick = {
-                            // navController.navigate("country_channels/$country")
-                        })
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            items(channels.take(8)) { channel ->
-                                SmallChannelCard(channel = channel, onClick = {
-                                    // Handle channel click, e.g., show link selector
-                                })
+                        SectionTitle(country, onSeeAllClick = { /* ... */ })
+                        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            items(items = channels.take(8), key = { it.id }) { channel ->
+                                SmallChannelCard(channel = channel, onClick = { /* ... */ })
                             }
                         }
                     }

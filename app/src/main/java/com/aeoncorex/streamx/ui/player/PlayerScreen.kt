@@ -41,6 +41,9 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.*
+import androidx.media3.common.C.TRACK_TYPE_AUDIO
+import androidx.media3.common.C.TRACK_TYPE_TEXT
+import androidx.media3.common.C.TRACK_TYPE_VIDEO
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
@@ -59,7 +62,7 @@ import kotlin.math.abs
 enum class SeekDirection { NONE, FORWARD, BACKWARD }
 enum class IndicatorType { NONE, BRIGHTNESS, VOLUME }
 
-@OptIn(UnstableApi::class, ExperimentalMaterial3Api::class)
+@OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -121,13 +124,29 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
     LaunchedEffect(errorMessage) { if (errorMessage != null) { delay(3000); onBack() } }
 
     Box(
-        modifier = Modifier.fillMaxSize().background(Color.Black).pointerInput(Unit) { if (isLocked) return@pointerInput; detectTapGestures(onTap = { showControls = !showControls }, onDoubleTap = { offset -> showControls = true; if (offset.x > size.width / 2) { exoPlayer.seekForward(); showSeekUI = SeekDirection.FORWARD } else { exoPlayer.seekBack(); showSeekUI = SeekDirection.BACKWARD } }) }
+        modifier = Modifier.fillMaxSize().background(Color.Black)
+            .pointerInput(Unit) {
+                if (isLocked) return@pointerInput
+                detectTapGestures(
+                    onTap = { showControls = !showControls },
+                    onDoubleTap = { offset ->
+                        showControls = true
+                        if (offset.x > size.width / 2) {
+                            exoPlayer.seekForward()
+                            showSeekUI = SeekDirection.FORWARD
+                        } else {
+                            exoPlayer.seekBack()
+                            showSeekUI = SeekDirection.BACKWARD
+                        }
+                    }
+                )
+            }
             .pointerInput(Unit) {
                 if (isLocked) return@pointerInput
                 detectVerticalDragGestures(
                     onDragStart = { showControls = true },
-                    onVerticalDrag = { _, dragAmount ->
-                        val isLeft = currentPosition.x < size.width / 2
+                    onVerticalDrag = { change, dragAmount ->
+                        val isLeft = change.position.x < size.width / 2
                         if (isLeft) {
                             showIndicator = IndicatorType.BRIGHTNESS
                             activity?.window?.let { window ->
@@ -228,13 +247,13 @@ fun SettingsBottomSheet(exoPlayer: ExoPlayer, onDismiss: () -> Unit) {
 
             item { SettingsGroup(title = "Speed") { val speeds = listOf(0.5f, 1.0f, 1.5f, 2.0f); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { speeds.forEach { speed -> FilterChip(selected = playbackSpeed == speed, onClick = { exoPlayer.setPlaybackSpeed(speed); playbackSpeed = speed }, label = { Text("${speed}x") }) } } } }
             
-            val videoTracks = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO && it.isSupported }
+            val videoTracks = tracks.groups.firstOrNull { it.type == TRACK_TYPE_VIDEO && it.isSupported }
             videoTracks?.let { item { SettingsGroup(title = "Quality") { TrackSelectionMenu(it, exoPlayer) { fmt -> "${fmt.height}p" } } } }
             
-            val audioTracks = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.isSupported }
+            val audioTracks = tracks.groups.firstOrNull { it.type == TRACK_TYPE_AUDIO && it.isSupported }
             audioTracks?.let { item { SettingsGroup(title = "Audio") { TrackSelectionMenu(it, exoPlayer) { fmt -> fmt.label ?: fmt.language ?: "Track" } } } }
             
-            val textTracks = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_TEXT && it.isSupported }
+            val textTracks = tracks.groups.firstOrNull { it.type == TRACK_TYPE_TEXT && it.isSupported }
             textTracks?.let { item { SettingsGroup(title = "Subtitles") { TrackSelectionMenu(it, exoPlayer, showOffOption = true) { fmt -> fmt.label ?: fmt.language ?: "Track" } } } }
         }
     }
@@ -251,20 +270,38 @@ fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
 @Composable
 fun TrackSelectionMenu(trackGroup: Tracks.Group, player: Player, showOffOption: Boolean = false, labelBuilder: (Format) -> String) {
     var expanded by remember { mutableStateOf(false) }
-    val selectedIndex = trackGroup.selectedTrackIndex
-    val selectedFormat = if (selectedIndex != -1) trackGroup.getTrackFormat(selectedIndex) else null
-    val currentLabel = if (selectedFormat != null && trackGroup.isSelected) labelBuilder(selectedFormat) else "Off"
+    val selectedTrack = trackGroup.tracks.find { it.isSelected }
+    val currentLabel = if (selectedTrack != null) labelBuilder(selectedTrack.format) else "Off"
 
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
-        OutlinedTextField(value = currentLabel, onValue-change = {}, readOnly = true, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }, modifier = Modifier.menuAnchor().fillMaxWidth())
+        OutlinedTextField(
+            value = currentLabel,
+            onValueChange = {},
+            readOnly = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.menuAnchor().fillMaxWidth()
+        )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (showOffOption) {
-                DropdownMenuItem(text = { Text("Off") }, onClick = { player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearTrackOverrides(trackGroup.mediaTrackGroup).build(); expanded = false })
+            if (showOffOption && selectedTrack != null) {
+                DropdownMenuItem(text = { Text("Off") }, onClick = {
+                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                        .setTrackSelectionOverrides(player.trackSelectionParameters.overrides.buildUpon().remove(trackGroup.mediaTrackGroup).build())
+                        .build()
+                    expanded = false
+                })
             }
-            for (i in 0 until trackGroup.length) {
-                if (trackGroup.isTrackSupported(i)) {
-                    val format = trackGroup.getTrackFormat(i)
-                    DropdownMenuItem(text = { Text(labelBuilder(format)) }, onClick = { player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackOverride(TrackSelectionOverride(trackGroup.mediaTrackGroup, i)).build(); expanded = false })
+            trackGroup.tracks.forEachIndexed { index, track ->
+                if (track.isSupported) {
+                    val format = track.format
+                    DropdownMenuItem(
+                        text = { Text(labelBuilder(format)) },
+                        onClick = {
+                            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                                .setTrackSelectionOverrides(player.trackSelectionParameters.overrides.buildUpon().add(TrackSelectionOverride(trackGroup.mediaTrackGroup, index)).build())
+                                .build()
+                            expanded = false
+                        }
+                    )
                 }
             }
         }
