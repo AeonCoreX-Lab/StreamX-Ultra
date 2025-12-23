@@ -2,6 +2,12 @@ package com.aeoncorex.streamx.ui.home
 
 import android.content.Context
 import android.util.Log
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColor
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,6 +43,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
@@ -45,16 +54,125 @@ import com.aeoncorex.streamx.model.Channel
 import com.aeoncorex.streamx.model.Event
 import com.aeoncorex.streamx.model.GitHubRelease
 import com.aeoncorex.streamx.services.UpdateChecker
+import com.aeoncorex.streamx.util.ChannelCategorizer
 import com.valentinilk.shimmer.shimmer
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Url
 import java.net.URLEncoder
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import kotlin.math.absoluteValue
 
-// DataStore and API Interfaces remain the same
+// DataStore, API Interface, and ViewModel
+private val Context.dataStore by preferencesDataStore(name = "favorites_prefs")
+private val FAVORITES_KEY = stringSetPreferencesKey("favorite_ids")
+
+interface IPTVApi {
+    @GET("index.json")
+    suspend fun getIndex(): Map<String, Any>
+    @GET
+    suspend fun getChannelsByUrl(@Url url: String): Map<String, Any>
+    @GET("categories/events.json")
+    suspend fun getEvents(): Map<String, List<Event>>
+}
+
+class HomeViewModel : ViewModel() {
+    private val api: IPTVApi = Retrofit.Builder()
+        .baseUrl("https://raw.githubusercontent.com/cybernahid-dev/streamx-iptv-data/main/")
+        .addConverterFactory(GsonConverterFactory.create())
+        .build().create(IPTVApi::class.java)
+
+    private val _isLoading = MutableStateFlow(true)
+    val isLoading = _isLoading.asStateFlow()
+
+    private val _allChannels = MutableStateFlow<List<Channel>>(emptyList())
+    val allChannels = _allChannels.asStateFlow()
+
+    private val _liveEvents = MutableStateFlow<List<Event>>(emptyList())
+    val liveEvents = _liveEvents.asStateFlow()
+
+    private val _upcomingEvents = MutableStateFlow<List<Event>>(emptyList())
+    val upcomingEvents = _upcomingEvents.asStateFlow()
+
+    init {
+        loadAllData()
+    }
+
+    private fun loadAllData() {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                launch { loadEvents() }
+                launch { loadChannels() }
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Failed to load data", e)
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    private suspend fun loadEvents() {
+        try {
+            val allEvents = api.getEvents()["events"] ?: emptyList()
+            val now = LocalDateTime.now(ZoneId.systemDefault())
+            
+            _liveEvents.value = allEvents.filter { event ->
+                val startTime = Instant.parse(event.startTime).atZone(ZoneId.systemDefault()).toLocalDateTime()
+                startTime.isBefore(now)
+            }
+            
+            _upcomingEvents.value = allEvents.filter { event ->
+                val startTime = Instant.parse(event.startTime).atZone(ZoneId.systemDefault()).toLocalDateTime()
+                startTime.isAfter(now) && ChronoUnit.HOURS.between(now, startTime) < 4
+            }
+        } catch (e: Exception) {
+            Log.e("HomeViewModel", "Failed to load events", e)
+        }
+    }
+
+    private suspend fun loadChannels() {
+        try {
+            val index = api.getIndex()
+            val cats = index["categories"] as? List<Map<String, Any>>
+            val masterList = mutableListOf<Channel>()
+            cats?.forEach { cat ->
+                val fileName = cat["file"] as String
+                val catName = cat["name"] as String
+                if (fileName.contains("events.json")) return@forEach
+                try {
+                    val res = api.getChannelsByUrl(fileName)
+                    val rawChannels = (res["channels"] as? List<Map<String, Any>>) ?: emptyList()
+                    rawChannels.forEach { ch ->
+                         masterList.add(Channel(
+                            id = (ch["id"] as? String) ?: "",
+                            name = (ch["name"] as? String) ?: "No Name",
+                            logoUrl = (ch["logoUrl"] as? String) ?: "",
+                            streamUrls = (ch["streamUrls"] as? List<String>) ?: emptyList(),
+                            country = catName,
+                            genre = ChannelCategorizer.getGenreFromString(ch["genre"] as? String),
+                            isFeatured = (ch["isFeatured"] as? Boolean) ?: false
+                        ))
+                    }
+                } catch (e: Exception) { Log.e("HomeViewModel", "Error loading category file: $fileName", e) }
+            }
+            _allChannels.value = masterList
+        } catch (e: Exception) {
+            Log.e("HomeViewModel", "Failed to load channels", e)
+        }
+    }
+}
+
+// --- Main HomeScreen Composable ---
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,20 +183,20 @@ fun HomeScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
-    // ViewModel থেকে ডেটা গ্রহণ করা হচ্ছে
     val isLoading by homeViewModel.isLoading.collectAsState()
     val allChannels by homeViewModel.allChannels.collectAsState()
     val liveEvents by homeViewModel.liveEvents.collectAsState()
     val upcomingEvents by homeViewModel.upcomingEvents.collectAsState()
     
-    // UI States
     var showLinkSelectorDialog by remember { mutableStateOf(false) }
     var selectedChannelForLinks by remember { mutableStateOf<Channel?>(null) }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var showUpdateDialog by remember { mutableStateOf(false) }
     var latestReleaseInfo by remember { mutableStateOf<GitHubRelease?>(null) }
+    val favoriteIds by context.dataStore.data
+        .map { preferences -> preferences[FAVORITES_KEY] ?: emptySet() }
+        .collectAsState(initial = emptySet())
 
-    // Update Check
     LaunchedEffect(Unit) {
         val release = UpdateChecker.checkForUpdate(context)
         if (release != null) {
@@ -89,26 +207,20 @@ fun HomeScreen(
     
     ModalNavigationDrawer(
         drawerState = drawerState,
-        drawerContent = {
-            AppDrawer(
-                navController = navController,
-                onCloseDrawer = { scope.launch { drawerState.close() } }
-            )
-        }
+        drawerContent = { AppDrawer(navController = navController, onCloseDrawer = { scope.launch { drawerState.close() } }) }
     ) {
-        FuturisticBackground()
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
                     title = { Text("STREAMX ULTRA", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Black, color = Color.White)) },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                            Icon(Icons.Default.Menu, "Menu", tint = Color.White)
                         }
                     },
                     actions = {
                         IconButton(onClick = { /* TODO: Navigate to Explore screen */ }) {
-                            Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.secondary)
+                            Icon(Icons.Default.Search, "Search", tint = MaterialTheme.colorScheme.secondary)
                         }
                     },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
@@ -172,29 +284,11 @@ fun HomeScreen(
         }
     }
     
-    if (showLinkSelectorDialog && selectedChannelForLinks != null) {
-        LinkSelectorDialog(
-            channel = selectedChannelForLinks!!,
-            onDismiss = { showLinkSelectorDialog = false },
-            onLinkSelected = { selectedUrl ->
-                showLinkSelectorDialog = false
-                val encodedUrl = URLEncoder.encode(selectedUrl, "UTF-8")
-                navController.navigate("player/$encodedUrl")
-            }
-        )
-    }
-
-    if (showUpdateDialog && latestReleaseInfo != null) {
-        UpdateDialog(
-            release = latestReleaseInfo!!,
-            onDismiss = { showUpdateDialog = false },
-            onUpdateClick = {
-                showUpdateDialog = false
-                UpdateChecker.downloadAndInstall(context, latestReleaseInfo!!)
-            }
-        )
-    }
+    if (showLinkSelectorDialog && selectedChannelForLinks != null) { LinkSelectorDialog(channel = selectedChannelForLinks!!, onDismiss = { showLinkSelectorDialog = false }, onLinkSelected = { selectedUrl -> showLinkSelectorDialog = false; val encodedUrl = URLEncoder.encode(selectedUrl, "UTF-8"); navController.navigate("player/$encodedUrl") }) }
+    if (showUpdateDialog && latestReleaseInfo != null) { UpdateDialog(release = latestReleaseInfo!!, onDismiss = { showUpdateDialog = false }, onUpdateClick = { showUpdateDialog = false; UpdateChecker.downloadAndInstall(context, latestReleaseInfo!!) }) }
 }
+
+// --- All other Composables ---
 
 @Composable
 fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
@@ -206,56 +300,19 @@ fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
         Text("STREAMX ULTRA", modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(0.2f), modifier = Modifier.padding(horizontal = 28.dp))
         
-        // --- "Home" আইটেমটির onClick পরিবর্তন করা হয়েছে ---
-        NavigationDrawerItem(
-            label = { Text("Home Hub") },
-            selected = false, // এটি আর ডিফল্ট স্ক্রিন নয়
-            onClick = {
-                onCloseDrawer()
-                // Home Hub স্ক্রিনে নেভিগেট করা
-                navController.navigate("home_hub") {
-                    launchSingleTop = true // যদি 이미 খোলা থাকে, নতুন করে খুলবে না
-                }
-            },
-            icon = { Icon(Icons.Default.Home, null) },
-            colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent),
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-        )
-
-        NavigationDrawerItem(
-            label = { Text("My Account") },
-            selected = false,
-            onClick = { onCloseDrawer(); navController.navigate("account") },
-            icon = { Icon(Icons.Default.Person, null) },
-            colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent),
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-        )
-        NavigationDrawerItem(
-            label = { Text("Settings") },
-            selected = false,
-            onClick = { onCloseDrawer(); navController.navigate("settings") },
-            icon = { Icon(Icons.Default.Settings, null) },
-            colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent),
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-        )
-
-        NavigationDrawerItem(
-            label = { Text("Theme") },
-            selected = false,
-            onClick = { onCloseDrawer(); navController.navigate("theme") },
-            icon = { Icon(Icons.Default.InvertColors, null) },
-            colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent),
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-        )
+        NavigationDrawerItem(label = { Text("Home Hub") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("home_hub") { launchSingleTop = true } }, icon = { Icon(Icons.Default.Home, null) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
+        NavigationDrawerItem(label = { Text("My Account") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("account") }, icon = { Icon(Icons.Default.Person, null) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
+        NavigationDrawerItem(label = { Text("Settings") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("settings") }, icon = { Icon(Icons.Default.Settings, null) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
+        NavigationDrawerItem(label = { Text("Theme") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("theme") }, icon = { Icon(Icons.Default.InvertColors, null) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
     }
 }
 
 @Composable
 fun FuturisticBackground() {
-    val infiniteTransition = rememberInfiniteTransition(label = "")
+    val infiniteTransition = rememberInfiniteTransition(label = "bg_transition")
     val color1 by infiniteTransition.animateColor(
         initialValue = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), targetValue = MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f),
-        animationSpec = infiniteRepeatable(tween(12000), RepeatMode.Reverse), label = ""
+        animationSpec = infiniteRepeatable(tween(12000), RepeatMode.Reverse), label = "bg_color"
     )
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(color1, MaterialTheme.colorScheme.background))).blur(100.dp))
@@ -298,27 +355,13 @@ fun SectionTitle(title: String, onSeeAllClick: () -> Unit) {
 
 @Composable
 fun SmallChannelCard(channel: Channel, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier.width(100.dp).clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier.size(100.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-        ) {
-            AsyncImage(
-                model = channel.logoUrl,
-                contentDescription = channel.name,
-                modifier = Modifier.fillMaxSize().padding(16.dp),
-                contentScale = ContentScale.Fit,
-                placeholder = painterResource(id = R.drawable.ic_launcher_foreground)
-            )
+    Column(modifier = Modifier.width(100.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+        Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.size(100.dp), elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
+            AsyncImage(model = channel.logoUrl, contentDescription = channel.name, modifier = Modifier.fillMaxSize().padding(16.dp), contentScale = ContentScale.Fit, placeholder = painterResource(id = R.mipmap.ic_launcher_foreground))
         }
         Text(text = channel.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, modifier = Modifier.padding(top = 8.dp))
     }
 }
-
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable

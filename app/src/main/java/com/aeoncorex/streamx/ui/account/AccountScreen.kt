@@ -3,7 +3,6 @@ package com.aeoncorex.streamx.ui.account
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -12,10 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
-import androidx.compose.material.icons.filled.AlternateEmail
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,7 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import com.aeoncorex.streamx.R // R ফাইলটি সঠিকভাবে ইম্পোর্ট করা
+import com.aeoncorex.streamx.R
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
@@ -43,7 +39,6 @@ fun AccountScreen(navController: NavController) {
     val context = LocalContext.current
     val auth = Firebase.auth
     val currentUser = auth.currentUser
-
     var isEditingName by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf(currentUser?.displayName ?: "") }
 
@@ -51,38 +46,24 @@ fun AccountScreen(navController: NavController) {
         topBar = {
             TopAppBar(
                 title = { Text("My Account") },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                }
+                navigationIcon = { IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }
             )
         }
     ) { padding ->
         if (currentUser == null) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("No user is logged in.")
-            }
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text("No user is logged in.") }
             return@Scaffold
         }
 
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             AsyncImage(
                 model = currentUser.photoUrl,
                 contentDescription = "Profile Picture",
-                // ফিক্স ১: R.drawable -> R.mipmap
-                placeholder = painterResource(id = R.mipmap.ic_launcher),
-                modifier = Modifier
-                    .size(120.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                placeholder = painterResource(id = R.mipmap.ic_launcher_foreground),
+                modifier = Modifier.size(120.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant),
                 contentScale = ContentScale.Crop
             )
             Spacer(modifier = Modifier.height(24.dp))
@@ -104,12 +85,7 @@ fun AccountScreen(navController: NavController) {
                     TextButton(onClick = { isEditingName = false }) { Text("Cancel") }
                 }
             } else {
-                InfoCard(
-                    icon = Icons.Default.Person,
-                    title = "Display Name",
-                    subtitle = currentUser.displayName ?: "No name set",
-                    onClick = { isEditingName = true }
-                )
+                InfoCard(icon = Icons.Default.Person, title = "Display Name", subtitle = currentUser.displayName ?: "No name set", onClick = { isEditingName = true })
             }
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -139,16 +115,8 @@ fun AccountScreen(navController: NavController) {
             
             Spacer(modifier = Modifier.height(32.dp))
 
-            OutlinedButton(
-                onClick = {
-                    auth.signOut()
-                    navController.navigate("auth") { popUpTo("home") { inclusive = true } }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Logout")
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Logout")
+            OutlinedButton(onClick = { auth.signOut(); navController.navigate("auth") { popUpTo("main_screen") { inclusive = true } } }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.AutoMirrored.Filled.ExitToApp, "Logout"); Spacer(modifier = Modifier.width(8.dp)); Text("Logout")
             }
         }
     }
@@ -157,15 +125,11 @@ fun AccountScreen(navController: NavController) {
 @Composable
 private fun InfoCard(icon: ImageVector, title: String, subtitle: String, onClick: (() -> Unit)? = null) {
     Card(
-        // ফিক্স ২: clickable modifier সঠিকভাবে ব্যবহার করা হয়েছে
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        modifier = Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = title, tint = MaterialTheme.colorScheme.primary)
-            Spacer(modifier = Modifier.width(16.dp))
+            Icon(icon, title, tint = MaterialTheme.colorScheme.primary); Spacer(modifier = Modifier.width(16.dp))
             Column {
                 Text(title, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                 Text(subtitle, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
@@ -176,16 +140,10 @@ private fun InfoCard(icon: ImageVector, title: String, subtitle: String, onClick
 
 @Composable
 private fun ProviderInfoCard(icon: Any, title: String, subtitle: String) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (icon is ImageVector) {
-                Icon(icon, contentDescription = title, tint = MaterialTheme.colorScheme.primary)
-            } else if (icon is Painter) {
-                Image(painter = icon, contentDescription = title, modifier = Modifier.size(24.dp))
-            }
+            if (icon is ImageVector) Icon(icon, title, tint = MaterialTheme.colorScheme.primary)
+            else if (icon is Painter) Image(painter = icon, title, modifier = Modifier.size(24.dp))
             Spacer(modifier = Modifier.width(16.dp))
             Column {
                 Text(title, style = MaterialTheme.typography.bodySmall, color = Color.Gray)

@@ -26,9 +26,10 @@ import com.aeoncorex.streamx.ui.settings.SettingsScreen
 import com.aeoncorex.streamx.ui.splash.SplashScreen
 import com.aeoncorex.streamx.ui.theme.ThemeScreen
 import com.aeoncorex.streamx.ui.theme.ThemeViewModel
+import com.aeoncorex.streamx.ui.about.AboutScreen
+import com.aeoncorex.streamx.ui.privacy.PrivacyPolicyScreen
 import kotlinx.coroutines.launch
 
-// --- Bottom Navigation-এর জন্য স্ক্রিনের সংজ্ঞা ---
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
     object Events : Screen("events", "Events", Icons.Default.Event)
     object LiveTV : Screen("livetv", "Live TV", Icons.Default.LiveTv)
@@ -44,16 +45,9 @@ val bottomNavItems = listOf(
 @Composable
 fun AppNavigation(themeViewModel: ThemeViewModel) {
     val navController = rememberNavController()
-    
     NavHost(navController = navController, startDestination = "splash") {
-        
-        // --- Bottom Bar ছাড়া স্ক্রিনগুলো ---
-        composable("splash") {
-            SplashScreen(navController)
-        }
-        composable("auth") {
-            AuthScreen(navController)
-        }
+        composable("splash") { SplashScreen(navController) }
+        composable("auth") { AuthScreen(navController) }
         composable(
             route = "player/{encodedUrl}",
             arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
@@ -61,69 +55,34 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             val encodedUrl = backStackEntry.arguments?.getString("encodedUrl") ?: ""
             PlayerScreen(encodedUrl = encodedUrl, onBack = { navController.popBackStack() })
         }
-        composable("settings") {
-            SettingsScreen(navController)
-        }
-        composable("account") {
-            AccountScreen(navController)
-        }
-        composable("theme") {
-            ThemeScreen(navController, themeViewModel = themeViewModel)
-        }
-        composable("copyright") {
-            CopyrightScreen(navController)
-        }
-        
-        // --- এই দুটি রুট আলাদাভাবে লেখা হয়েছে ---
-        composable("about") {
-            AboutScreen(navController)
-        }
-        composable("privacy_policy") {
-            PrivacyPolicyScreen(navController)
-        }
-        
-        // --- HomeScreen (Hub) এর জন্য নতুন রুট ---
-        composable("home_hub") {
-            HomeScreen(navController)
-        }
-        
-        // --- Bottom Bar সহ প্রধান স্ক্রিনগুলোর কন্টেইনার ---
-        // লগইন করার পর ব্যবহারকারী এই রুটে আসবে
-        composable("main_screen") {
-            MainScreen(mainNavController = navController)
-        }
+        composable("settings") { SettingsScreen(navController) }
+        composable("account") { AccountScreen(navController) }
+        composable("theme") { ThemeScreen(navController, themeViewModel = themeViewModel) }
+        composable("copyright") { CopyrightScreen(navController) }
+        composable("about") { AboutScreen(navController) }
+        composable("privacy_policy") { PrivacyPolicyScreen(navController) }
+        composable("home_hub") { HomeScreen(navController) }
+        composable("main_screen") { MainScreen(mainNavController = navController) }
     }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(mainNavController: NavController) {
-    val bottomNavController = rememberNavController() // Bottom Bar-এর জন্য
+    val bottomNavController = rememberNavController()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        drawerContent = {
-            AppDrawer(
-                navController = mainNavController, // প্রধান NavController পাস করা হচ্ছে
-                onCloseDrawer = { scope.launch { drawerState.close() } }
-            )
-        }
+        drawerContent = { AppDrawer(navController = mainNavController, onCloseDrawer = { scope.launch { drawerState.close() } }) }
     ) {
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text("STREAMX ULTRA") }, // এখানে বর্তমান ট্যাবের নামও দেখানো যেতে পারে
-                    navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = "Menu")
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { /* TODO: Search */ }) {
-                            Icon(Icons.Default.Search, contentDescription = "Search")
-                        }
-                    }
+                    title = { Text("STREAMX ULTRA") },
+                    navigationIcon = { IconButton(onClick = { scope.launch { drawerState.open() } }) { Icon(Icons.Default.Menu, "Menu") } },
+                    actions = { IconButton(onClick = { /*TODO: Navigate to a dedicated search screen*/ }) { Icon(Icons.Default.Search, "Search") } }
                 )
             },
             bottomBar = { AppBottomNavBar(navController = bottomNavController) }
@@ -142,7 +101,6 @@ fun AppBottomNavBar(navController: NavController) {
     NavigationBar {
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentDestination = navBackStackEntry?.destination
-
         bottomNavItems.forEach { screen ->
             NavigationBarItem(
                 icon = { Icon(screen.icon, contentDescription = screen.label) },
