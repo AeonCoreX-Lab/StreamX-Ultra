@@ -20,6 +20,18 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          cache: gradle
+
+      # Gradle cache
+      - name: Cache Gradle
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
 
       - name: Decode Keystore
         run: |
@@ -28,6 +40,7 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      # Build with retry
       - name: Build Signed Release APK
         env:
           RELEASE_KEYSTORE_FILE: ${{ github.workspace }}/release.keystore
@@ -35,26 +48,55 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          ./gradlew assembleRelease \
-            -PRELEASE_KEYSTORE_FILE=${{ env.RELEASE_KEYSTORE_FILE }} \
-            -PRELEASE_KEYSTORE_PASSWORD=${{ env.RELEASE_KEYSTORE_PASSWORD }} \
-            -PRELEASE_KEY_ALIAS=${{ env.RELEASE_KEY_ALIAS }} \
-            -PRELEASE_KEY_PASSWORD=${{ env.RELEASE_KEY_PASSWORD }}
+          # Retry mechanism for Gradle
+          max_attempts=3
+          attempt=1
+          success=false
+          
+          while [ $attempt -le $max_attempts ] && [ "$success" = false ]; do
+            echo "Build attempt $attempt of $max_attempts..."
+            if ./gradlew assembleRelease \
+                -PRELEASE_KEYSTORE_FILE=${{ env.RELEASE_KEYSTORE_FILE }} \
+                -PRELEASE_KEYSTORE_PASSWORD=${{ env.RELEASE_KEYSTORE_PASSWORD }} \
+                -PRELEASE_KEY_ALIAS=${{ env.RELEASE_KEY_ALIAS }} \
+                -PRELEASE_KEY_PASSWORD=${{ env.RELEASE_KEY_PASSWORD }} \
+                --no-daemon --stacktrace; then
+              success=true
+              echo "Build successful!"
+            else
+              echo "Build failed. Retrying in 10 seconds..."
+              sleep 10
+              attempt=$((attempt + 1))
+            fi
+          done
+          
+          if [ "$success" = false ]; then
+            echo "All build attempts failed."
+            exit 1
+          fi
 
       - name: List Release Directory Files for Debugging
-        run: ls -R app/build/outputs/apk/release
+        run: ls -R app/build/outputs/apk/release || echo "Release directory not found"
       
       - name: Upload Release APK as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: StreamX-Ultra-Release-APK
           path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
 
       - name: Create Release Notes and Get Version Info
         id: create_notes
         run: |
-          VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | sed -n 's/.*versionName = "\(.*\)".*/\1/p')
-          VERSION_CODE=$(grep 'versionCode' app/build.gradle.kts | sed -n 's/.*versionCode = \([0-9]*\).*/\1/p')
+          # Alternative way to get version
+          if [ -f "app/build.gradle.kts" ]; then
+            VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | sed -n 's/.*versionName = "\(.*\)".*/\1/p')
+            VERSION_CODE=$(grep 'versionCode' app/build.gradle.kts | sed -n 's/.*versionCode = \([0-9]*\).*/\1/p')
+          else
+            # Fallback values
+            VERSION_NAME="1.2"
+            VERSION_CODE="3"
+          fi
 
           echo "## StreamX Ultra v1.2 - The Hub Update!" > release_notes.md
           echo "" >> release_notes.md
@@ -66,7 +108,13 @@ jobs:
           echo "- **New 'Live TV' Screen:** A redesigned screen to explore all channels, with powerful filtering options coming soon." >> release_notes.md
           echo "- **Performance Enhancements:** Optimized data loading with ViewModel for a faster and more stable and also updated and enchanced player experience." >> release_notes.md
           echo "" >> release_notes.md
-          echo "versionCode: ${VERSION_CODE}" >> release_notes.md
+          echo "**Technical Fixes:**" >> release_notes.md
+          echo "- Fixed all compilation errors in HomeScreen.kt and PlayerScreen.kt" >> release_notes.md
+          echo "- Resolved @OptIn annotation issues for Material3 APIs" >> release_notes.md
+          echo "- Fixed Media3 import errors" >> release_notes.md
+          echo "- Added in-app update system" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "Version Code: ${VERSION_CODE}" >> release_notes.md
           
           echo "version_name=${VERSION_NAME}" >> $GITHUB_OUTPUT
           echo "notes_path=release_notes.md" >> $GITHUB_OUTPUT
@@ -75,6 +123,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: app/build/outputs/apk/release/*.apk
-          name: "Version ${{ steps.create_notes.outputs.version_name }}"
+          name: "StreamX Ultra v${{ steps.create_notes.outputs.version_name }}"
           tag_name: ${{ github.ref_name }}
           body_path: ${{ steps.create_notes.outputs.notes_path }}
+          draft: false
+          prerelease: false
