@@ -78,13 +78,13 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
     // Firebase
-    implementation(platform("com.google.firebase:firebase-bom:32.8.0")) // আপডেটেড
+    implementation(platform("com.google.firebase:firebase-bom:32.8.0"))
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.android.gms:play-services-auth:21.0.0")
 
-    // --- Facebook Login SDK (নতুন) ---
-    implementation("com.facebook.android:facebook-login:latest.release")
+    // Facebook Login SDK
+    implementation("com.facebook.android:facebook-login:16.3.0")
 
     // MEDIA3 (EXOPLAYER)
     implementation("androidx.media3:media3-exoplayer:1.3.1")
@@ -98,4 +98,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
     implementation("com.valentinilk.shimmer:compose-shimmer:1.2.0")
     implementation("androidx.compose.material:material-icons-extended:1.6.7")
+    
+    // For experimental APIs
+    implementation("androidx.compose.foundation:foundation:1.6.7")
+    implementation("androidx.compose.foundation:foundation-layout:1.6.7")
 }

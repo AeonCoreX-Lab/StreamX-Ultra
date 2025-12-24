@@ -287,7 +287,7 @@ fun HomeScreen(
         }
     }
     
-    // Dialogs - These should be at the end of the composable
+    // Dialogs
     if (showLinkSelectorDialog && selectedChannelForLinks != null) { 
         LinkSelectorDialog(
             selectedChannelForLinks!!, 
