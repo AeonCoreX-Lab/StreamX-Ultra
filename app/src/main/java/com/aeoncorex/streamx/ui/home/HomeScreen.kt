@@ -55,10 +55,12 @@ import com.aeoncorex.streamx.model.Event
 import com.aeoncorex.streamx.model.GitHubRelease
 import com.aeoncorex.streamx.services.UpdateChecker
 import com.aeoncorex.streamx.util.ChannelCategorizer
+import com.aeoncorex.streamx.util.ChannelGenre
 import com.valentinilk.shimmer.shimmer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -71,7 +73,7 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import kotlin.math.absoluteValue
 
-// --- Enums, DataStore, API Interface, ViewModel ---
+// --- Enums, DataStore, API Interface ---
 
 enum class HomeTab { EVENTS, LIVE_TV, FAVORITES }
 
@@ -79,13 +81,12 @@ private val Context.dataStore by preferencesDataStore(name = "favorites_prefs")
 private val FAVORITES_KEY = stringSetPreferencesKey("favorite_ids")
 
 interface IPTVApi {
-    @GET("index.json")
-    suspend fun getIndex(): Map<String, Any>
-    @GET
-    suspend fun getChannelsByUrl(@Url url: String): Map<String, Any>
-    @GET("categories/events.json")
-    suspend fun getEvents(): Map<String, List<Event>>
+    @GET("index.json") suspend fun getIndex(): Map<String, Any>
+    @GET suspend fun getChannelsByUrl(@Url url: String): Map<String, Any>
+    @GET("categories/events.json") suspend fun getEvents(): Map<String, List<Event>>
 }
+
+// --- ViewModel ---
 
 class HomeViewModel : ViewModel() {
     private val api: IPTVApi = Retrofit.Builder().baseUrl("https://raw.githubusercontent.com/cybernahid-dev/streamx-iptv-data/main/").addConverterFactory(GsonConverterFactory.create()).build().create(IPTVApi::class.java)
@@ -100,14 +101,14 @@ class HomeViewModel : ViewModel() {
 
     init { loadAllData() }
 
-    fun loadAllData() {
+    private fun loadAllData() {
         viewModelScope.launch {
             _isLoading.value = true
             try {
                 val eventsJob = launch { loadEvents() }
                 val channelsJob = launch { loadChannels() }
                 eventsJob.join(); channelsJob.join()
-            } catch (e: Exception) { Log.e("HomeViewModel", "Failed to load data", e) }
+            } catch (e: Exception) { Log.e("HomeViewModel", "Failed to load data", e) } 
             finally { _isLoading.value = false }
         }
     }
@@ -117,7 +118,7 @@ class HomeViewModel : ViewModel() {
             val allEvents = api.getEvents()["events"] ?: emptyList()
             val now = LocalDateTime.now(ZoneId.systemDefault())
             _liveEvents.value = allEvents.filter { event -> 
-                try { Instant.parse(event.startTime).atZone(ZoneId.systemDefault()).toLocalDateTime().isBefore(now) } catch(e:Exception){false} 
+                try { Instant.parse(event.startTime).atZone(ZoneId.systemDefault()).toLocalDateTime().isBefore(now) } catch(e:Exception){false}
             }
             _upcomingEvents.value = allEvents.filter { event -> 
                  try {
@@ -181,10 +182,7 @@ fun HomeScreen(
     
     LaunchedEffect(Unit) {
         val release = UpdateChecker.checkForUpdate(context)
-        if (release != null) {
-            latestReleaseInfo = release
-            showUpdateDialog = true
-        }
+        if (release != null) { latestReleaseInfo = release; showUpdateDialog = true }
     }
 
     ModalNavigationDrawer(
@@ -197,7 +195,7 @@ fun HomeScreen(
                 topBar = {
                     if (!isSearchActive) {
                         CenterAlignedTopAppBar(
-                            title = { Text("STREAMX ULTRA", fontWeight = FontWeight.Black, color = Color.White) },
+                            title = { Text("STREAMX ULTRA", fontWeight = FontWeight.ExtraBold, color = Color.White) },
                             navigationIcon = {
                                 IconButton(onClick = { scope.launch { drawerState.open() } }) { Icon(Icons.Default.Menu, "Menu", tint = Color.Cyan) }
                             },
@@ -251,15 +249,10 @@ fun HomeScreen(
     }
 }
 
-// --- Content Components ---
+// --- Content Composables ---
 
 @Composable
-fun EventsContent(
-    navController: NavController, 
-    homeViewModel: HomeViewModel, 
-    isLoading: Boolean,
-    onChannelClick: (Channel) -> Unit
-) {
+fun EventsContent(navController: NavController, homeViewModel: HomeViewModel, isLoading: Boolean, onChannelClick: (Channel) -> Unit) {
     val liveEvents by homeViewModel.liveEvents.collectAsState()
     val upcomingEvents by homeViewModel.upcomingEvents.collectAsState()
     val allChannels by homeViewModel.allChannels.collectAsState()
@@ -290,14 +283,10 @@ fun EventsContent(
 }
 
 @Composable
-fun LiveTVContent(
-    homeViewModel: HomeViewModel, 
-    isLoading: Boolean, 
-    onChannelClick: (Channel) -> Unit
-) {
-    val allChannels by homeViewModel.allChannels.collectAsState()
-    val genres = remember { com.aeoncorex.streamx.util.ChannelGenre.values().filterNot { it == com.aeoncorex.streamx.util.ChannelGenre.UNKNOWN } }
-    var selectedGenre by remember { mutableStateOf<com.aeoncorex.streamx.util.ChannelGenre?>(null) }
+fun LiveTVContent(viewModel: HomeViewModel, isLoading: Boolean, onChannelClick: (Channel) -> Unit) {
+    val allChannels by viewModel.allChannels.collectAsState()
+    val genres = remember { ChannelGenre.values().filterNot { it == ChannelGenre.UNKNOWN } }
+    var selectedGenre by remember { mutableStateOf<ChannelGenre?>(null) }
 
     if (isLoading && allChannels.isEmpty()) {
         LoadingShimmer()
@@ -333,7 +322,7 @@ fun LiveTVContent(
                             contentPadding = PaddingValues(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            items(channels) { channel ->
+                            items(items = channels.take(8), key = { it.id }) { channel ->
                                 SmallChannelCard(channel, onChannelClick)
                             }
                         }
@@ -345,9 +334,9 @@ fun LiveTVContent(
 }
 
 @Composable
-fun FavoritesContent(homeViewModel: HomeViewModel, onChannelClick: (Channel) -> Unit) {
+fun FavoritesContent(viewModel: HomeViewModel, onChannelClick: (Channel) -> Unit) {
     val context = LocalContext.current
-    val allChannels by homeViewModel.allChannels.collectAsState()
+    val allChannels by viewModel.allChannels.collectAsState()
     val favoriteIds by context.dataStore.data.map { it[FAVORITES_KEY] ?: emptySet() }.collectAsState(initial = emptySet())
     val favorites = remember(allChannels, favoriteIds) { allChannels.filter { it.id in favoriteIds } }
 
@@ -360,12 +349,12 @@ fun FavoritesContent(homeViewModel: HomeViewModel, onChannelClick: (Channel) -> 
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(favorites) { channel -> SmallChannelCard(channel, onChannelClick) }
+            items(items = favorites, key = { it.id }) { channel -> SmallChannelCard(channel, onChannelClick) }
         }
     }
 }
 
-// --- COMPONENTS ---
+// --- Helper Composables ---
 
 @Composable
 fun HomeTabRow(selectedTab: HomeTab, onTabSelected: (HomeTab) -> Unit) {
@@ -393,40 +382,10 @@ fun HomeTabRow(selectedTab: HomeTab, onTabSelected: (HomeTab) -> Unit) {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun FeaturedCarousel(channels: List<Channel>, navController: NavController, onChannelClick: (Channel) -> Unit) {
-    if (channels.isEmpty()) return
-    val pagerState = rememberPagerState(pageCount = { channels.size })
-    LaunchedEffect(pagerState.pageCount) { if (pagerState.pageCount > 1) { while (true) { delay(5000L); pagerState.animateScrollToPage((pagerState.currentPage + 1) % pagerState.pageCount) } } }
-    
-    HorizontalPager(state = pagerState, contentPadding = PaddingValues(horizontal = 32.dp), pageSpacing = 16.dp, modifier = Modifier.padding(vertical = 16.dp)) { page ->
-        // --- ফিক্স: pageOffset ক্যালকুলেশন ---
-        val pageOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-        val channel = channels[page]
-        Card(
-            modifier = Modifier
-                .graphicsLayer { 
-                    val scale = lerp(0.85f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f))
-                    scaleX = scale; scaleY = scale
-                    alpha = lerp(0.5f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f)) 
-                }
-                .fillMaxWidth().height(180.dp)
-                .clickable { onChannelClick(channel) },
-            shape = RoundedCornerShape(24.dp)
-        ) {
-            Box {
-                AsyncImage(model = channel.logoUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.9f)))))
-                Text(channel.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.align(Alignment.BottomStart).padding(16.dp))
-            }
-        }
-    }
-}
-
 @Composable
 fun EventCard(event: Event, allChannels: List<Channel>, onChannelClick: (Channel) -> Unit) {
     val channels = remember(event.channelIds, allChannels) { allChannels.filter { it.id in event.channelIds } }
+    
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.08f)),
@@ -446,11 +405,15 @@ fun EventCard(event: Event, allChannels: List<Channel>, onChannelClick: (Channel
             }
             Spacer(Modifier.height(8.dp))
             Text(event.tournament, color = Color.Cyan, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+            
             if (channels.isNotEmpty()) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(0.1f))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(channels) { ch ->
-                        AsyncImage(model = ch.logoUrl, contentDescription = null, modifier = Modifier.size(30.dp).clip(CircleShape).clickable { onChannelClick(ch) })
+                        AsyncImage(
+                            model = ch.logoUrl, contentDescription = null,
+                            modifier = Modifier.size(30.dp).clip(CircleShape).clickable { onChannelClick(ch) }
+                        )
                     }
                 }
             }
@@ -460,17 +423,51 @@ fun EventCard(event: Event, allChannels: List<Channel>, onChannelClick: (Channel
 
 @Composable
 fun SmallChannelCard(channel: Channel, onClick: () -> Unit) {
-    Column(modifier = Modifier.width(100.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        modifier = Modifier.width(100.dp).clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.1f)),
             modifier = Modifier.size(100.dp).border(1.dp, Color.White.copy(0.1f), RoundedCornerShape(20.dp))
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                AsyncImage(model = channel.logoUrl, contentDescription = channel.name, modifier = Modifier.fillMaxSize(0.7f), contentScale = ContentScale.Fit, placeholder = painterResource(id = R.mipmap.ic_launcher))
+                AsyncImage(
+                    model = channel.logoUrl, contentDescription = channel.name,
+                    modifier = Modifier.fillMaxSize(0.7f), contentScale = ContentScale.Fit,
+                    placeholder = painterResource(id = R.mipmap.ic_launcher_foreground)
+                )
             }
         }
-        Text(text = channel.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, color = Color.White.copy(0.8f), modifier = Modifier.padding(top = 6.dp), textAlign = TextAlign.Center)
+        Text(
+            text = channel.name, style = MaterialTheme.typography.bodySmall,
+            maxLines = 1, color = Color.White.copy(0.8f),
+            modifier = Modifier.padding(top = 6.dp), textAlign = TextAlign.Center
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun FeaturedCarousel(channels: List<Channel>, navController: NavController, onChannelClick: (Channel) -> Unit) {
+    if (channels.isEmpty()) return
+    val pagerState = rememberPagerState(pageCount = { channels.size })
+    LaunchedEffect(pagerState.pageCount) { if (pagerState.pageCount > 1) { while (true) { delay(5000L); pagerState.animateScrollToPage((pagerState.currentPage + 1) % pagerState.pageCount) } } }
+    HorizontalPager(state = pagerState, contentPadding = PaddingValues(horizontal = 32.dp), pageSpacing = 16.dp, modifier = Modifier.padding(vertical = 16.dp)) { page ->
+        val pageOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+        Card(
+            modifier = Modifier
+                .graphicsLayer { val scale = lerp(0.85f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f)); scaleX = scale; scaleY = scale; alpha = lerp(0.5f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f)) }
+                .fillMaxWidth().height(180.dp).clickable { onChannelClick(channels[page]) },
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Box {
+                AsyncImage(model = channels[page].logoUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.9f)))))
+                Text(channels[page].name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.align(Alignment.BottomStart).padding(16.dp))
+            }
+        }
     }
 }
 
@@ -486,12 +483,11 @@ fun SearchUI(allChannels: List<Channel>, onClose: () -> Unit, onChannelClick: (C
         trailingIcon = { IconButton(onClick = onClose) { Icon(Icons.Default.Close, null) } }
     ) {
         LazyVerticalGrid(columns = GridCells.Adaptive(100.dp), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            items(filtered) { ch -> SmallChannelCard(ch) { onChannelClick(ch) } }
+            items(items = filtered, key = { it.id }) { ch -> SmallChannelCard(ch) { onChannelClick(ch) } }
         }
     }
 }
 
-// --- HELPERS ---
 @Composable
 fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
     ModalDrawerSheet(drawerContainerColor = Color(0xFF121212)) {
@@ -499,7 +495,7 @@ fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
         Text("STREAMX", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(24.dp))
         HorizontalDivider(color = Color.Gray)
         NavigationDrawerItem(label = { Text("Home", color = Color.White) }, selected = true, onClick = onCloseDrawer, icon = { Icon(Icons.Default.Home, null, tint = Color.White) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent))
-        NavigationDrawerItem(label = { Text("Account", color = Color.White) }, selected = false, onClick = { navController.navigate("account") }, icon = { Icon(Icons.Default.Person, null, tint = Color.White) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent))
+        NavigationDrawerItem(label = { Text("My Account", color = Color.White) }, selected = false, onClick = { navController.navigate("account") }, icon = { Icon(Icons.Default.Person, null, tint = Color.White) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent))
         NavigationDrawerItem(label = { Text("Settings", color = Color.White) }, selected = false, onClick = { navController.navigate("settings") }, icon = { Icon(Icons.Default.Settings, null, tint = Color.White) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent))
     }
 }

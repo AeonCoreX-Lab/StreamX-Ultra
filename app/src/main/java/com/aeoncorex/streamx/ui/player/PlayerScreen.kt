@@ -242,7 +242,6 @@ fun PlayerScreen(encodedUrl: String, onBack: () -> Unit) {
                     layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 } 
             },
-            update = { it.resizeMode = resizeMode },
             modifier = Modifier.fillMaxSize()
         )
 
