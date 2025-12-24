@@ -216,7 +216,7 @@ fun HomeScreen(
                             onChannelClick = { ch -> selectedChannelForLinks = ch; showLinkSelectorDialog = true }
                         )
                     } else {
-                        HomeTabs(selectedTab = currentTab, onTabSelected = { currentTab = it })
+                        HomeTabRow(selectedTab = currentTab, onTabSelected = { currentTab = it })
                         AnimatedContent(
                             targetState = currentTab,
                             label = "tab_content",
@@ -323,7 +323,7 @@ fun LiveTVContent(viewModel: HomeViewModel, isLoading: Boolean, onChannelClick: 
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             items(items = channels.take(8), key = { it.id }) { channel ->
-                                SmallChannelCard(channel, onChannelClick)
+                                SmallChannelCard(channel) { onChannelClick(channel) }
                             }
                         }
                     }
@@ -349,7 +349,7 @@ fun FavoritesContent(viewModel: HomeViewModel, onChannelClick: (Channel) -> Unit
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(items = favorites, key = { it.id }) { channel -> SmallChannelCard(channel, onChannelClick) }
+            items(items = favorites, key = { it.id }) { channel -> SmallChannelCard(channel) { onChannelClick(channel) } }
         }
     }
 }
@@ -436,7 +436,7 @@ fun SmallChannelCard(channel: Channel, onClick: () -> Unit) {
                 AsyncImage(
                     model = channel.logoUrl, contentDescription = channel.name,
                     modifier = Modifier.fillMaxSize(0.7f), contentScale = ContentScale.Fit,
-                    placeholder = painterResource(id = R.mipmap.ic_launcher_foreground)
+                    placeholder = painterResource(id = R.mipmap.ic_launcher)
                 )
             }
         }
