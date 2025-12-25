@@ -38,7 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.util.lerp
+//import androidx.compose.ui.util.lerp//
 import androidx.compose.ui.window.Dialog
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringSetPreferencesKey
@@ -668,18 +668,19 @@ fun FeaturedCarousel(
         Card(
             modifier = Modifier
                 .graphicsLayer { 
-                    val scale = lerp(
-                        0.85f, 
-                        1f, 
-                        1f - pageOffset.absoluteValue.coerceIn(0f, 1f)
-                    )
+                    // FIX: Manual calculation instead of using lerp function to avoid Composable scope errors
+                    val fraction = 1f - pageOffset.absoluteValue.coerceIn(0f, 1f)
+                    val startScale = 0.85f
+                    val stopScale = 1f
+                    val scale = startScale + (stopScale - startScale) * fraction
+
                     scaleX = scale
                     scaleY = scale
-                    alpha = lerp(
-                        0.5f, 
-                        1f, 
-                        1f - pageOffset.absoluteValue.coerceIn(0f, 1f)
-                    ) 
+                    
+                    // Same manual calc for alpha (0.5 to 1.0)
+                    val startAlpha = 0.5f
+                    val stopAlpha = 1f
+                    alpha = startAlpha + (stopAlpha - startAlpha) * fraction
                 }
                 .fillMaxWidth()
                 .height(180.dp)
@@ -715,6 +716,7 @@ fun FeaturedCarousel(
         }
     }
 }
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
