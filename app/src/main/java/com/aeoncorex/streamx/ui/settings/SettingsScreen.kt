@@ -54,8 +54,8 @@ fun SettingsScreen(navController: NavController) {
             item {
                 SettingsItem(
                     icon = Icons.Default.InvertColors,
-                    title = "©️Copyright", // Fixed spelling from "Copyrite"
-                    subtitle = "Copyright of StreamX",
+                    title = "Copyright Disclaimer", // Fixed spelling from "Copyrite"
+                    subtitle = "Read our content policy and disclaimer",
                     onClick = { navController.navigate("copyright") } // Fixed route name to match AppNavigation
                 )
             }

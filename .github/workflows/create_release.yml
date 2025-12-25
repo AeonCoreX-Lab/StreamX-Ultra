@@ -62,28 +62,67 @@ jobs:
           name: StreamX-Ultra-Release-APK
           path: app/build/outputs/apk/release/*.apk
 
-      # ধাপ ৮: রিলিজ নোট তৈরি এবং সংস্করণ তথ্য সংগ্রহ করা
+      # ধাপ ৮: রিলিজ নোট তৈরি এবং সংস্করণ তথ্য সংগ্রহ করা (আপডেট করা হয়েছে)
       - name: Create Release Notes and Get Version Info
         id: create_notes
         run: |
           VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | sed -n 's/.*versionName = "\(.*\)".*/\1/p')
-          VERSION_CODE=$(grep 'versionCode' app/build.gradle.kts | sed -n 's/.*versionCode = \([0-9]*\).*/\1/p')
-
-          # আপনি প্রতিটি নতুন রিলিজের আগে এই অংশটুকু পরিবর্তন করতে পারেন
-          echo "## StreamX Ultra v${VERSION_NAME} - The Ultimate Upgrade!" > release_notes.md
-          echo "" >> release_notes.md
-          echo "**What's New in this Major Upgrade:**" >> release_notes.md
-          echo "- **Complete UI Overhaul:** Introduced a modern Bottom Navigation Bar for a smoother user experience, inspired by top streaming apps." >> release_notes.md
-          echo "- **Live Events Hub:** A new, dedicated 'Events' tab that automatically fetches and displays live and upcoming sports schedules." >> release_notes.md
-          echo "- **Advanced Categorization:** Implemented a dual-category system. You can now browse channels 'By Country' and 'By Genre' (Sports, News, etc.)." >> release_notes.md
-          echo "- **AI-Powered Backend:** A smart, automated script now categorizes channels by genre using AI, ensuring the library is always organized." >> release_notes.md
-          echo "- **New 'Live TV' Screen:** A redesigned screen to explore all channels, with powerful filtering options coming soon." >> release_notes.md
-          echo "- **Performance Enhancements:** Optimized data loading with ViewModel for a faster and more stable experience." >> release_notes.md
-          echo "" >> release_notes.md
-          echo "versionCode: ${VERSION_CODE}" >> release_notes.md
           
+          # নতুন রিলিজ নোট তৈরি করা হচ্ছে
+          echo "🚀 StreamX Ultra v1.1 – The Ultimate Upgrade" > RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+
+          echo "Official Live TV & IPTV Platform by AeonCoreX™" >> RELEASE_NOTES.md
+          echo "First Stable Public Release" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+
+          echo "✨ What's New in v1.1" >> RELEASE_NOTES.md
+          echo "----------------------" >> RELEASE_NOTES.md
+
+          echo "🔐 Multi-Platform Authentication" >> RELEASE_NOTES.md
+          echo "- Login with Google" >> RELEASE_NOTES.md
+          echo "- Login with Facebook" >> RELEASE_NOTES.md
+          echo "- Login with GitHub" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+
+          echo "🎨 Ultimate Auth Screen UI" >> RELEASE_NOTES.md
+          echo "- Fully redesigned Login & Sign Up screen" >> RELEASE_NOTES.md
+          echo "- Professional, modern & clean UI" >> RELEASE_NOTES.md
+          echo "- Optimized for all screen sizes" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+
+          echo "▶️ Advanced Player Features" >> RELEASE_NOTES.md
+          echo "- Rotation Control (Portrait / Landscape)" >> RELEASE_NOTES.md
+          echo "- Double Tap to Seek (Forward / Backward 10s)" >> RELEASE_NOTES.md
+          echo "- Live Data Usage Statistics" >> RELEASE_NOTES.md
+          echo "- Real-time internet speed monitoring" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+
+          echo "👤 Functional Account & Settings" >> RELEASE_NOTES.md
+          echo "- Manage profile information" >> RELEASE_NOTES.md
+          echo "- Change password securely" >> RELEASE_NOTES.md
+          echo "- View connected login methods" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+
+          echo "⚖️ Copyright & Disclaimer" >> RELEASE_NOTES.md
+          echo "- Dedicated legal & disclaimer page added" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+
+          echo "📦 Version Information" >> RELEASE_NOTES.md
+          echo "- Version Name: v1.1" >> RELEASE_NOTES.md
+          echo "- Version Code: 2" >> RELEASE_NOTES.md
+          echo "- Release Type: First Stable Release" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+
+          echo "📲 Download APK" >> RELEASE_NOTES.md
+          echo "https://github.com/cybernahid-dev/StreamX-Ultra/releases/download/v1.1/app-release.apk" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+
+          echo "© AeonCoreX™ – All Rights Reserved" >> RELEASE_NOTES.md
+          
+          # আউটপুট সেট করা যাতে পরের ধাপে ব্যবহার করা যায়
           echo "version_name=${VERSION_NAME}" >> $GITHUB_OUTPUT
-          echo "notes_path=release_notes.md" >> $GITHUB_OUTPUT
+          echo "notes_path=RELEASE_NOTES.md" >> $GITHUB_OUTPUT
 
       # ধাপ ৯: GitHub রিলিজ তৈরি এবং APK আপলোড করা
       - name: Create GitHub Release
