@@ -50,6 +50,11 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         composable("theme") {
             ThemeScreen(navController, themeViewModel = themeViewModel)
         }
+        composable("privacy") {
+            PrivacyPolicyScreen(navController)
+        }
+        composable("about") {
+            AboutScreen(navController)
         
         // --- নতুন Copyright রুটটি এখানে যোগ করা হয়েছে ---
         composable("copyright") {

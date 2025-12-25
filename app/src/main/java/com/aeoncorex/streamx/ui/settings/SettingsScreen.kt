@@ -51,6 +51,14 @@ fun SettingsScreen(navController: NavController) {
                 )
             }
             item {
+                SettingsItem(
+                    icon = Icons.Default.InvertColors,
+                    title = "©️Copyrite",
+                    subtitle = "Copyrite of StreamX",
+                    onClick = { navController.navigate("copyrite") }
+                )
+            }
+            item {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             }
             item {
@@ -58,7 +66,7 @@ fun SettingsScreen(navController: NavController) {
                     icon = Icons.Default.Info,
                     title = "About",
                     subtitle = "App version, licenses, and more",
-                    onClick = { /* TODO: Navigate to About screen */ }
+                    onClick = { navController.navigate("about") }
                 )
             }
             item {
@@ -66,7 +74,7 @@ fun SettingsScreen(navController: NavController) {
                     icon = Icons.Default.Policy,
                     title = "Privacy Policy",
                     subtitle = "Read our privacy policy",
-                    onClick = { /* TODO: Open privacy policy link */ }
+                    onClick = { navController.navigate("privacy") }
                 )
             }
         }
