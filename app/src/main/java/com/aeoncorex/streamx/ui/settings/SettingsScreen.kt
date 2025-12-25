@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color // --- FIXED: Added Import ---
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
@@ -53,9 +54,9 @@ fun SettingsScreen(navController: NavController) {
             item {
                 SettingsItem(
                     icon = Icons.Default.InvertColors,
-                    title = "©️Copyrite",
-                    subtitle = "Copyrite of StreamX",
-                    onClick = { navController.navigate("copyrite") }
+                    title = "©️Copyright", // Fixed spelling from "Copyrite"
+                    subtitle = "Copyright of StreamX",
+                    onClick = { navController.navigate("copyright") } // Fixed route name to match AppNavigation
                 )
             }
             item {

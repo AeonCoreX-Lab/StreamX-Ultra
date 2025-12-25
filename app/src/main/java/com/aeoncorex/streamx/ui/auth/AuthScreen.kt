@@ -30,6 +30,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation // --- FIXED: Added Import ---
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
@@ -270,7 +271,8 @@ fun AuthTextField(
         leadingIcon = { Icon(icon, contentDescription = null) },
         shape = RoundedCornerShape(12.dp),
         singleLine = true,
-        visualTransformation = if (isPassword) PasswordVisualTransformation() else PasswordVisualTransformation.None,
+        // --- FIXED: VisualTransformation.None instead of PasswordVisualTransformation.None ---
+        visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(keyboardType = if (isPassword) KeyboardType.Password else keyboardType)
     )
 }

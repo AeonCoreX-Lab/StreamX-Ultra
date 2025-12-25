@@ -8,13 +8,16 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.aeoncorex.streamx.ui.account.AccountScreen
 import com.aeoncorex.streamx.ui.auth.AuthScreen
-import com.aeoncorex.streamx.ui.copyright.CopyrightScreen // নতুন ইম্পোর্ট
+import com.aeoncorex.streamx.ui.copyright.CopyrightScreen
 import com.aeoncorex.streamx.ui.home.HomeScreen
 import com.aeoncorex.streamx.ui.player.PlayerScreen
 import com.aeoncorex.streamx.ui.settings.SettingsScreen
 import com.aeoncorex.streamx.ui.splash.SplashScreen
 import com.aeoncorex.streamx.ui.theme.ThemeScreen
 import com.aeoncorex.streamx.ui.theme.ThemeViewModel
+// --- ADDED IMPORTS ---
+import com.aeoncorex.streamx.ui.privacy.PrivacyPolicyScreen
+import com.aeoncorex.streamx.ui.about.AboutScreen
 
 @Composable
 fun AppNavigation(themeViewModel: ThemeViewModel) {
@@ -55,8 +58,8 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         }
         composable("about") {
             AboutScreen(navController)
+        } // --- FIXED: Added missing closing brace here ---
         
-        // --- নতুন Copyright রুটটি এখানে যোগ করা হয়েছে ---
         composable("copyright") {
             CopyrightScreen(navController)
         }

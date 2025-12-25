@@ -20,10 +20,9 @@ android {
         }
     }
 
-    // --- এই signingConfigs ব্লকটি চূড়ান্ত এবং সবচেয়ে নির্ভরযোগ্য সংস্করণ ---
+    // --- Signing Configs ---
     signingConfigs {
         create("release") {
-            // প্রজেক্ট প্রপার্টি অথবা এনভায়রনমেন্ট ভেরিয়েবল থেকে তথ্য পড়ার চেষ্টা করা হচ্ছে
             val storeFileValue = project.findProperty("RELEASE_KEYSTORE_FILE") as? String ?: System.getenv("RELEASE_KEYSTORE_FILE")
             val storePasswordValue = project.findProperty("RELEASE_KEYSTORE_PASSWORD") as? String ?: System.getenv("RELEASE_KEYSTORE_PASSWORD")
             val keyAliasValue = project.findProperty("RELEASE_KEY_ALIAS") as? String ?: System.getenv("RELEASE_KEY_ALIAS")
@@ -88,6 +87,9 @@ dependencies {
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.android.gms:play-services-auth:21.0.0")
+
+    // --- ADDED: Facebook Login Dependency (Fixes AuthScreen Errors) ---
+    implementation("com.facebook.android:facebook-login:16.3.0")
 
     // MEDIA3 (EXOPLAYER)
     implementation("androidx.media3:media3-exoplayer:1.3.1")
