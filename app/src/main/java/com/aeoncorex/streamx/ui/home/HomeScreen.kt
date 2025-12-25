@@ -11,9 +11,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
@@ -23,42 +20,31 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-//import androidx.compose.ui.util.lerp//
+import androidx.compose.ui.util.lerp
 import androidx.compose.ui.window.Dialog
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import com.aeoncorex.streamx.R
 import com.aeoncorex.streamx.model.Channel
-import com.aeoncorex.streamx.model.Event
 import com.aeoncorex.streamx.model.GitHubRelease
 import com.aeoncorex.streamx.services.UpdateChecker
-import com.aeoncorex.streamx.util.ChannelCategorizer
-import com.aeoncorex.streamx.util.ChannelGenre
 import com.valentinilk.shimmer.shimmer
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import retrofit2.Retrofit
@@ -66,865 +52,354 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Url
 import java.net.URLEncoder
-import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.temporal.ChronoUnit
 import kotlin.math.absoluteValue
 
-// --- Enums, DataStore, API Interface ---
-
-enum class HomeTab { EVENTS, LIVE_TV, FAVORITES }
-
+// DataStore Setup for Persistence
 private val Context.dataStore by preferencesDataStore(name = "favorites_prefs")
 private val FAVORITES_KEY = stringSetPreferencesKey("favorite_ids")
 
 interface IPTVApi {
-    @GET("index.json") suspend fun getIndex(): Map<String, Any>
-    @GET suspend fun getChannelsByUrl(@Url url: String): Map<String, Any>
-    @GET("categories/events.json") suspend fun getEvents(): Map<String, List<Event>>
+    @GET("index.json")
+    suspend fun getIndex(): Map<String, Any>
+    @GET
+    suspend fun getChannelsByUrl(@Url url: String): Map<String, Any>
 }
-
-// --- ViewModel ---
-
-class HomeViewModel : ViewModel() {
-    private val api: IPTVApi = Retrofit.Builder().baseUrl("https://raw.githubusercontent.com/cybernahid-dev/streamx-iptv-data/main/").addConverterFactory(GsonConverterFactory.create()).build().create(IPTVApi::class.java)
-    private val _isLoading = MutableStateFlow(true)
-    val isLoading = _isLoading.asStateFlow()
-    private val _allChannels = MutableStateFlow<List<Channel>>(emptyList())
-    val allChannels = _allChannels.asStateFlow()
-    private val _liveEvents = MutableStateFlow<List<Event>>(emptyList())
-    val liveEvents = _liveEvents.asStateFlow()
-    private val _upcomingEvents = MutableStateFlow<List<Event>>(emptyList())
-    val upcomingEvents = _upcomingEvents.asStateFlow()
-
-    init { loadAllData() }
-
-    private fun loadAllData() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val eventsJob = launch { loadEvents() }
-                val channelsJob = launch { loadChannels() }
-                eventsJob.join(); channelsJob.join()
-            } catch (e: Exception) { Log.e("HomeViewModel", "Failed to load data", e) } 
-            finally { _isLoading.value = false }
-        }
-    }
-
-    private suspend fun loadEvents() {
-        try {
-            val allEvents = api.getEvents()["events"] ?: emptyList()
-            val now = LocalDateTime.now(ZoneId.systemDefault())
-            _liveEvents.value = allEvents.filter { event -> 
-                try { Instant.parse(event.startTime).atZone(ZoneId.systemDefault()).toLocalDateTime().isBefore(now) } catch(e:Exception){false}
-            }
-            _upcomingEvents.value = allEvents.filter { event -> 
-                 try {
-                    val startTime = Instant.parse(event.startTime).atZone(ZoneId.systemDefault()).toLocalDateTime()
-                    startTime.isAfter(now) && ChronoUnit.HOURS.between(now, startTime) < 24 
-                 } catch(e:Exception){false}
-            }
-        } catch (e: Exception) { Log.e("HomeViewModel", "Failed to load events", e) }
-    }
-
-    private suspend fun loadChannels() {
-        try {
-            val index = api.getIndex()
-            val cats = index["categories"] as? List<Map<String, Any>>
-            val masterList = mutableListOf<Channel>()
-            cats?.forEach { cat ->
-                val fileName = cat["file"] as String
-                val catName = cat["name"] as String
-                if (fileName.contains("events.json")) return@forEach
-                try {
-                    val res = api.getChannelsByUrl(fileName)
-                    (res["channels"] as? List<Map<String, Any>>)?.forEach { ch ->
-                         masterList.add(Channel(
-                            id = (ch["id"] as? String) ?: ch.hashCode().toString(),
-                            name = (ch["name"] as? String) ?: "No Name",
-                            logoUrl = (ch["logoUrl"] as? String) ?: "",
-                            streamUrls = (ch["streamUrls"] as? List<String>) ?: emptyList(),
-                            country = catName,
-                            genre = ChannelCategorizer.getGenreFromString(ch["genre"] as? String),
-                            isFeatured = (ch["isFeatured"] as? Boolean) ?: false
-                        ))
-                    }
-                } catch (e: Exception) { Log.e("HomeViewModel", "Error loading category file: $fileName", e) }
-            }
-            _allChannels.value = masterList
-        } catch (e: Exception) { Log.e("HomeViewModel", "Failed to load channels", e) }
-    }
-}
-
-// --- Main HomeScreen Composable ---
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(
-    navController: NavController,
-    homeViewModel: HomeViewModel = viewModel()
-) {
+fun HomeScreen(navController: NavController) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    
-    var currentTab by remember { mutableStateOf(HomeTab.EVENTS) }
+
+    val allChannels = remember { mutableStateOf<List<Channel>>(emptyList()) }
+    val categories = remember { mutableStateOf(listOf("All", "Favorites")) }
+    var selectedCategory by remember { mutableStateOf("All") }
+    var isLoading by remember { mutableStateOf(true) }
+    var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
     var showLinkSelectorDialog by remember { mutableStateOf(false) }
     var selectedChannelForLinks by remember { mutableStateOf<Channel?>(null) }
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var showUpdateDialog by remember { mutableStateOf(false) }
     var latestReleaseInfo by remember { mutableStateOf<GitHubRelease?>(null) }
-    
-    val isLoading by homeViewModel.isLoading.collectAsState()
-    val allChannels by homeViewModel.allChannels.collectAsState()
-    
+
+    val favoriteIds by context.dataStore.data
+        .map { preferences -> preferences[FAVORITES_KEY] ?: emptySet() }
+        .collectAsState(initial = emptySet())
+
     LaunchedEffect(Unit) {
         val release = UpdateChecker.checkForUpdate(context)
-        if (release != null) { 
+        if (release != null) {
             latestReleaseInfo = release
-            showUpdateDialog = true 
+            showUpdateDialog = true
+        }
+        
+        try {
+            val api = Retrofit.Builder()
+                .baseUrl("https://raw.githubusercontent.com/cybernahid-dev/streamx-iptv-data/main/")
+                .addConverterFactory(GsonConverterFactory.create())
+                .build().create(IPTVApi::class.java)
+
+            val index = api.getIndex()
+            val cats = index["categories"] as? List<Map<String, Any>>
+            val masterList = mutableListOf<Channel>()
+
+            cats?.forEach { cat ->
+                val fileName = cat["file"] as String
+                val catName = cat["name"] as String
+                try {
+                    val res = api.getChannelsByUrl(fileName)
+                    val rawChannels = (res["channels"] as? List<Map<String, Any>>)
+                        ?: (res["categories"] as? List<Map<String, Any>>)?.flatMap { it["channels"] as List<Map<String, Any>> }
+
+                    rawChannels?.forEach { ch ->
+                         masterList.add(Channel(
+                            id = (ch["id"] as? String) ?: (ch["streamUrls"]?.hashCode()?.toString() ?: ""),
+                            name = (ch["name"] as? String) ?: "No Name",
+                            logoUrl = (ch["logoUrl"] as? String) ?: "",
+                            streamUrls = (ch["streamUrls"] as? List<String>) ?: emptyList(),
+                            category = catName,
+                            isFeatured = (ch["isFeatured"] as? Boolean) ?: false
+                        ))
+                    }
+                } catch (e: Exception) { Log.e("API", "Error loading category: $catName", e) }
+            }
+            allChannels.value = masterList
+            categories.value = listOf("All", "Favorites") + masterList.map { it.category }.distinct()
+            isLoading = false
+        } catch (e: Exception) {
+            isLoading = false
+            Log.e("API", "Failed to load initial data", e)
         }
     }
-
+    
     ModalNavigationDrawer(
         drawerState = drawerState,
-        drawerContent = { 
+        drawerContent = {
             AppDrawer(
-                navController = navController, 
+                navController = navController,
                 onCloseDrawer = { scope.launch { drawerState.close() } }
-            ) 
+            )
         }
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            FuturisticBackground()
-            Scaffold(
-                topBar = {
-                    if (!isSearchActive) {
-                        CenterAlignedTopAppBar(
-                            title = { 
-                                Text(
-                                    "STREAMX ULTRA", 
-                                    fontWeight = FontWeight.ExtraBold, 
-                                    color = Color.White
-                                ) 
-                            },
-                            navigationIcon = {
-                                IconButton(onClick = { scope.launch { drawerState.open() } }) { 
-                                    Icon(
-                                        Icons.Default.Menu, 
-                                        "Menu", 
-                                        tint = Color.Cyan
-                                    ) 
-                                }
-                            },
-                            actions = {
-                                IconButton(onClick = { isSearchActive = true }) { 
-                                    Icon(
-                                        Icons.Default.Search, 
-                                        "Search", 
-                                        tint = Color.Cyan
-                                    ) 
-                                }
-                            },
-                            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                                containerColor = Color.Transparent
-                            )
-                        )
+        FuturisticBackground()
+
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { if (!isSearchActive) Text("STREAMX ULTRA", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 2.sp)) },
+                    navigationIcon = {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                        }
+                    },
+                    actions = {
+                        // সার্চ আইকনে ক্লিক করলে সার্চবার فعال হবে
+                        IconButton(onClick = { isSearchActive = true }) {
+                            Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.secondary)
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                )
+            },
+            containerColor = Color.Transparent
+        ) { padding ->
+
+            val filteredChannels = remember(searchQuery, selectedCategory, allChannels.value, favoriteIds) {
+                allChannels.value.filter { channel ->
+                    val matchesSearch = channel.name.contains(searchQuery, ignoreCase = true)
+                    val matchesCategory = when (selectedCategory) {
+                        "All" -> true
+                        "Favorites" -> channel.id in favoriteIds
+                        else -> channel.category == selectedCategory
                     }
-                },
-                containerColor = Color.Transparent
-            ) { padding ->
-                Column(modifier = Modifier.padding(padding)) {
-                    if (isSearchActive) {
-                        SearchUI(
-                            allChannels = allChannels,
-                            onClose = { isSearchActive = false },
-                            onChannelClick = { ch -> 
-                                selectedChannelForLinks = ch
-                                showLinkSelectorDialog = true 
-                            }
-                        )
-                    } else {
-                        HomeTabRow(
-                            selectedTab = currentTab, 
-                            onTabSelected = { currentTab = it }
-                        )
-                        AnimatedContent(
-                            targetState = currentTab,
-                            label = "tab_content",
-                            transitionSpec = { 
-                                fadeIn(tween(300)) togetherWith fadeOut(tween(300)) 
-                            }
-                        ) { tab ->
-                            when (tab) {
-                                HomeTab.EVENTS -> EventsContent(
-                                    navController, 
-                                    homeViewModel, 
-                                    isLoading
-                                ) { ch -> 
-                                    selectedChannelForLinks = ch
-                                    showLinkSelectorDialog = true 
+                    matchesSearch && matchesCategory
+                }
+            }
+
+            // সার্চবার فعال থাকলে পুরো স্ক্রিন জুড়ে দেখাবে
+            if (isSearchActive) {
+                SearchBar(
+                    query = searchQuery,
+                    onQueryChange = { searchQuery = it },
+                    onSearch = { isSearchActive = false }, // সার্চ বাটনে ক্লিক করলে সার্চবার বন্ধ হবে
+                    active = true,
+                    onActiveChange = { isSearchActive = it },
+                    placeholder = { Text("Search TV Channels...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Close, "Clear search") }
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    // সার্চ রেজাল্ট দেখানো হচ্ছে
+                    LazyColumn {
+                        items(filteredChannels) { channel ->
+                            ListItem(
+                                headlineContent = { Text(channel.name) },
+                                modifier = Modifier.clickable {
+                                    if (channel.streamUrls.isNotEmpty()) {
+                                        selectedChannelForLinks = channel
+                                        showLinkSelectorDialog = true
+                                        isSearchActive = false // চ্যানেল সিলেক্ট করলে সার্চবার বন্ধ হবে
+                                    }
                                 }
-                                HomeTab.LIVE_TV -> LiveTVContent(
-                                    homeViewModel, 
-                                    isLoading
-                                ) { ch -> 
-                                    selectedChannelForLinks = ch
-                                    showLinkSelectorDialog = true 
-                                }
-                                HomeTab.FAVORITES -> FavoritesContent(
-                                    homeViewModel
-                                ) { ch -> 
-                                    selectedChannelForLinks = ch
-                                    showLinkSelectorDialog = true 
+                            )
+                        }
+                    }
+                }
+            } else {
+                // সার্চবার فعال না থাকলে সাধারণ হোম স্ক্রিন দেখাবে
+                if (isLoading) {
+                    LoadingShimmerEffect(modifier = Modifier.padding(padding))
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
+                        val featured = allChannels.value.filter { it.isFeatured }
+                        if (featured.isNotEmpty()) {
+                            item { FeaturedCarousel(featured, navController) }
+                        }
+                        item { CategoryTabs(categories.value, selectedCategory) { selectedCategory = it } }
+                        
+                        if (filteredChannels.isEmpty()) {
+                            item { EmptyState(isFavorites = selectedCategory == "Favorites") }
+                        } else {
+                            items(filteredChannels.chunked(3)) { rowItems ->
+                                Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), Arrangement.spacedBy(16.dp)) {
+                                    rowItems.forEach { channel ->
+                                        ChannelCard(
+                                            channel = channel,
+                                            isFavorite = channel.id in favoriteIds,
+                                            modifier = Modifier.weight(1f),
+                                            onFavoriteToggle = {
+                                                scope.launch {
+                                                    context.dataStore.edit { prefs ->
+                                                        val current = prefs[FAVORITES_KEY] ?: emptySet()
+                                                        prefs[FAVORITES_KEY] = if (channel.id in current) current - channel.id else current + channel.id
+                                                    }
+                                                }
+                                            },
+                                            onClick = {
+                                                if (channel.streamUrls.isNotEmpty()) {
+                                                    selectedChannelForLinks = channel
+                                                    showLinkSelectorDialog = true
+                                                }
+                                            }
+                                        )
+                                    }
+                                    repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
                                 }
                             }
                         }
+                        item { Spacer(modifier = Modifier.height(100.dp)) }
                     }
                 }
             }
         }
     }
     
-    // Dialogs
-    if (showLinkSelectorDialog && selectedChannelForLinks != null) { 
+    if (showLinkSelectorDialog && selectedChannelForLinks != null) {
         LinkSelectorDialog(
-            selectedChannelForLinks!!, 
-            { showLinkSelectorDialog = false }
-        ) { url ->
-            showLinkSelectorDialog = false
-            val encodedUrl = URLEncoder.encode(url, "UTF-8")
-            navController.navigate("player/$encodedUrl")
-        }
+            channel = selectedChannelForLinks!!,
+            onDismiss = { showLinkSelectorDialog = false },
+            onLinkSelected = { selectedUrl ->
+                showLinkSelectorDialog = false
+                val encodedUrl = URLEncoder.encode(selectedUrl, "UTF-8")
+                navController.navigate("player/$encodedUrl")
+            }
+        )
     }
-    
-    if (showUpdateDialog && latestReleaseInfo != null) { 
+
+    if (showUpdateDialog && latestReleaseInfo != null) {
         UpdateDialog(
-            latestReleaseInfo!!, 
-            { showUpdateDialog = false }
-        ) {
-            showUpdateDialog = false
-            UpdateChecker.downloadAndInstall(context, latestReleaseInfo!!)
-        }
-    }
-}
-
-// --- Content Composables ---
-
-@Composable
-fun EventsContent(
-    navController: NavController, 
-    homeViewModel: HomeViewModel, 
-    isLoading: Boolean, 
-    onChannelClick: (Channel) -> Unit
-) {
-    val liveEvents by homeViewModel.liveEvents.collectAsState()
-    val upcomingEvents by homeViewModel.upcomingEvents.collectAsState()
-    val allChannels by homeViewModel.allChannels.collectAsState()
-
-    if (isLoading && liveEvents.isEmpty() && upcomingEvents.isEmpty()) {
-        LoadingShimmer()
-    } else if (liveEvents.isEmpty() && upcomingEvents.isEmpty()) {
-        EmptyStateMessage("No Live Events Found")
-    } else {
-        LazyColumn(contentPadding = PaddingValues(bottom = 20.dp)) {
-            item { 
-                FeaturedCarousel(
-                    channels = allChannels.filter { it.isFeatured }, 
-                    navController = navController, 
-                    onChannelClick = onChannelClick
-                ) 
+            release = latestReleaseInfo!!,
+            onDismiss = { showUpdateDialog = false },
+            onUpdateClick = {
+                showUpdateDialog = false
+                UpdateChecker.downloadAndInstall(context, latestReleaseInfo!!)
             }
-            if (liveEvents.isNotEmpty()) {
-                item { SectionHeader("LIVE NOW 🔥") }
-                items(liveEvents) { event -> 
-                    EventCard(
-                        event, 
-                        allChannels, 
-                        onChannelClick
-                    ) 
-                }
-            }
-            if (upcomingEvents.isNotEmpty()) {
-                item { SectionHeader("UPCOMING ⏰") }
-                items(upcomingEvents) { event -> 
-                    EventCard(
-                        event, 
-                        allChannels, 
-                        onChannelClick
-                    ) 
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun LiveTVContent(
-    viewModel: HomeViewModel, 
-    isLoading: Boolean, 
-    onChannelClick: (Channel) -> Unit
-) {
-    val allChannels by viewModel.allChannels.collectAsState()
-    val genres = remember { ChannelGenre.values().filterNot { it == ChannelGenre.UNKNOWN } }
-    var selectedGenre by remember { mutableStateOf<ChannelGenre?>(null) }
-
-    if (isLoading && allChannels.isEmpty()) {
-        LoadingShimmer()
-    } else {
-        LazyColumn(contentPadding = PaddingValues(bottom = 20.dp)) {
-            item {
-                LazyRow(
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(genres) { genre ->
-                        val isSelected = selectedGenre == genre
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { 
-                                selectedGenre = if (isSelected) null else genre 
-                            },
-                            label = { 
-                                Text(
-                                    genre.name.lowercase()
-                                        .replaceFirstChar { it.uppercase() }, 
-                                    color = if(isSelected) Color.Black else Color.White
-                                ) 
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color.Cyan, 
-                                containerColor = Color.White.copy(0.1f)
-                            )
-                        )
-                    }
-                }
-            }
-
-            val grouped = remember(allChannels, selectedGenre) {
-                val filtered = if (selectedGenre != null) 
-                    allChannels.filter { it.genre == selectedGenre } 
-                else allChannels
-                filtered.groupBy { it.country }
-            }
-
-            grouped.forEach { (country, channels) ->
-                if (channels.isNotEmpty()) {
-                    item { SectionHeader(country) }
-                    item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(items = channels.take(8), key = { it.id }) { channel ->
-                                SmallChannelCard(channel) { onChannelClick(channel) }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun FavoritesContent(
-    viewModel: HomeViewModel, 
-    onChannelClick: (Channel) -> Unit
-) {
-    val context = LocalContext.current
-    val allChannels by viewModel.allChannels.collectAsState()
-    val favoriteIds by context.dataStore.data.map { 
-        it[FAVORITES_KEY] ?: emptySet() 
-    }.collectAsState(initial = emptySet())
-    val favorites = remember(allChannels, favoriteIds) { 
-        allChannels.filter { it.id in favoriteIds } 
-    }
-
-    if (favorites.isEmpty()) {
-        EmptyStateMessage("No Favorites Yet")
-    } else {
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(100.dp),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            items(items = favorites, key = { it.id }) { channel -> 
-                SmallChannelCard(channel) { onChannelClick(channel) } 
-            }
-        }
-    }
-}
-
-// --- Helper Composables ---
-
-@Composable
-fun HomeTabRow(selectedTab: HomeTab, onTabSelected: (HomeTab) -> Unit) {
-    TabRow(
-        selectedTabIndex = selectedTab.ordinal,
-        containerColor = Color.Transparent,
-        contentColor = Color.Cyan,
-        indicator = { tabPositions ->
-            TabRowDefaults.Indicator(
-                Modifier.tabIndicatorOffset(tabPositions[selectedTab.ordinal]),
-                color = Color.Cyan,
-                height = 3.dp
-            )
-        },
-        divider = { 
-            HorizontalDivider(color = Color.White.copy(0.1f)) 
-        }
-    ) {
-        HomeTab.values().forEach { tab ->
-            Tab(
-                selected = selectedTab == tab,
-                onClick = { onTabSelected(tab) },
-                text = { 
-                    Text(
-                        tab.name.replace("_", " "), 
-                        fontWeight = FontWeight.Bold
-                    ) 
-                },
-                unselectedContentColor = Color.White.copy(0.6f)
-            )
-        }
-    }
-}
-
-@Composable
-fun EventCard(
-    event: Event, 
-    allChannels: List<Channel>, 
-    onChannelClick: (Channel) -> Unit
-) {
-    val channels = remember(event.channelIds, allChannels) { 
-        allChannels.filter { it.id in event.channelIds } 
-    }
-    
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Color.White.copy(0.08f)
-        ),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically, 
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally, 
-                    modifier = Modifier.weight(1f)
-                ) {
-                    AsyncImage(
-                        model = event.team1Logo, 
-                        contentDescription = null, 
-                        modifier = Modifier.size(40.dp)
-                    )
-                    Text(
-                        event.title.split(" vs ").firstOrNull() ?: "", 
-                        color = Color.White, 
-                        fontSize = 12.sp, 
-                        maxLines = 1
-                    )
-                }
-                Text(
-                    "VS", 
-                    color = Color.Red, 
-                    fontWeight = FontWeight.Bold, 
-                    fontSize = 20.sp, 
-                    modifier = Modifier.padding(horizontal = 8.dp)
-                )
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally, 
-                    modifier = Modifier.weight(1f)
-                ) {
-                    AsyncImage(
-                        model = event.team2Logo, 
-                        contentDescription = null, 
-                        modifier = Modifier.size(40.dp)
-                    )
-                    Text(
-                        event.title.split(" vs ").lastOrNull()
-                            ?.split(",")
-                            ?.firstOrNull() ?: "", 
-                        color = Color.White, 
-                        fontSize = 12.sp, 
-                        maxLines = 1
-                    )
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                event.tournament, 
-                color = Color.Cyan, 
-                fontSize = 12.sp, 
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            )
-            
-            if (channels.isNotEmpty()) {
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 8.dp), 
-                    color = Color.White.copy(0.1f)
-                )
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(channels) { ch ->
-                        AsyncImage(
-                            model = ch.logoUrl, 
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .clickable { onChannelClick(ch) }
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun SmallChannelCard(
-    channel: Channel, 
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .width(100.dp)
-            .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = Color.White.copy(0.1f)
-            ),
-            modifier = Modifier
-                .size(100.dp)
-                .border(
-                    1.dp, 
-                    Color.White.copy(0.1f), 
-                    RoundedCornerShape(20.dp)
-                )
-        ) {
-            Box(
-                Modifier.fillMaxSize(), 
-                contentAlignment = Alignment.Center
-            ) {
-                AsyncImage(
-                    model = channel.logoUrl, 
-                    contentDescription = channel.name,
-                    modifier = Modifier.fillMaxSize(0.7f), 
-                    contentScale = ContentScale.Fit,
-                    placeholder = painterResource(id = R.mipmap.ic_launcher)
-                )
-            }
-        }
-        Text(
-            text = channel.name, 
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1, 
-            color = Color.White.copy(0.8f),
-            modifier = Modifier.padding(top = 6.dp), 
-            textAlign = TextAlign.Center
         )
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun FeaturedCarousel(
-    channels: List<Channel>, 
-    navController: NavController, 
-    onChannelClick: (Channel) -> Unit
-) {
-    if (channels.isEmpty()) return
-    val pagerState = rememberPagerState(pageCount = { channels.size })
-    
-    LaunchedEffect(pagerState.pageCount) { 
-        if (pagerState.pageCount > 1) { 
-            while (true) { 
-                delay(5000L)
-                pagerState.animateScrollToPage(
-                    (pagerState.currentPage + 1) % pagerState.pageCount
-                ) 
-            } 
-        } 
-    }
-    
-    HorizontalPager(
-        state = pagerState, 
-        contentPadding = PaddingValues(horizontal = 32.dp), 
-        pageSpacing = 16.dp, 
-        modifier = Modifier.padding(vertical = 16.dp)
-    ) { page ->
-        val pageOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-        Card(
-            modifier = Modifier
-                .graphicsLayer { 
-                    // FIX: Manual calculation instead of using lerp function to avoid Composable scope errors
-                    val fraction = 1f - pageOffset.absoluteValue.coerceIn(0f, 1f)
-                    val startScale = 0.85f
-                    val stopScale = 1f
-                    val scale = startScale + (stopScale - startScale) * fraction
-
-                    scaleX = scale
-                    scaleY = scale
-                    
-                    // Same manual calc for alpha (0.5 to 1.0)
-                    val startAlpha = 0.5f
-                    val stopAlpha = 1f
-                    alpha = startAlpha + (stopAlpha - startAlpha) * fraction
-                }
-                .fillMaxWidth()
-                .height(180.dp)
-                .clickable { onChannelClick(channels[page]) },
-            shape = RoundedCornerShape(24.dp)
-        ) {
-            Box {
-                AsyncImage(
-                    model = channels[page].logoUrl, 
-                    contentDescription = null, 
-                    modifier = Modifier.fillMaxSize(), 
-                    contentScale = ContentScale.Crop
-                )
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, Color.Black.copy(0.9f))
-                            )
-                        )
-                )
-                Text(
-                    channels[page].name, 
-                    color = Color.White, 
-                    fontWeight = FontWeight.Bold, 
-                    fontSize = 20.sp, 
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(16.dp)
-                )
-            }
-        }
-    }
-}
-
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SearchUI(
-    allChannels: List<Channel>, 
-    onClose: () -> Unit, 
-    onChannelClick: (Channel) -> Unit
-) {
-    var query by remember { mutableStateOf("") }
-    val filtered = remember(query) { 
-        if(query.isEmpty()) emptyList() 
-        else allChannels.filter { it.name.contains(query, true) } 
-    }
-    
-    SearchBar(
-        query = query, 
-        onQueryChange = { query = it }, 
-        onSearch = {}, 
-        active = true, 
-        onActiveChange = { if(!it) onClose() },
-        placeholder = { Text("Search channels...") },
-        leadingIcon = { Icon(Icons.Default.Search, null) },
-        trailingIcon = { 
-            IconButton(onClick = onClose) { 
-                Icon(Icons.Default.Close, null) 
-            } 
-        }
-    ) {
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(100.dp), 
-            contentPadding = PaddingValues(16.dp), 
-            verticalArrangement = Arrangement.spacedBy(16.dp), 
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            items(items = filtered, key = { it.id }) { ch -> 
-                SmallChannelCard(ch) { onChannelClick(ch) } 
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AppDrawer(
-    navController: NavController, 
-    onCloseDrawer: () -> Unit
-) {
+fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
     ModalDrawerSheet(
-        drawerContainerColor = Color(0xFF121212)
+        drawerContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+        drawerContentColor = MaterialTheme.colorScheme.onSurface
     ) {
-        Spacer(Modifier.height(20.dp))
-        Text(
-            "STREAMX", 
-            color = Color.White, 
-            fontSize = 24.sp, 
-            fontWeight = FontWeight.Bold, 
-            modifier = Modifier.padding(24.dp)
-        )
-        HorizontalDivider(color = Color.Gray)
-        NavigationDrawerItem(
-            label = { Text("Home", color = Color.White) }, 
-            selected = true, 
-            onClick = onCloseDrawer, 
-            icon = { 
-                Icon(
-                    Icons.Default.Home, 
-                    null, 
-                    tint = Color.White
-                ) 
-            }, 
-            colors = NavigationDrawerItemDefaults.colors(
-                unselectedContainerColor = Color.Transparent
-            )
-        )
-        NavigationDrawerItem(
-            label = { Text("My Account", color = Color.White) }, 
-            selected = false, 
-            onClick = { navController.navigate("account") }, 
-            icon = { 
-                Icon(
-                    Icons.Default.Person, 
-                    null, 
-                    tint = Color.White
-                ) 
-            }, 
-            colors = NavigationDrawerItemDefaults.colors(
-                unselectedContainerColor = Color.Transparent
-            )
-        )
-        NavigationDrawerItem(
-            label = { Text("Settings", color = Color.White) }, 
-            selected = false, 
-            onClick = { navController.navigate("settings") }, 
-            icon = { 
-                Icon(
-                    Icons.Default.Settings, 
-                    null, 
-                    tint = Color.White
-                ) 
-            }, 
-            colors = NavigationDrawerItemDefaults.colors(
-                unselectedContainerColor = Color.Transparent
-            )
-        )
+        Spacer(Modifier.height(24.dp))
+        Text("STREAMX ULTRA", modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(0.2f), modifier = Modifier.padding(horizontal = 28.dp))
+        
+        NavigationDrawerItem(label = { Text("Home") }, selected = true, onClick = onCloseDrawer, icon = { Icon(Icons.Default.Home, null) }, colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = MaterialTheme.colorScheme.primary.copy(0.2f), unselectedContainerColor = Color.Transparent), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
+        NavigationDrawerItem(label = { Text("My Account") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("account") }, icon = { Icon(Icons.Default.Person, null) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
+        NavigationDrawerItem(label = { Text("Settings") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("settings") }, icon = { Icon(Icons.Default.Settings, null) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
+        NavigationDrawerItem(label = { Text("Theme") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("theme") }, icon = { Icon(Icons.Default.InvertColors, null) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
     }
 }
 
 @Composable
 fun FuturisticBackground() {
-    val infiniteTransition = rememberInfiniteTransition(label = "bg")
+    val infiniteTransition = rememberInfiniteTransition(label = "")
     val color1 by infiniteTransition.animateColor(
-        initialValue = Color(0xFF1A1A2E), 
-        targetValue = Color(0xFF16213E),
-        animationSpec = infiniteRepeatable(
-            tween(5000), 
-            RepeatMode.Reverse
-        ), 
-        label = "c1"
+        initialValue = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), targetValue = MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f),
+        animationSpec = infiniteRepeatable(tween(12000), RepeatMode.Reverse), label = ""
     )
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(listOf(color1, Color.Black))
-            )
-    )
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(color1, MaterialTheme.colorScheme.background))).blur(100.dp))
+    }
 }
 
 @Composable
-fun SectionHeader(title: String) { 
-    Text(
-        title, 
-        fontWeight = FontWeight.Bold, 
-        color = Color.Cyan, 
-        fontSize = 18.sp, 
-        modifier = Modifier.padding(
-            start = 16.dp, 
-            top = 24.dp, 
-            bottom = 8.dp
-        )
-    ) 
+fun LoadingShimmerEffect(modifier: Modifier = Modifier) {
+    LazyColumn(modifier = modifier, contentPadding = PaddingValues(16.dp)) {
+        item { Box(modifier = Modifier.fillMaxWidth().height(170.dp).padding(horizontal = 24.dp, vertical = 12.dp).shimmer().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(32.dp))) }
+        item { LazyRow(contentPadding = PaddingValues(horizontal = 24.dp, vertical = 20.dp)) { items(5) { Box(modifier = Modifier.padding(end = 10.dp).shimmer().size(width = 100.dp, height = 36.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), CircleShape)) } } }
+        items(5) { Row(modifier = Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) { repeat(3) { Column(modifier = Modifier.weight(1f).shimmer(), horizontalAlignment = Alignment.CenterHorizontally) { Box(modifier = Modifier.aspectRatio(1f).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(28.dp))); Spacer(modifier = Modifier.height(8.dp)); Box(modifier = Modifier.height(12.dp).fillMaxWidth(0.7f).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(4.dp))) } } } }
+    }
 }
 
 @Composable
-fun EmptyStateMessage(msg: String) { 
-    Box(
-        Modifier.fillMaxSize(), 
-        contentAlignment = Alignment.Center
-    ) { 
-        Text(msg, color = Color.Gray, fontSize = 16.sp) 
-    } 
-}
-
-@Composable
-fun LoadingShimmer() { 
-    Column(Modifier.padding(16.dp)) { 
+fun ChannelCard(channel: Channel, isFavorite: Boolean, modifier: Modifier, onFavoriteToggle: () -> Unit, onClick: () -> Unit) {
+    Column(modifier = modifier.clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            Modifier
-                .fillMaxWidth()
-                .height(180.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .shimmer()
-                .background(Color.Gray)
-        )
-        Spacer(Modifier.height(16.dp))
-        Row { 
-            repeat(3) { 
-                Box(
-                    Modifier
-                        .size(100.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .shimmer()
-                        .background(Color.Gray)
-                )
-                Spacer(Modifier.width(16.dp)) 
-            } 
-        } 
-    } 
+            modifier = Modifier.aspectRatio(1f).clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.3f)).border(width = 1.dp, brush = Brush.horizontalGradient(colors = listOf(MaterialTheme.colorScheme.onSurface.copy(0.1f), MaterialTheme.colorScheme.primary.copy(0.2f))), shape = RoundedCornerShape(28.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(model = channel.logoUrl, contentDescription = null, modifier = Modifier.fillMaxSize(0.65f), contentScale = ContentScale.Fit)
+            Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(32.dp).clip(CircleShape).background(Color.Black.copy(0.3f)).clickable(onClick = onFavoriteToggle), contentAlignment = Alignment.Center) {
+                Icon(if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, tint = if (isFavorite) Color.Red else Color.White, modifier = Modifier.size(16.dp))
+            }
+        }
+        Text(channel.name, color = MaterialTheme.colorScheme.onSurface.copy(0.7f), fontSize = 11.sp, maxLines = 1, modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.Medium)
+    }
 }
 
 @Composable
-fun LinkSelectorDialog(
-    channel: Channel, 
-    onDismiss: () -> Unit, 
-    onLinkSelected: (String) -> Unit
-) {
-    Dialog(onDismissRequest = onDismiss) {
+fun CategoryTabs(categories: List<String>, selected: String, onSelect: (String) -> Unit) {
+    LazyRow(contentPadding = PaddingValues(horizontal = 24.dp, vertical = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(categories) { cat ->
+            val isSelected = cat == selected
+            Box(modifier = Modifier.clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)).clickable { onSelect(cat) }.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                Text(cat, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(0.6f), fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Normal, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun FeaturedCarousel(featured: List<Channel>, navController: NavController) {
+    val pagerState = rememberPagerState(pageCount = { featured.size })
+
+    LaunchedEffect(pagerState.pageCount) {
+        if (pagerState.pageCount > 1) { while (true) { delay(5000L); val nextPage = (pagerState.currentPage + 1) % pagerState.pageCount; pagerState.animateScrollToPage(nextPage) } }
+    }
+
+    HorizontalPager(state = pagerState, contentPadding = PaddingValues(horizontal = 40.dp), modifier = Modifier.padding(top = 12.dp, bottom = 12.dp)) { page ->
+        val pageOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
         Card(
-            colors = CardDefaults.cardColors(
-                containerColor = Color(0xFF1E1E1E)
-            )
+            modifier = Modifier
+                .graphicsLayer {
+                    val scale = lerp(0.85f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f))
+                    scaleX = scale; scaleY = scale; alpha = lerp(0.5f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f))
+                }
+                .fillMaxWidth().height(170.dp).clickable { if (featured[page].streamUrls.isNotEmpty()) { val encodedUrl = URLEncoder.encode(featured[page].streamUrls.first(), "UTF-8"); navController.navigate("player/$encodedUrl") } },
+            shape = RoundedCornerShape(32.dp)
         ) {
-            Column(Modifier.padding(16.dp)) {
-                Text(
-                    channel.name, 
-                    color = Color.White, 
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(16.dp))
-                LazyColumn { 
-                    itemsIndexed(channel.streamUrls) { i, url -> 
-                        TextButton(
-                            onClick = { onLinkSelected(url) }, 
-                            modifier = Modifier.fillMaxWidth()
-                        ) { 
-                            Text("Link ${i + 1}", color = Color.Cyan) 
-                        } 
-                    } 
+            Box {
+                AsyncImage(model = featured[page].logoUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.85f)))))
+                Text(featured[page].name, color = Color.White, fontWeight = FontWeight.Black, fontSize = 20.sp, modifier = Modifier.align(Alignment.BottomStart).padding(20.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun EmptyState(isFavorites: Boolean) {
+    Box(Modifier.fillMaxWidth().padding(top = 80.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(if (isFavorites) "Your favorites list is empty" else "No matching channels", color = MaterialTheme.colorScheme.onSurface.copy(0.4f), fontSize = 15.sp)
+            Text(if (isFavorites) "Tap the heart to save channels" else "Try another search term", color = MaterialTheme.colorScheme.secondary.copy(0.5f), fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+fun LinkSelectorDialog(channel: Channel, onDismiss: () -> Unit, onLinkSelected: (String) -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Column(modifier = Modifier.padding(vertical = 16.dp)) {
+                Text("Multiple Links Available", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(0.1f))
+                LazyColumn {
+                    itemsIndexed(channel.streamUrls) { index, url ->
+                        Text("LINK ${index + 1}", color = MaterialTheme.colorScheme.onSurface.copy(0.9f), fontSize = 16.sp, modifier = Modifier.fillMaxWidth().clickable { onLinkSelected(url) }.padding(horizontal = 24.dp, vertical = 16.dp))
+                    }
                 }
             }
         }
@@ -932,24 +407,15 @@ fun LinkSelectorDialog(
 }
 
 @Composable
-fun UpdateDialog(
-    release: GitHubRelease, 
-    onDismiss: () -> Unit, 
-    onUpdateClick: () -> Unit
-) {
+fun UpdateDialog(release: GitHubRelease, onDismiss: () -> Unit, onUpdateClick: () -> Unit) {
     AlertDialog(
-        onDismissRequest = onDismiss, 
-        title = { Text("Update Available") }, 
-        text = { Text("Version ${release.tag_name}") }, 
-        confirmButton = { 
-            Button(onClick = onUpdateClick) { 
-                Text("Update") 
-            } 
-        }, 
-        dismissButton = { 
-            TextButton(onClick = onDismiss) { 
-                Text("Later") 
-            } 
-        }
+        onDismissRequest = onDismiss,
+        title = { Text("New Update Available! (${release.tag_name})") },
+        text = {
+            val cleanBody = release.body.lines().filterNot { it.startsWith("versionCode:") }.joinToString("\n")
+            Text(cleanBody)
+        },
+        confirmButton = { Button(onClick = onUpdateClick) { Text("Update Now") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Later") } }
     )
 }

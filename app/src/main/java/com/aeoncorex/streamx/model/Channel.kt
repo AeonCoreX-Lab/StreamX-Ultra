@@ -1,7 +1,6 @@
 package com.aeoncorex.streamx.model
 
 import com.google.gson.annotations.SerializedName
-import com.aeoncorex.streamx.util.ChannelGenre
 
 data class Channel(
     @SerializedName("id")
@@ -16,15 +15,15 @@ data class Channel(
     @SerializedName("streamUrls")
     val streamUrls: List<String> = emptyList(),
 
-    @SerializedName("country")
-    val country: String = "",
+    @SerializedName("category")
+    var category: String = "",
 
     @SerializedName("isFeatured")
     val isFeatured: Boolean = false,
 
-    @SerializedName("genre")
-    var genre: ChannelGenre = ChannelGenre.UNKNOWN
-) {
-    // Optional: সহজে access করার জন্য function
-    fun hasStreams(): Boolean = streamUrls.isNotEmpty()
-}
+    @SerializedName("isHD")
+    val isHD: Boolean = false,
+
+    @SerializedName("ageGroup")
+    val ageGroup: String? = null
+)

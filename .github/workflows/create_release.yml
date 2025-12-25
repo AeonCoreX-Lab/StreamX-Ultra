@@ -1,6 +1,7 @@
 name: Create New Release
 
 on:
+  # v1.0, v1.1, v1.2.1 এই ধরনের ট্যাগ পুশ করলেই এই Workflow চলবে
   push:
     tags:
       - 'v*.*'
@@ -8,88 +9,88 @@ on:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+
+    # রিলিজ তৈরি করার জন্য প্রয়োজনীয় 'write' পারমিশন
     permissions:
       contents: write
 
     steps:
+      # ধাপ ১: রিপোজিটরির কোড আনা
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ধাপ ২: JDK 17 সেটআপ করা
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: gradle
 
-      - name: Cache Gradle
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
+      # ধাপ ৩: GitHub Secrets থেকে Keystore ডিকোড করা
       - name: Decode Keystore
         run: |
           echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > ${{ github.workspace }}/release.keystore
 
+      # ধাপ ৪: gradlew ফাইলকে এক্সিকিউট করার অনুমতি দেওয়া
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      # ধাপ ৫: সাইন করা রিলিজ APK তৈরি করা
       - name: Build Signed Release APK
         env:
+          # এনভায়রনমেন্ট ভেরিয়েবল হিসেবে তথ্য সেট করা
           RELEASE_KEYSTORE_FILE: ${{ github.workspace }}/release.keystore
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
+          # প্রজেক্ট প্রপার্টি হিসেবেও তথ্য পাস করা হচ্ছে (বুলেটপ্রুফ সমাধান)
           ./gradlew assembleRelease \
             -PRELEASE_KEYSTORE_FILE=${{ env.RELEASE_KEYSTORE_FILE }} \
             -PRELEASE_KEYSTORE_PASSWORD=${{ env.RELEASE_KEYSTORE_PASSWORD }} \
             -PRELEASE_KEY_ALIAS=${{ env.RELEASE_KEY_ALIAS }} \
-            -PRELEASE_KEY_PASSWORD=${{ env.RELEASE_KEY_PASSWORD }} \
-            --no-daemon --stacktrace
+            -PRELEASE_KEY_PASSWORD=${{ env.RELEASE_KEY_PASSWORD }}
 
+      # ধাপ ৬ (ডিবাগিং): APK ফাইলটি কোথায় তৈরি হয়েছে তা প্রিন্ট করা
       - name: List Release Directory Files for Debugging
-        run: ls -R app/build/outputs/apk/release || echo "Release directory not found"
-      
+        run: ls -R app/build/outputs/apk/release
+
+      # ধাপ ৭: রিলিজ APK ফাইলটিকে Artifact হিসেবে আপলোড করা
       - name: Upload Release APK as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: StreamX-Ultra-Release-APK
           path: app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
 
+      # ধাপ ৮: রিলিজ নোট তৈরি এবং সংস্করণ তথ্য সংগ্রহ করা
       - name: Create Release Notes and Get Version Info
         id: create_notes
         run: |
-          # Fallback values if file parsing fails
-          VERSION_NAME="1.2"
-          VERSION_CODE="3"
+          VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | sed -n 's/.*versionName = "\(.*\)".*/\1/p')
+          VERSION_CODE=$(grep 'versionCode' app/build.gradle.kts | sed -n 's/.*versionCode = \([0-9]*\).*/\1/p')
 
-          if [ -f "app/build.gradle.kts" ]; then
-            VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | sed -n 's/.*versionName = "\(.*\)".*/\1/p') || echo "1.2"
-            VERSION_CODE=$(grep 'versionCode' app/build.gradle.kts | sed -n 's/.*versionCode = \([0-9]*\).*/\1/p') || echo "3"
-          fi
-
-          echo "## StreamX Ultra v$VERSION_NAME" > release_notes.md
+          # আপনি প্রতিটি নতুন রিলিজের আগে এই অংশটুকু পরিবর্তন করতে পারেন
+          echo "## StreamX Ultra v${VERSION_NAME} - The Ultimate Upgrade!" > release_notes.md
           echo "" >> release_notes.md
-          echo "**What's New:**" >> release_notes.md
-          echo "- Live Events Hub" >> release_notes.md
-          echo "- UI Improvements" >> release_notes.md
+          echo "**What's New in this Major Upgrade:**" >> release_notes.md
+          echo "- **Complete UI Overhaul:** Introduced a modern Bottom Navigation Bar for a smoother user experience, inspired by top streaming apps." >> release_notes.md
+          echo "- **Live Events Hub:** A new, dedicated 'Events' tab that automatically fetches and displays live and upcoming sports schedules." >> release_notes.md
+          echo "- **Advanced Categorization:** Implemented a dual-category system. You can now browse channels 'By Country' and 'By Genre' (Sports, News, etc.)." >> release_notes.md
+          echo "- **AI-Powered Backend:** A smart, automated script now categorizes channels by genre using AI, ensuring the library is always organized." >> release_notes.md
+          echo "- **New 'Live TV' Screen:** A redesigned screen to explore all channels, with powerful filtering options coming soon." >> release_notes.md
+          echo "- **Performance Enhancements:** Optimized data loading with ViewModel for a faster and more stable experience." >> release_notes.md
+          echo "" >> release_notes.md
+          echo "versionCode: ${VERSION_CODE}" >> release_notes.md
           
-          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "version_name=${VERSION_NAME}" >> $GITHUB_OUTPUT
           echo "notes_path=release_notes.md" >> $GITHUB_OUTPUT
 
+      # ধাপ ৯: GitHub রিলিজ তৈরি এবং APK আপলোড করা
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
+          # ওয়াইল্ডকার্ড ব্যবহার করে APK ফাইল খুঁজে বের করা হচ্ছে
           files: app/build/outputs/apk/release/*.apk
-          name: "StreamX Ultra v${{ steps.create_notes.outputs.version_name }}"
+          name: "Version ${{ steps.create_notes.outputs.version_name }}"
           tag_name: ${{ github.ref_name }}
           body_path: ${{ steps.create_notes.outputs.notes_path }}
-          draft: false
-          prerelease: false

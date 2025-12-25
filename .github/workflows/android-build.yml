@@ -1,54 +1,48 @@
-
+ওয়ার্কফ্লোর নাম
 name: StreamX-Ultra APK & Keys
-
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
-
+push:
+branches:
+- main
+workflow_dispatch:
 jobs:
-  build:
-    runs-on: ubuntu-latest
+build:
+runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+steps:
+  # ধাপ ১: রিপোজিটরির কোড আনা
+  - name: Checkout repository
+    uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: gradle
+  # ধাপ ২: JDK 17 সেটআপ করা
+  - name: Set up JDK 17
+    uses: actions/setup-java@v4
+    with:
+      java-version: '17'
+      distribution: 'temurin'
+      cache: gradle
 
-      - name: Cache Gradle
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+  # ধাপ ৩: Gradle Wrapper-কে এক্সিকিউট করার অনুমতি দেওয়া
+  - name: Grant execute permission for gradlew
+    run: chmod +x gradlew
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+  # ধাপ ৪: Gradle ব্যবহার করে ডিবাগ APK বিল্ড করা (এটি debug.keystore তৈরি করে)
+  - name: Build Debug APK
+    run: ./gradlew assembleDebug
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+  # ধাপ ৫: Gradle signingReport টাস্ক ব্যবহার করে সব কী প্রিন্ট করা
+  - name: Generate and Print Signing Keys (SHA-1, SHA-256)
+    run: |
+      echo "===================================================================="
+      echo "🔑 GENERATING ALL SIGNING FINGERPRINTS..."
+      echo "===================================================================="
+      ./gradlew signingReport
+      echo "===================================================================="
+      echo "Copy the SHA-1 and SHA-256 values from the 'Variant: debug' section above."
 
-      - name: Generate and Print Signing Keys (SHA-1, SHA-256)
-        run: |
-          echo "===================================================================="
-          echo "🔑 GENERATING ALL SIGNING FINGERPRINTS..."
-          echo "===================================================================="
-          ./gradlew signingReport
-          echo "===================================================================="
-          echo "Copy the SHA-1 and SHA-256 values from the 'Variant: debug' section above."
-
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: StreamX-Ultra-Debug-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+  # ধাপ ৬: বিল্ড হওয়া APK ফাইলটিকে Artifact হিসেবে আপলোড করা
+  - name: Upload Debug APK
+    uses: actions/upload-artifact@v4
+    with:
+      name: StreamX-Ultra-Debug-APK
+      path: app/build/outputs/apk/debug/app-debug.apk
