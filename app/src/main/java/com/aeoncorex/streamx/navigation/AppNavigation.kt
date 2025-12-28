@@ -15,7 +15,6 @@ import com.aeoncorex.streamx.ui.settings.SettingsScreen
 import com.aeoncorex.streamx.ui.splash.SplashScreen
 import com.aeoncorex.streamx.ui.theme.ThemeScreen
 import com.aeoncorex.streamx.ui.theme.ThemeViewModel
-// --- ADDED IMPORTS ---
 import com.aeoncorex.streamx.ui.privacy.PrivacyPolicyScreen
 import com.aeoncorex.streamx.ui.about.AboutScreen
 
@@ -38,9 +37,10 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
         ) { backStackEntry ->
             val encodedUrl = backStackEntry.arguments?.getString("encodedUrl") ?: ""
+            // FIX: Passed navController and removed onBack to match PlayerScreen definition
             PlayerScreen(
-                encodedUrl = encodedUrl,
-                onBack = { navController.popBackStack() }
+                navController = navController,
+                encodedUrl = encodedUrl
             )
         }
         
@@ -58,7 +58,7 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         }
         composable("about") {
             AboutScreen(navController)
-        } // --- FIXED: Added missing closing brace here ---
+        }
         
         composable("copyright") {
             CopyrightScreen(navController)
