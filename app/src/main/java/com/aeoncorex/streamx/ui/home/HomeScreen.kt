@@ -32,6 +32,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha // FIXED: Added missing import
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -704,7 +705,7 @@ fun LinkSelectorDialog(channel: Channel, onDismiss: () -> Unit, onLinkSelected: 
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(Icons.Default.PlayArrow, null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(width = 16.dp)
+                            Spacer(modifier = Modifier.width(16.dp)) // FIXED: Added modifier wrapper
                             Text("Server ${index + 1}", color = Color.White, fontWeight = FontWeight.Medium)
                         }
                     }
