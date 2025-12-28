@@ -1,5 +1,6 @@
 package com.aeoncorex.streamx.ui.home
 
+import android.app.Activity
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -9,9 +10,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -32,7 +31,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha // FIXED: Added missing import
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -103,10 +102,12 @@ fun HomeScreen(navController: NavController) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var showUpdateDialog by remember { mutableStateOf(false) }
     var latestReleaseInfo by remember { mutableStateOf<GitHubRelease?>(null) }
-    
+
     // No Internet & Refresh States
     var showNoInternetDialog by remember { mutableStateOf(false) }
     var isRefreshing by remember { mutableStateOf(false) }
+    
+    // Refresh State Config
     val pullRefreshState = rememberPullToRefreshState()
 
     val favoriteIds by context.dataStore.data
@@ -114,11 +115,14 @@ fun HomeScreen(navController: NavController) {
         .collectAsState(initial = emptySet())
 
     // Function to fetch data
-    val fetchData: () -> Unit = {
+    val fetchData: (isRetry: Boolean) -> Unit = { isRetry ->
         scope.launch {
             if (!isInternetAvailable(context)) {
                 isLoading = false
                 isRefreshing = false
+                if(isRetry) {
+                    Toast.makeText(context, "Loading Failed", Toast.LENGTH_SHORT).show()
+                }
                 showNoInternetDialog = true
                 return@launch
             }
@@ -168,6 +172,9 @@ fun HomeScreen(navController: NavController) {
                 isLoading = false
                 isRefreshing = false
                 Log.e("API", "Failed to load data", e)
+                if(isRetry) {
+                    Toast.makeText(context, "Loading Failed", Toast.LENGTH_SHORT).show()
+                }
                 showNoInternetDialog = true // Show dialog on error
             }
         }
@@ -175,14 +182,15 @@ fun HomeScreen(navController: NavController) {
 
     // Initial Load
     LaunchedEffect(Unit) {
-        fetchData()
+        fetchData(false)
     }
 
     // Handle Pull to Refresh
     if (pullRefreshState.isRefreshing) {
         LaunchedEffect(true) {
             isRefreshing = true
-            fetchData()
+            fetchData(false)
+            delay(1000) // Small delay for UX
             pullRefreshState.endRefresh()
         }
     }
@@ -196,6 +204,7 @@ fun HomeScreen(navController: NavController) {
             )
         }
     ) {
+        // Dynamic Background based on Theme
         FuturisticBackground()
 
         Scaffold(
@@ -207,25 +216,25 @@ fun HomeScreen(navController: NavController) {
                                 "STREAMX ULTRA", 
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Black, 
-                                    color = Color.White, 
+                                    color = MaterialTheme.colorScheme.onBackground, // Dynamic Color
                                     letterSpacing = 1.5.sp
                                 )
                             ) 
                         },
                         navigationIcon = {
                             IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                                Icon(Icons.Default.Menu, contentDescription = "Menu", tint = MaterialTheme.colorScheme.onBackground)
                             }
                         },
                         actions = {
                             IconButton(onClick = { isSearchActive = true }) {
-                                Icon(Icons.Default.Search, null, tint = Color.White)
+                                Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onBackground)
                             }
                         },
                         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                            containerColor = Color.Black.copy(alpha = 0.2f) // Glassmorphic look
+                            containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.5f) // Dynamic Glass
                         ),
-                        modifier = Modifier.blur(0.dp) // Optional additional blur if supported
+                        modifier = Modifier.blur(0.dp)
                     )
                 }
             },
@@ -286,6 +295,7 @@ fun HomeScreen(navController: NavController) {
                     }
                 }
             } else {
+                // Main Content Box with Pull to Refresh
                 Box(modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
@@ -319,7 +329,7 @@ fun HomeScreen(navController: NavController) {
                             item { 
                                 CategoryTabs(categories.value, selectedCategory) { selectedCategory = it } 
                             }
-                            
+
                             // 3. Grid Content
                             if (filteredChannels.isEmpty()) {
                                 item { EmptyState(isFavorites = selectedCategory == "Favorites") }
@@ -358,18 +368,18 @@ fun HomeScreen(navController: NavController) {
                         }
                     }
 
-                    // Pull to Refresh Indicator
+                    // Pull to Refresh Indicator (Now Properly Overlayed)
                     PullToRefreshContainer(
                         state = pullRefreshState,
                         modifier = Modifier.align(Alignment.TopCenter),
-                        containerColor = MaterialTheme.colorScheme.surface,
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = MaterialTheme.colorScheme.primary
                     )
                 }
             }
         }
     }
-    
+
     // Link Selector Dialog
     if (showLinkSelectorDialog && selectedChannelForLinks != null) {
         LinkSelectorDialog(
@@ -399,10 +409,10 @@ fun HomeScreen(navController: NavController) {
         )
     }
 
-    // No Internet Dialog
+    // No Internet Dialog (Fixed)
     if (showNoInternetDialog) {
         AlertDialog(
-            onDismissRequest = { /* Prevent dismiss on outside click */ },
+            onDismissRequest = { /* Prevent dismiss */ },
             icon = { Icon(Icons.Rounded.SignalWifiOff, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
             title = { Text("No Internet Connection") },
             text = { Text("Please check your internet connection and try again.") },
@@ -411,55 +421,69 @@ fun HomeScreen(navController: NavController) {
                     onClick = {
                         showNoInternetDialog = false
                         isLoading = true
-                        fetchData()
+                        fetchData(true) // Pass true for retry
                     }
                 ) {
                     Text("Retry")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showNoInternetDialog = false }) {
+                TextButton(onClick = { 
+                    // Fixed: Close the App properly
+                    (context as? Activity)?.finish() 
+                }) {
                     Text("Close App")
                 }
-            }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
 
 // ----------------------------------------------------------------------------------
-// UI COMPONENTS
+// UI COMPONENTS (UPDATED FOR THEMING)
 // ----------------------------------------------------------------------------------
 
 @Composable
 fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
     ModalDrawerSheet(
-        drawerContainerColor = Color(0xFF121212).copy(alpha = 0.95f),
-        drawerContentColor = Color.White
+        drawerContainerColor = MaterialTheme.colorScheme.surface,
+        drawerContentColor = MaterialTheme.colorScheme.onSurface
     ) {
-        Box(modifier = Modifier.fillMaxWidth().height(200.dp).background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.primary, Color.Transparent))), contentAlignment = Alignment.BottomStart) {
-            Text("STREAMX ULTRA", modifier = Modifier.padding(24.dp), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Color.White)
+        Box(modifier = Modifier.fillMaxWidth().height(200.dp).background(
+            Brush.verticalGradient(
+                listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondaryContainer)
+            )
+        ), contentAlignment = Alignment.BottomStart) {
+            Text("STREAMX ULTRA", modifier = Modifier.padding(24.dp), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
         }
-        HorizontalDivider(color = Color.White.copy(0.1f))
-        
+        HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(0.1f))
+
         Spacer(Modifier.height(12.dp))
-        NavigationDrawerItem(label = { Text("Home") }, selected = true, onClick = onCloseDrawer, icon = { Icon(Icons.Default.Home, null) }, colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = MaterialTheme.colorScheme.primary.copy(0.2f), unselectedContainerColor = Color.Transparent, selectedTextColor = MaterialTheme.colorScheme.primary, unselectedTextColor = Color.White), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
-        NavigationDrawerItem(label = { Text("My Account") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("account") }, icon = { Icon(Icons.Default.Person, null) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent, unselectedTextColor = Color.White), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
-        NavigationDrawerItem(label = { Text("Settings") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("settings") }, icon = { Icon(Icons.Default.Settings, null) }, colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent, unselectedTextColor = Color.White), modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
+        NavigationDrawerItem(label = { Text("Home") }, selected = true, onClick = onCloseDrawer, icon = { Icon(Icons.Default.Home, null) }, modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
+        NavigationDrawerItem(label = { Text("My Account") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("account") }, icon = { Icon(Icons.Default.Person, null) }, modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
+        NavigationDrawerItem(label = { Text("Settings") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("settings") }, icon = { Icon(Icons.Default.Settings, null) }, modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding))
     }
 }
 
 @Composable
 fun FuturisticBackground() {
     val infiniteTransition = rememberInfiniteTransition(label = "")
+    
+    // UPDATED: Use Material Theme Colors for Background
     val color1 by infiniteTransition.animateColor(
-        initialValue = Color(0xFF0F2027), targetValue = Color(0xFF203A43),
-        animationSpec = infiniteRepeatable(tween(10000), RepeatMode.Reverse), label = ""
+        initialValue = MaterialTheme.colorScheme.surface, 
+        targetValue = MaterialTheme.colorScheme.surfaceContainer,
+        animationSpec = infiniteRepeatable(tween(5000), RepeatMode.Reverse), label = ""
     )
     val color2 by infiniteTransition.animateColor(
-        initialValue = Color(0xFF2C5364), targetValue = Color(0xFF0F2027),
-        animationSpec = infiniteRepeatable(tween(10000), RepeatMode.Reverse), label = ""
+        initialValue = MaterialTheme.colorScheme.surfaceContainer, 
+        targetValue = MaterialTheme.colorScheme.background,
+        animationSpec = infiniteRepeatable(tween(5000), RepeatMode.Reverse), label = ""
     )
-    
+
     Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(color1, color2))))
 }
 
@@ -471,49 +495,46 @@ fun ChannelCard(
     onFavoriteToggle: () -> Unit, 
     onClick: () -> Unit
 ) {
-    // High Level Card Design
     Card(
         modifier = modifier
             .aspectRatio(0.85f)
             .shadow(elevation = 8.dp, shape = RoundedCornerShape(20.dp), spotColor = MaterialTheme.colorScheme.primary)
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+        // UPDATED: Use Dynamic Colors
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Background Logo with low opacity
             AsyncImage(
                 model = channel.logoUrl,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize().padding(24.dp).alpha(0.8f),
                 contentScale = ContentScale.Fit
             )
-            
-            // Favorite Button
+
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp)
                     .size(32.dp)
                     .clip(CircleShape)
-                    .background(Color.Black.copy(0.4f))
+                    .background(MaterialTheme.colorScheme.surface.copy(0.4f))
                     .clickable(onClick = onFavoriteToggle),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     contentDescription = null,
-                    tint = if (isFavorite) Color(0xFFFF4081) else Color.White,
+                    tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(18.dp)
                 )
             }
 
-            // Name Overlay (Glassmorphism style at bottom)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.9f))))
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.scrim.copy(0.8f))))
                     .padding(10.dp)
             ) {
                 Text(
@@ -537,8 +558,8 @@ fun CategoryTabs(categories: List<String>, selected: String, onSelect: (String) 
     ) {
         items(categories) { cat ->
             val isSelected = cat == selected
-            val animatedColor by animateColorAsState(if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFF2D2D2D))
-            
+            val animatedColor by animateColorAsState(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
@@ -548,7 +569,7 @@ fun CategoryTabs(categories: List<String>, selected: String, onSelect: (String) 
             ) {
                 Text(
                     cat, 
-                    color = if (isSelected) Color.White else Color.Gray, 
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, 
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium, 
                     fontSize = 14.sp
                 )
@@ -562,24 +583,23 @@ fun CategoryTabs(categories: List<String>, selected: String, onSelect: (String) 
 fun FeaturedCarousel(featured: List<Channel>, navController: NavController, onChannelClick: (Channel) -> Unit) {
     val pagerState = rememberPagerState(pageCount = { featured.size })
 
-    // Auto Sliding Logic
     LaunchedEffect(pagerState.currentPage) {
         if (featured.isNotEmpty()) {
             delay(4000) 
             try {
                 val nextPage = (pagerState.currentPage + 1) % featured.size
                 pagerState.animateScrollToPage(nextPage, animationSpec = tween(800))
-            } catch (e: Exception) { /* Handle cancellation */ }
+            } catch (e: Exception) { }
         }
     }
 
     Column {
         Text(
             "Featured Channels", 
-            style = MaterialTheme.typography.titleMedium.copy(color = Color.White, fontWeight = FontWeight.Bold),
+            style = MaterialTheme.typography.titleMedium.copy(color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.Bold),
             modifier = Modifier.padding(start = 24.dp, top = 8.dp)
         )
-        
+
         HorizontalPager(
             state = pagerState,
             contentPadding = PaddingValues(horizontal = 32.dp),
@@ -588,7 +608,7 @@ fun FeaturedCarousel(featured: List<Channel>, navController: NavController, onCh
         ) { page ->
             val pageOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
             val scale = lerp(0.9f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f))
-            
+
             Card(
                 modifier = Modifier
                     .graphicsLayer {
@@ -600,20 +620,19 @@ fun FeaturedCarousel(featured: List<Channel>, navController: NavController, onCh
                     .height(180.dp)
                     .clickable { onChannelClick(featured[page]) },
                 shape = RoundedCornerShape(24.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Box {
                     AsyncImage(
                         model = featured[page].logoUrl,
                         contentDescription = null,
-                        contentScale = ContentScale.Crop, // Changed to Crop for better banner look
-                        modifier = Modifier.fillMaxSize().background(Color.DarkGray)
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant)
                     )
-                    
-                    // Gradient Overlay
+
                     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black))))
-                    
-                    // Play Icon
+
                     Icon(
                         Icons.Default.PlayCircleOutline, 
                         contentDescription = null, 
@@ -665,18 +684,18 @@ fun EmptyState(isFavorites: Boolean) {
         Icon(
             if (isFavorites) Icons.Default.FavoriteBorder else Icons.Rounded.Warning,
             contentDescription = null,
-            tint = Color.Gray,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(64.dp).padding(bottom = 16.dp)
         )
         Text(
             if (isFavorites) "No Favorites Yet" else "No Channels Found",
-            color = Color.White,
+            color = MaterialTheme.colorScheme.onBackground,
             fontSize = 18.sp,
             fontWeight = FontWeight.Bold
         )
         Text(
             if (isFavorites) "Mark channels as favorite to see them here" else "Try searching for something else",
-            color = Color.Gray,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 14.sp
         )
     }
@@ -687,10 +706,10 @@ fun LinkSelectorDialog(channel: Channel, onDismiss: () -> Unit, onLinkSelected: 
     Dialog(onDismissRequest = onDismiss) {
         Card(
             shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
-                Text("Select Stream", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color.White)
+                Text("Select Stream", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(modifier = Modifier.height(16.dp))
                 LazyColumn {
                     itemsIndexed(channel.streamUrls) { index, url ->
@@ -699,14 +718,14 @@ fun LinkSelectorDialog(channel: Channel, onDismiss: () -> Unit, onLinkSelected: 
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFF2D2D2D))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
                                 .clickable { onLinkSelected(url) }
                                 .padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(Icons.Default.PlayArrow, null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(16.dp)) // FIXED: Added modifier wrapper
-                            Text("Server ${index + 1}", color = Color.White, fontWeight = FontWeight.Medium)
+                            Spacer(modifier = Modifier.width(16.dp)) 
+                            Text("Server ${index + 1}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
                         }
                     }
                 }

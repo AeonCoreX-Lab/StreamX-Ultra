@@ -28,7 +28,7 @@ import com.aeoncorex.streamx.ui.home.FuturisticBackground
 fun AboutScreen(navController: NavController) {
     val context = LocalContext.current
     val packageInfo = getPackageInfo(context)
-    val versionName = packageInfo?.versionName ?: "N/A"
+    val versionName = packageInfo?.versionName ?: "1.2"
     
     Box(modifier = Modifier.fillMaxSize()) {
         FuturisticBackground()
