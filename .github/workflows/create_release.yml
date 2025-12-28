@@ -1,7 +1,7 @@
 name: Create New Release
 
 on:
-  # v1.0, v1.1, v1.2.1 এই ধরনের ট্যাগ পুশ করলেই এই Workflow চলবে
+  # v1.0, v1.1, v1.2 এই ধরনের ট্যাগ পুশ করলেই এই Workflow চলবে
   push:
     tags:
       - 'v*.*'
@@ -62,60 +62,49 @@ jobs:
           name: StreamX-Ultra-Release-APK
           path: app/build/outputs/apk/release/*.apk
 
-      # ধাপ ৮: রিলিজ নোট তৈরি এবং সংস্করণ তথ্য সংগ্রহ করা (আপডেট করা হয়েছে)
+      # ধাপ ৮: রিলিজ নোট তৈরি এবং সংস্করণ তথ্য সংগ্রহ করা (Updated for v1.2)
       - name: Create Release Notes and Get Version Info
         id: create_notes
         run: |
           VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | sed -n 's/.*versionName = "\(.*\)".*/\1/p')
           
-          # নতুন রিলিজ নোট তৈরি করা হচ্ছে
-          echo "🚀 StreamX Ultra v1.1 – The Ultimate Upgrade" > RELEASE_NOTES.md
+          # নতুন রিলিজ নোট তৈরি করা হচ্ছে (v1.2)
+          echo "🚀 StreamX Ultra v1.2 – Visual Intelligence & Player Mastery" > RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
 
-          echo "Official Live TV & IPTV Platform by AeonCoreX™" >> RELEASE_NOTES.md
-          echo "First Stable Public Release" >> RELEASE_NOTES.md
+          echo "The most significant UI/UX update yet. Redefined Home Screen & Cinema-Grade Player Experience." >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
 
-          echo "✨ What's New in v1.1" >> RELEASE_NOTES.md
-          echo "----------------------" >> RELEASE_NOTES.md
-
-          echo "🔐 Multi-Platform Authentication" >> RELEASE_NOTES.md
-          echo "- Login with Google" >> RELEASE_NOTES.md
-          echo "- Login with Facebook" >> RELEASE_NOTES.md
-          echo "- Login with GitHub" >> RELEASE_NOTES.md
+          echo "🎨 Aesthetic & Functional Home UI" >> RELEASE_NOTES.md
+          echo "---------------------------------" >> RELEASE_NOTES.md
+          echo "🔹 **Futuristic Glassmorphism Design:** All channel cards now feature a modern glass-effect with dynamic shadows." >> RELEASE_NOTES.md
+          echo "🔹 **Auto-Sliding Featured Banner:** Top banner now slides automatically and supports direct one-tap play." >> RELEASE_NOTES.md
+          echo "🔹 **Pull-to-Refresh:** Swipe down on the home screen to instantly reload channel lists." >> RELEASE_NOTES.md
+          echo "🔹 **Smart Connectivity Handling:** New 'No Internet' popup with retry mechanism for seamless error handling." >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
 
-          echo "🎨 Ultimate Auth Screen UI" >> RELEASE_NOTES.md
-          echo "- Fully redesigned Login & Sign Up screen" >> RELEASE_NOTES.md
-          echo "- Professional, modern & clean UI" >> RELEASE_NOTES.md
-          echo "- Optimized for all screen sizes" >> RELEASE_NOTES.md
+          echo "🎥 Next-Gen Player Controls" >> RELEASE_NOTES.md
+          echo "---------------------------------" >> RELEASE_NOTES.md
+          echo "✨ **Pinch-to-Zoom (YouTube Style):** Pinch out to fill the screen, pinch in to fit original aspect ratio." >> RELEASE_NOTES.md
+          echo "✨ **Advanced Aspect Ratio Control:** Manual toggle button for Fit, Fill, and Zoom modes." >> RELEASE_NOTES.md
+          echo "✨ **Smart Live Stream UI:** Replaces seekbar with a 'LIVE' badge for real-time broadcasts." >> RELEASE_NOTES.md
+          echo "✨ **Enhanced Gestures:** Smoother Volume & Brightness controls with visual feedback." >> RELEASE_NOTES.md
+          echo "✨ **Precision Seeking:** Double-tap to skip 10s with new animated indicators." >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
 
-          echo "▶️ Advanced Player Features" >> RELEASE_NOTES.md
-          echo "- Rotation Control (Portrait / Landscape)" >> RELEASE_NOTES.md
-          echo "- Double Tap to Seek (Forward / Backward 10s)" >> RELEASE_NOTES.md
-          echo "- Live Data Usage Statistics" >> RELEASE_NOTES.md
-          echo "- Real-time internet speed monitoring" >> RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-
-          echo "👤 Functional Account & Settings" >> RELEASE_NOTES.md
-          echo "- Manage profile information" >> RELEASE_NOTES.md
-          echo "- Change password securely" >> RELEASE_NOTES.md
-          echo "- View connected login methods" >> RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-
-          echo "⚖️ Copyright & Disclaimer" >> RELEASE_NOTES.md
-          echo "- Dedicated legal & disclaimer page added" >> RELEASE_NOTES.md
+          echo "🔍 Search & Performance" >> RELEASE_NOTES.md
+          echo "---------------------------------" >> RELEASE_NOTES.md
+          echo "🔸 **Instant Play from Search:** Click any channel in search results to play immediately." >> RELEASE_NOTES.md
+          echo "🔸 **Optimized Search Bar:** Improved responsiveness and close functionality." >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
 
           echo "📦 Version Information" >> RELEASE_NOTES.md
-          echo "- Version Name: v1.1" >> RELEASE_NOTES.md
-          echo "- Version Code: 2" >> RELEASE_NOTES.md
-          echo "- Release Type: First Stable Release" >> RELEASE_NOTES.md
+          echo "- Version Name: v1.2" >> RELEASE_NOTES.md
+          echo "- Release Type: Major Feature Update" >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
 
           echo "📲 Download APK" >> RELEASE_NOTES.md
-          echo "https://github.com/cybernahid-dev/StreamX-Ultra/releases/download/v1.1/app-release.apk" >> RELEASE_NOTES.md
+          echo "https://github.com/cybernahid-dev/StreamX-Ultra/releases/download/v1.2/app-release.apk" >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
 
           echo "© AeonCoreX™ – All Rights Reserved" >> RELEASE_NOTES.md
