@@ -66,7 +66,7 @@ fun AboutScreen(navController: NavController) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text("Version $versionName", color = Color.Cyan)
                         Spacer(modifier = Modifier.height(24.dp))
-                        Text("© 2025 CyberNahid Dev", color = Color.White.copy(0.7f))
+                        Text("© 2025 AeonCoreX™", color = Color.White.copy(0.7f))
                     }
                 }
             }
