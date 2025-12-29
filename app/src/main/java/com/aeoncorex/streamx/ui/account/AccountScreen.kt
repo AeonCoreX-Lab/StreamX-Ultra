@@ -51,8 +51,8 @@ fun AccountScreen(navController: NavController) {
         else -> "Email/Password"
     }
     val providerIcon = when {
-        providerId.contains("google.com") -> R.drawable.ic_google // আপনার প্রোজেক্টে থাকা আইকন দিন
-        providerId.contains("github.com") -> R.drawable.ic_github
+        providerId.contains("google.com") -> R.drawable.google_logo.xml // আপনার প্রোজেক্টে থাকা আইকন দিন
+        providerId.contains("github.com") -> R.drawable.github_logo.xml
         else -> null
     }
 
