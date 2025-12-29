@@ -387,13 +387,7 @@ fun HomeScreen(navController: NavController) {
                         }
                     }
 
-                    // REFRESH INDICATOR - Correctly Positioned
-                    PullToRefreshContainer(
-                        state = pullRefreshState,
-                        modifier = Modifier.align(Alignment.TopCenter),
-                        containerColor = NeonCyan,
-                        contentColor = DeepDark
-                    )
+                    // REMOVED: PullToRefreshContainer to fix the "stuck" issue.
                 }
             }
         }
@@ -499,7 +493,8 @@ fun HolographicChannelCard(
                 AsyncImage(
                     model = channel.logoUrl,
                     contentDescription = null,
-                    modifier = Modifier.fillMaxWidth().aspectRatio(1f).shadow(12.dp, CircleShape, spotColor = NeonCyan),
+                    // UPDATED: Removed shadow() and CircleShape clipping.
+                    modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                     contentScale = ContentScale.Fit
                 )
             }
@@ -735,7 +730,7 @@ fun LinkSelectorDialog(channel: Channel, onDismiss: () -> Unit, onLinkSelected: 
             modifier = Modifier.border(1.dp, Color.White.copy(0.1f), RoundedCornerShape(16.dp))
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
-                Text("SELECT STREAM //", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = NeonCyan, letterSpacing = 1.sp)
+                Text("SELECT STREAM", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = NeonCyan, letterSpacing = 1.sp)
                 Spacer(modifier = Modifier.height(16.dp))
                 LazyColumn {
                     itemsIndexed(channel.streamUrls) { index, url ->
@@ -751,7 +746,7 @@ fun LinkSelectorDialog(channel: Channel, onDismiss: () -> Unit, onLinkSelected: 
                         ) {
                             Icon(Icons.Default.PlayArrow, null, tint = NeonCyan)
                             Spacer(modifier = Modifier.width(16.dp)) 
-                            Text("SERVER_NODE_0${index + 1}", color = Color.White, fontWeight = FontWeight.Medium, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                            Text("SERVER 0${index + 1}", color = Color.White, fontWeight = FontWeight.Medium, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                         }
                     }
                 }

@@ -1,195 +1,94 @@
 package com.aeoncorex.streamx.ui.account
 
-import android.widget.Toast
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ExitToApp
-import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import com.aeoncorex.streamx.R // R ফাইলটি সঠিকভাবে ইম্পোর্ট করা
-import com.google.firebase.auth.UserProfileChangeRequest
-import com.google.firebase.auth.ktx.auth
-import com.google.firebase.ktx.Firebase
+import com.aeoncorex.streamx.R
+import com.aeoncorex.streamx.ui.home.CyberMeshBackground
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountScreen(navController: NavController) {
-    val context = LocalContext.current
-    val auth = Firebase.auth
-    val currentUser = auth.currentUser
-
-    var isEditingName by remember { mutableStateOf(false) }
-    var newName by remember { mutableStateOf(currentUser?.displayName ?: "") }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("My Account") },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                }
-            )
-        }
-    ) { padding ->
-        if (currentUser == null) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("No user is logged in.")
-            }
-            return@Scaffold
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            AsyncImage(
-                model = currentUser.photoUrl,
-                contentDescription = "Profile Picture",
-                // ফিক্স ১: R.drawable -> R.mipmap
-                placeholder = painterResource(id = R.mipmap.ic_launcher),
-                modifier = Modifier
-                    .size(120.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentScale = ContentScale.Crop
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-
-            if (isEditingName) {
-                OutlinedTextField(value = newName, onValueChange = { newName = it }, label = { Text("Enter new name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Spacer(modifier = Modifier.height(8.dp))
-                Row {
-                    Button(onClick = {
-                        val profileUpdates = UserProfileChangeRequest.Builder().setDisplayName(newName).build()
-                        currentUser.updateProfile(profileUpdates).addOnCompleteListener { task ->
-                            if (task.isSuccessful) {
-                                Toast.makeText(context, "Name updated successfully!", Toast.LENGTH_SHORT).show()
-                                isEditingName = false
-                            }
+    Box(modifier = Modifier.fillMaxSize()) {
+        CyberMeshBackground()
+        Scaffold(
+            containerColor = Color.Transparent,
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { Text("My Profile", color = Color.White, fontWeight = FontWeight.Black) },
+                    navigationIcon = {
+                        IconButton(onClick = { navController.popBackStack() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White)
                         }
-                    }) { Text("Save") }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    TextButton(onClick = { isEditingName = false }) { Text("Cancel") }
-                }
-            } else {
-                InfoCard(
-                    icon = Icons.Default.Person,
-                    title = "Display Name",
-                    subtitle = currentUser.displayName ?: "No name set",
-                    onClick = { isEditingName = true }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
                 )
             }
-            Spacer(modifier = Modifier.height(16.dp))
-
-            InfoCard(icon = Icons.Default.Email, title = "Email", subtitle = currentUser.email ?: "No email available")
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            val providerId = currentUser.providerData.find { it.providerId != "firebase" }?.providerId
-            val (providerIcon, providerName) = when (providerId) {
-                "google.com" -> painterResource(id = R.drawable.google_logo) to "Google"
-                "github.com" -> painterResource(id = R.drawable.github_logo) to "GitHub"
-                "facebook.com" -> painterResource(id = R.drawable.facebook_logo) to "Facebook"
-                else -> Icons.Default.AlternateEmail to "Email & Password"
-            }
-            ProviderInfoCard(icon = providerIcon, title = "Signed in with", subtitle = providerName)
-            Spacer(modifier = Modifier.height(16.dp))
-
-            if (providerId == "password") {
-                InfoCard(icon = Icons.Default.VpnKey, title = "Change Password", subtitle = "Send password reset email", onClick = {
-                    auth.sendPasswordResetEmail(currentUser.email!!).addOnCompleteListener { task ->
-                        if (task.isSuccessful) {
-                            Toast.makeText(context, "Password reset email sent!", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                })
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-            
-            Spacer(modifier = Modifier.height(32.dp))
-
-            OutlinedButton(
-                onClick = {
-                    auth.signOut()
-                    navController.navigate("auth") { popUpTo("home") { inclusive = true } }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Logout")
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Logout")
+        ) { padding ->
+            Column(modifier = Modifier.padding(padding).padding(20.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+                // Profile Image with Glow
+                Box(Modifier.size(110.dp).border(2.dp, Color(0xFF00FFFF), CircleShape).padding(5.dp)) {
+                    AsyncImage(
+                        model = "https://ui-avatars.com/api/?name=User&background=00FFFF&color=000",
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+                
+                Spacer(Modifier.height(24.dp))
+                
+                // Info Cards
+                InfoCard("Identity", "Streamer_0X24", Icons.Default.Person)
+                InfoCard("Network Address", "user@streamx.core", Icons.Default.Email)
+                InfoCard("Access Level", "Premium Neural Link", Icons.Default.VpnKey)
+                
+                Spacer(Modifier.height(30.dp))
+                
+                Button(
+                    onClick = { /* Logout Logic */ },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF0055)),
+                    modifier = Modifier.fillMaxWidth().height(55.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("TERMINATE SESSION", fontWeight = FontWeight.Bold, color = Color.White)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun InfoCard(icon: ImageVector, title: String, subtitle: String, onClick: (() -> Unit)? = null) {
-    Card(
-        // ফিক্স ২: clickable modifier সঠিকভাবে ব্যবহার করা হয়েছে
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+private fun InfoCard(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    Box(
+        Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(16.dp))
+            .background(Color.White.copy(0.05f)).border(1.dp, Color.White.copy(0.1f), RoundedCornerShape(16.dp)).padding(16.dp)
     ) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = title, tint = MaterialTheme.colorScheme.primary)
-            Spacer(modifier = Modifier.width(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = Color(0xFF00FFFF), modifier = Modifier.size(24.dp))
+            Spacer(Modifier.width(16.dp))
             Column {
-                Text(title, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                Text(subtitle, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProviderInfoCard(icon: Any, title: String, subtitle: String) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (icon is ImageVector) {
-                Icon(icon, contentDescription = title, tint = MaterialTheme.colorScheme.primary)
-            } else if (icon is Painter) {
-                Image(painter = icon, contentDescription = title, modifier = Modifier.size(24.dp))
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Column {
-                Text(title, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                Text(subtitle, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                Text(title.uppercase(), fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                Text(subtitle, fontSize = 16.sp, color = Color.White, fontWeight = FontWeight.Medium)
             }
         }
     }
