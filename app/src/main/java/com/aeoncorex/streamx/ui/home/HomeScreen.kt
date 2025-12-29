@@ -6,7 +6,6 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
 import android.widget.Toast
-import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -29,21 +28,15 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.SignalWifiOff
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.*
-import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
@@ -77,11 +70,8 @@ import kotlin.math.absoluteValue
 private val Context.dataStore by preferencesDataStore(name = "favorites_prefs")
 private val FAVORITES_KEY = stringSetPreferencesKey("favorite_ids")
 
-// Neon Color Palette
-val NeonCyan = Color(0xFF00FFFF)
-val NeonPurple = Color(0xFFBC13FE)
-val DeepDark = Color(0xFF050505)
-val GlassWhite = Color(0x1AFFFFFF)
+// NOTE: Hardcoded colors removed. Using MaterialTheme instead.
+val GlassWhite = Color(0x1AFFFFFF) // Keeping this as a neutral overlay
 
 interface IPTVApi {
     @GET("index.json")
@@ -103,6 +93,12 @@ fun HomeScreen(navController: NavController) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    // THEME COLORS (Dynamic)
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val secondaryColor = MaterialTheme.colorScheme.secondary
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val surfaceColor = MaterialTheme.colorScheme.surface
+
     // State
     val allChannels = remember { mutableStateOf<List<Channel>>(emptyList()) }
     val categories = remember { mutableStateOf(listOf("All", "Favorites")) }
@@ -119,7 +115,6 @@ fun HomeScreen(navController: NavController) {
     var isRefreshing by remember { mutableStateOf(false) }
     
     val pullRefreshState = rememberPullToRefreshState()
-    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
 
     val favoriteIds by context.dataStore.data
         .map { preferences -> preferences[FAVORITES_KEY] ?: emptySet() }
@@ -201,7 +196,7 @@ fun HomeScreen(navController: NavController) {
             AppDrawer(navController, onCloseDrawer = { scope.launch { drawerState.close() } })
         }
     ) {
-        // ULTRA BACKGROUND
+        // ULTRA BACKGROUND - Now Dynamic
         CyberMeshBackground()
 
         Scaffold(
@@ -226,7 +221,7 @@ fun HomeScreen(navController: NavController) {
                                         fontWeight = FontWeight.Black,
                                         fontSize = 22.sp,
                                         letterSpacing = 2.sp,
-                                        brush = Brush.horizontalGradient(listOf(NeonCyan, NeonPurple))
+                                        brush = Brush.horizontalGradient(listOf(primaryColor, secondaryColor))
                                     )
                                 ) 
                             },
@@ -261,7 +256,7 @@ fun HomeScreen(navController: NavController) {
 
             if (isSearchActive) {
                 // Futuristic Search View
-                Box(modifier = Modifier.fillMaxSize().background(DeepDark.copy(0.95f))) {
+                Box(modifier = Modifier.fillMaxSize().background(backgroundColor.copy(0.95f))) {
                     SearchBar(
                         query = searchQuery,
                         onQueryChange = { searchQuery = it },
@@ -269,7 +264,7 @@ fun HomeScreen(navController: NavController) {
                         active = true,
                         onActiveChange = { isSearchActive = it },
                         placeholder = { Text("Search Global Database...", color = Color.Gray) },
-                        leadingIcon = { Icon(Icons.Default.Search, null, tint = NeonCyan) },
+                        leadingIcon = { Icon(Icons.Default.Search, null, tint = primaryColor) },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
                                 IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Close, "Clear", tint = Color.White) }
@@ -279,7 +274,7 @@ fun HomeScreen(navController: NavController) {
                         },
                         colors = SearchBarDefaults.colors(
                             containerColor = Color.Black,
-                            dividerColor = NeonPurple,
+                            dividerColor = secondaryColor,
                             inputFieldColors = TextFieldDefaults.colors(focusedTextColor = Color.White)
                         ),
                         modifier = Modifier.fillMaxSize()
@@ -302,7 +297,7 @@ fun HomeScreen(navController: NavController) {
                                     AsyncImage(
                                         model = channel.logoUrl,
                                         contentDescription = null,
-                                        modifier = Modifier.size(50.dp).clip(RoundedCornerShape(12.dp)).border(1.dp, NeonCyan.copy(0.5f), RoundedCornerShape(12.dp)),
+                                        modifier = Modifier.size(50.dp).clip(RoundedCornerShape(12.dp)).border(1.dp, primaryColor.copy(0.5f), RoundedCornerShape(12.dp)),
                                         contentScale = ContentScale.Fit
                                     )
                                     Spacer(Modifier.width(16.dp))
@@ -386,8 +381,6 @@ fun HomeScreen(navController: NavController) {
                             }
                         }
                     }
-
-                    // REMOVED: PullToRefreshContainer to fix the "stuck" issue.
                 }
             }
         }
@@ -416,19 +409,19 @@ fun HomeScreen(navController: NavController) {
     if (showNoInternetDialog) {
         AlertDialog(
             onDismissRequest = { },
-            icon = { Icon(Icons.Rounded.SignalWifiOff, null, tint = NeonCyan) },
+            icon = { Icon(Icons.Rounded.SignalWifiOff, null, tint = primaryColor) },
             title = { Text("OFFLINE MODE", color = Color.White) },
             text = { Text("Neural Uplink Disconnected. Check connection.", color = Color.Gray) },
-            confirmButton = { Button(onClick = { showNoInternetDialog = false; isLoading = true; fetchData(true) }, colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)) { Text("RECONNECT", color = Color.Black) } },
+            confirmButton = { Button(onClick = { showNoInternetDialog = false; isLoading = true; fetchData(true) }, colors = ButtonDefaults.buttonColors(containerColor = primaryColor)) { Text("RECONNECT", color = Color.Black) } },
             dismissButton = { TextButton(onClick = { (context as? Activity)?.finish() }) { Text("EXIT SYSTEM", color = Color.Gray) } },
-            containerColor = Color(0xFF101010),
+            containerColor = surfaceColor,
             shape = RoundedCornerShape(16.dp)
         )
     }
 }
 
 // ----------------------------------------------------------------------------------
-// ULTRA FUTURISTIC COMPONENTS
+// ULTRA FUTURISTIC COMPONENTS (Dynamic Theming)
 // ----------------------------------------------------------------------------------
 
 @Composable
@@ -439,23 +432,28 @@ fun CyberMeshBackground() {
         animationSpec = infiniteRepeatable(tween(20000, easing = LinearEasing), RepeatMode.Reverse), label = ""
     )
 
-    Canvas(modifier = Modifier.fillMaxSize().background(DeepDark)) {
+    // Dynamic Colors
+    val bgColor = MaterialTheme.colorScheme.background
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+
+    Canvas(modifier = Modifier.fillMaxSize().background(bgColor)) {
         // Deep Space Gradient
         drawRect(
             brush = Brush.radialGradient(
-                colors = listOf(Color(0xFF0F0F15), Color.Black),
+                colors = listOf(Color(0xFF0F0F15), bgColor),
                 center = center,
                 radius = size.maxDimension
             )
         )
         // Moving Neon Orbs (Simulated Mesh)
         drawCircle(
-            brush = Brush.radialGradient(listOf(NeonPurple.copy(0.15f), Color.Transparent)),
+            brush = Brush.radialGradient(listOf(secondary.copy(0.15f), Color.Transparent)),
             radius = size.minDimension * 0.6f,
             center = Offset(size.width * 0.8f, size.height * 0.2f + offset1)
         )
         drawCircle(
-            brush = Brush.radialGradient(listOf(NeonCyan.copy(0.1f), Color.Transparent)),
+            brush = Brush.radialGradient(listOf(primary.copy(0.1f), Color.Transparent)),
             radius = size.minDimension * 0.7f,
             center = Offset(size.width * 0.2f, size.height * 0.8f - offset1)
         )
@@ -470,7 +468,7 @@ fun HolographicChannelCard(
     onFavoriteToggle: () -> Unit,
     onClick: () -> Unit
 ) {
-    // Interaction Source for Click Glow
+    val primaryColor = MaterialTheme.colorScheme.primary
     val interactionSource = remember { MutableInteractionSource() }
     
     Card(
@@ -493,7 +491,6 @@ fun HolographicChannelCard(
                 AsyncImage(
                     model = channel.logoUrl,
                     contentDescription = null,
-                    // UPDATED: Removed shadow() and CircleShape clipping.
                     modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                     contentScale = ContentScale.Fit
                 )
@@ -528,7 +525,7 @@ fun HolographicChannelCard(
                 Icon(
                     imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     contentDescription = null,
-                    tint = if (isFavorite) NeonPurple else Color.White.copy(0.5f),
+                    tint = if (isFavorite) primaryColor else Color.White.copy(0.5f),
                     modifier = Modifier.size(16.dp)
                 )
             }
@@ -538,18 +535,20 @@ fun HolographicChannelCard(
 
 @Composable
 fun NeonCategoryTabs(categories: List<String>, selected: String, onSelect: (String) -> Unit) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    
     LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         items(categories) { cat ->
             val isSelected = cat == selected
-            val color = if (isSelected) NeonCyan else Color.White.copy(0.1f)
+            val color = if (isSelected) primaryColor else Color.White.copy(0.1f)
             val textColor = if (isSelected) Color.Black else Color.Gray
 
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp)) // Cut corners tech look
+                    .clip(RoundedCornerShape(8.dp))
                     .background(color)
                     .clickable { onSelect(cat) }
                     .padding(horizontal = 20.dp, vertical = 8.dp)
@@ -570,6 +569,8 @@ fun NeonCategoryTabs(categories: List<String>, selected: String, onSelect: (Stri
 @Composable
 fun HolographicCarousel(featured: List<Channel>, navController: NavController, onChannelClick: (Channel) -> Unit) {
     val pagerState = rememberPagerState(pageCount = { featured.size })
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val secondaryColor = MaterialTheme.colorScheme.secondary
 
     LaunchedEffect(pagerState.currentPage) {
         if (featured.isNotEmpty()) {
@@ -581,7 +582,7 @@ fun HolographicCarousel(featured: List<Channel>, navController: NavController, o
     Column {
         Text(
             "FEATURED_STREAMS //",
-            style = TextStyle(color = NeonCyan, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, fontSize = 12.sp),
+            style = TextStyle(color = primaryColor, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, fontSize = 12.sp),
             modifier = Modifier.padding(start = 24.dp, bottom = 12.dp)
         )
 
@@ -624,7 +625,7 @@ fun HolographicCarousel(featured: List<Channel>, navController: NavController, o
                     Column(
                         modifier = Modifier.align(Alignment.BottomStart).padding(20.dp)
                     ) {
-                        Box(Modifier.background(NeonPurple, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                        Box(Modifier.background(secondaryColor, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
                             Text("LIVE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                         Spacer(Modifier.height(8.dp))
@@ -638,7 +639,7 @@ fun HolographicCarousel(featured: List<Channel>, navController: NavController, o
                     
                     // Play Icon
                     Box(
-                        modifier = Modifier.align(Alignment.Center).size(50.dp).background(GlassWhite, CircleShape).border(1.dp, NeonCyan, CircleShape),
+                        modifier = Modifier.align(Alignment.Center).size(50.dp).background(GlassWhite, CircleShape).border(1.dp, primaryColor, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Default.PlayArrow, null, tint = Color.White)
@@ -651,15 +652,18 @@ fun HolographicCarousel(featured: List<Channel>, navController: NavController, o
 
 @Composable
 fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val bgColor = MaterialTheme.colorScheme.background
+    
     ModalDrawerSheet(
         drawerContainerColor = Color(0xFF101010),
         drawerContentColor = Color.White
     ) {
         Box(modifier = Modifier.fillMaxWidth().height(200.dp).background(
-            Brush.linearGradient(listOf(DeepDark, Color(0xFF1A1A1A)))
+            Brush.linearGradient(listOf(bgColor, Color(0xFF1A1A1A)))
         ), contentAlignment = Alignment.CenterStart) {
             Column(Modifier.padding(24.dp)) {
-                Text("STREAMX", color = NeonCyan, fontSize = 30.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                Text("STREAMX", color = primaryColor, fontSize = 30.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
                 Text("ULTRA EDITION", color = Color.Gray, fontSize = 12.sp, letterSpacing = 4.sp)
             }
         }
@@ -669,8 +673,8 @@ fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
         val itemModifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
         NavigationDrawerItem(
             label = { Text("DASHBOARD") }, selected = true, onClick = onCloseDrawer,
-            icon = { Icon(Icons.Default.Home, null, tint = NeonCyan) },
-            colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = NeonCyan.copy(0.1f), selectedTextColor = NeonCyan, unselectedTextColor = Color.Gray),
+            icon = { Icon(Icons.Default.Home, null, tint = primaryColor) },
+            colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = primaryColor.copy(0.1f), selectedTextColor = primaryColor, unselectedTextColor = Color.Gray),
             modifier = itemModifier
         )
         NavigationDrawerItem(
@@ -723,14 +727,17 @@ fun EmptyState(isFavorites: Boolean) {
 
 @Composable
 fun LinkSelectorDialog(channel: Channel, onDismiss: () -> Unit, onLinkSelected: (String) -> Unit) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    
     Dialog(onDismissRequest = onDismiss) {
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF151515)),
+            colors = CardDefaults.cardColors(containerColor = surfaceColor),
             modifier = Modifier.border(1.dp, Color.White.copy(0.1f), RoundedCornerShape(16.dp))
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
-                Text("SELECT STREAM", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = NeonCyan, letterSpacing = 1.sp)
+                Text("SELECT STREAM", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = primaryColor, letterSpacing = 1.sp)
                 Spacer(modifier = Modifier.height(16.dp))
                 LazyColumn {
                     itemsIndexed(channel.streamUrls) { index, url ->
@@ -744,7 +751,7 @@ fun LinkSelectorDialog(channel: Channel, onDismiss: () -> Unit, onLinkSelected: 
                                 .padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.PlayArrow, null, tint = NeonCyan)
+                            Icon(Icons.Default.PlayArrow, null, tint = primaryColor)
                             Spacer(modifier = Modifier.width(16.dp)) 
                             Text("SERVER 0${index + 1}", color = Color.White, fontWeight = FontWeight.Medium, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                         }
@@ -757,9 +764,12 @@ fun LinkSelectorDialog(channel: Channel, onDismiss: () -> Unit, onLinkSelected: 
 
 @Composable
 fun UpdateDialog(release: GitHubRelease, onDismiss: () -> Unit, onUpdateClick: () -> Unit) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val surfaceColor = MaterialTheme.colorScheme.surface
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("SYSTEM UPDATE DETECTED", color = NeonCyan, fontSize = 16.sp) },
+        title = { Text("SYSTEM UPDATE DETECTED", color = primaryColor, fontSize = 16.sp) },
         text = {
             Column {
                 Text("PATCH: ${release.tag_name}", fontWeight = FontWeight.Bold, color = Color.White)
@@ -767,8 +777,8 @@ fun UpdateDialog(release: GitHubRelease, onDismiss: () -> Unit, onUpdateClick: (
                 Text(release.body.lines().filterNot { it.startsWith("versionCode:") }.joinToString("\n"), color = Color.Gray)
             }
         },
-        confirmButton = { Button(onClick = onUpdateClick, colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)) { Text("INSTALL PATCH", color = Color.Black) } },
+        confirmButton = { Button(onClick = onUpdateClick, colors = ButtonDefaults.buttonColors(containerColor = primaryColor)) { Text("INSTALL PATCH", color = Color.Black) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("IGNORE", color = Color.Gray) } },
-        containerColor = Color(0xFF121212)
+        containerColor = surfaceColor
     )
 }

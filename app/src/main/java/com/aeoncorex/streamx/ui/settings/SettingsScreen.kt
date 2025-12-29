@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Copyright // নতুন ইমপোর্ট
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.InvertColors
 import androidx.compose.material.icons.filled.Person
@@ -18,7 +19,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -49,6 +49,10 @@ fun SettingsScreen(navController: NavController) {
             LazyColumn(contentPadding = padding, modifier = Modifier.padding(16.dp)) {
                 item { SettingsItem(Icons.Default.InvertColors, "Visual Theme", "Customize your interface", { navController.navigate("theme") }) }
                 item { SettingsItem(Icons.Default.Person, "User Account", "Profile and linked services", { navController.navigate("account") }) }
+                
+                // --- যোগ করা হয়েছে: Copyright Option ---
+                item { SettingsItem(Icons.Default.Copyright, "Copyright Notice", "Legal disclaimers & DMCA", { navController.navigate("copyright") }) }
+                
                 item { SettingsItem(Icons.Default.Info, "About System", "Build version and core info", { navController.navigate("about") }) }
                 item { SettingsItem(Icons.Default.Policy, "Legal Protocols", "Privacy policy and terms", { navController.navigate("privacy") }) }
             }

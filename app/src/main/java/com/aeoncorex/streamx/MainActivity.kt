@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -18,10 +19,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            // --- এই অংশটি সম্পূর্ণ পরিবর্তন করা হয়েছে ---
-
-            // ১. ThemeViewModel তৈরি করা হচ্ছে
-            // এটি পুরো অ্যাপের থিম স্টেট পরিচালনা করবে
+            // ১. ThemeViewModel তৈরি করা হচ্ছে (Factory ব্যবহার করে যাতে Context পাস করা যায়)
             val themeViewModel: ThemeViewModel = viewModel(factory = object : ViewModelProvider.Factory {
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     @Suppress("UNCHECKED_CAST")
@@ -29,22 +27,21 @@ class MainActivity : ComponentActivity() {
                 }
             })
             
-            // ২. ViewModel থেকে বর্তমান থিমটি নেওয়া হচ্ছে
-            val currentTheme = themeViewModel.theme.value
+            // ২. ViewModel থেকে বর্তমান থিমটি observe করা হচ্ছে। 
+            // এখানে 'by' ব্যবহার করা হয়েছে যাতে থিম চেঞ্জ হলে UI অটোমেটিক রি-কম্পোজ হয়।
+            val currentTheme by themeViewModel.theme
             
-            // ৩. অ্যাপের মূল থিম হিসেবে বর্তমান থিমটি ব্যবহার করা হচ্ছে
+            // ৩. অ্যাপের মূল থিম হিসেবে বর্তমান থিমটি সেট করা হচ্ছে
             StreamXUltraTheme(appTheme = currentTheme) {
+                // Surface ব্যবহার করা জরুরি যাতে থিম অনুযায়ী ব্যাকগ্রাউন্ড কালার অটো আপডেট হয়
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // ৪. AppNavigation-কে ViewModel পাস করা হচ্ছে
+                    // ৪. AppNavigation-এ ViewModel পাস করা হচ্ছে যাতে সব স্ক্রিন থিম অ্যাক্সেস করতে পারে
                     AppNavigation(themeViewModel = themeViewModel)
                 }
             }
         }
     }
-    
-    // PiP মোডের জন্য আলাদা ফাংশনের আর প্রয়োজন নেই, কারণ এটি এখন PlayerScreen থেকে সরাসরি হ্যান্ডেল করা হয়।
-    // কোডটি পরিষ্কার রাখার জন্য এটি সরিয়ে ফেলা হয়েছে।
 }
