@@ -14,7 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.aeoncorex.streamx.ui.home.FuturisticBackground
+import com.aeoncorex.streamx.ui.home.CyberMeshBackground // ইমপোর্ট আপডেট
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.URL
@@ -33,7 +33,7 @@ fun PrivacyPolicyScreen(navController: NavController) {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        FuturisticBackground()
+        CyberMeshBackground() // নতুন ব্যাকগ্রাউন্ড
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
@@ -50,7 +50,7 @@ fun PrivacyPolicyScreen(navController: NavController) {
                 Column(modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp)) {
                     policyText?.lines()?.forEach { line ->
                         when {
-                            line.startsWith("# ") -> Text(line.removePrefix("# "), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 8.dp))
+                            line.startsWith("# ") -> Text(line.removePrefix("# "), style = MaterialTheme.typography.headlineSmall, color = Color.Cyan, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 8.dp))
                             line.startsWith("## ") -> Text(line.removePrefix("## "), style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
                             line.startsWith("* ") -> Text("• ${line.removePrefix("* ")}", color = Color.White.copy(0.8f), modifier = Modifier.padding(start = 8.dp))
                             else -> Text(line, color = Color.White.copy(0.7f), lineHeight = 20.sp)

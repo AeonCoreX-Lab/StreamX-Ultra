@@ -3,7 +3,6 @@ package com.aeoncorex.streamx.ui.about
 import android.content.Context
 import android.content.pm.PackageInfo
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -12,8 +11,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -21,7 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.aeoncorex.streamx.R
-import com.aeoncorex.streamx.ui.home.FuturisticBackground
+import com.aeoncorex.streamx.ui.home.CyberMeshBackground // ফাংশনটি ইমপোর্ট করা হয়েছে
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,7 +28,7 @@ fun AboutScreen(navController: NavController) {
     val versionName = packageInfo?.versionName ?: "1.2"
     
     Box(modifier = Modifier.fillMaxSize()) {
-        FuturisticBackground()
+        CyberMeshBackground() // নতুন ব্যাকগ্রাউন্ড ফাংশন
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
@@ -49,7 +46,7 @@ fun AboutScreen(navController: NavController) {
             ) {
                 Card(
                     shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.1f)),
+                    colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f)), // Glass Look
                     modifier = Modifier.fillMaxWidth().padding(16.dp)
                 ) {
                     Column(
