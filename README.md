@@ -58,7 +58,7 @@
            onmouseover="this.style.transform='scale(1.1)'; this.style.filter='drop-shadow(0 4px 12px rgba(0,0,0,0.4))'" 
            onmouseout="this.style.transform='scale(1)'; this.style.filter='none'"/></a>
     <!-- CI / Build -->
-    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android_build.yml"><img src="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android_build.yml/badge.svg?style=for-the-badge" alt="Android Build"
+    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android-build.yml"><img src="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android_build.yml/badge.svg?style=for-the-badge" alt="Android Build"
            style="transition: all 0.3s;" 
            onmouseover="this.style.transform='scale(1.1)'; this.style.filter='drop-shadow(0 4px 12px rgba(0,0,0,0.4))'" 
            onmouseout="this.style.transform='scale(1)'; this.style.filter='none'"/></a>
