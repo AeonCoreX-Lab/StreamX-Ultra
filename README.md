@@ -1,10 +1,8 @@
 <!-- ================= Futuristic Header Section ================= -->
-<div align="center" style="padding: 30px; background: linear-gradient(135deg,#e0f7fa,#f1f8e9); border-radius: 20px; box-shadow: 0 8px 25px rgba(0,0,0,0.15); transition: all 0.3s;">
+<div align="center" style="padding: 30px; background: linear-gradient(135deg,#e0f7fa,#f1f8e9); border-radius: 20px; box-shadow: 0 8px 25px rgba(0,0,0,0.15);">
 
   <!-- Main Logo -->
-  <img src="assets/logo.png" alt="StreamX Ultra Logo" width="160" style="margin-bottom: 12px; transition: all 0.4s; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.2));" 
-       onmouseover="this.style.transform='scale(1.12)'; this.style.filter='drop-shadow(0 8px 20px rgba(0,0,0,0.35))'" 
-       onmouseout="this.style.transform='scale(1)'; this.style.filter='drop-shadow(0 4px 10px rgba(0,0,0,0.2))'"/>
+  <img src="assets/logo.png" alt="StreamX Ultra Logo" width="160" style="margin-bottom: 12px; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.2));">
 
   <!-- Title -->
   <h1 style="margin: 0; font-family:'Segoe UI',sans-serif; color:#0d47a1; text-shadow:0 2px 6px rgba(0,0,0,0.2);">StreamX Ultra</h1>
@@ -13,9 +11,7 @@
   <p style="margin: 6px 0; font-size:1.15rem; color:#222;"><strong>Next-Generation Live TV & Streaming Platform</strong></p>
 
   <!-- AeonCoreX Logo -->
-  <img src="assets/aeoncorex-logo.png" alt="AeonCoreX Logo" width="100" style="margin: 10px 0; transition: all 0.4s;"
-       onmouseover="this.style.transform='scale(1.12)'; this.style.filter='drop-shadow(0 6px 15px rgba(0,0,0,0.3))'"
-       onmouseout="this.style.transform='scale(1)'; this.style.filter='drop-shadow(0 3px 8px rgba(0,0,0,0.2))'"/>
+  <img src="assets/aeoncorex-logo.png" alt="AeonCoreX Logo" width="100" style="margin: 10px 0; filter: drop-shadow(0 3px 8px rgba(0,0,0,0.2));">
 
   <!-- Built By -->
   <p style="margin:0; font-size:0.85rem; color:#555;">Built & maintained by <strong>AeonCoreX</strong></p>
@@ -23,49 +19,22 @@
   <!-- Divider -->
   <hr style="margin: 22px auto; width: 60%; border: 1px solid #bbb; border-radius: 2px;"/>
 
-  <!-- Animated Gradient Badges -->
+  <!-- ================= Badge Section ================= -->
   <div style="display:flex; flex-wrap:wrap; justify-content:center; gap:12px;">
-    <!-- Latest Version -->
-    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/releases" style="text-decoration:none;">
-      <img src="https://img.shields.io/github/v/release/cybernahid-dev/StreamX-Ultra?label=Latest%20Version&include_prereleases=false&style=for-the-badge&colorA=36d1dc&colorB=5b86e5" alt="Latest Version" 
-           style="transition: all 0.3s;" 
-           onmouseover="this.style.transform='scale(1.1)'; this.style.filter='drop-shadow(0 4px 12px rgba(0,0,0,0.4))'" 
-           onmouseout="this.style.transform='scale(1)'; this.style.filter='none'"/>
+
+  <!-- Android Build Status -->
+    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android_build.yml">
+      <img src="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android_build.yml/badge.svg?branch=main" alt="Android Build">
     </a>
-    <!-- Last Release -->
-    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/releases"><img src="https://img.shields.io/github/release-date/cybernahid-dev/StreamX-Ultra?label=Last%20Release&style=for-the-badge&colorA=ff416c&colorB=ff4b2b" alt="Last Release" 
-           style="transition: all 0.3s;" 
-           onmouseover="this.style.transform='scale(1.1)'; this.style.filter='drop-shadow(0 4px 12px rgba(0,0,0,0.4))'" 
-           onmouseout="this.style.transform='scale(1)'; this.style.filter='none'"/></a>
-    <!-- Downloads -->
-    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/releases"><img src="https://img.shields.io/github/downloads/cybernahid-dev/StreamX-Ultra/total?label=Downloads&style=for-the-badge&colorA=11998e&colorB=38ef7d" alt="Downloads" 
-           style="transition: all 0.3s;" 
-           onmouseover="this.style.transform='scale(1.1)'; this.style.filter='drop-shadow(0 4px 12px rgba(0,0,0,0.4))'" 
-           onmouseout="this.style.transform='scale(1)'; this.style.filter='none'"/></a>
-    <!-- Stars -->
-    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/stargazers"><img src="https://img.shields.io/github/stars/cybernahid-dev/StreamX-Ultra?style=for-the-badge&colorA=f7971e&colorB=fcb045" alt="Stars" 
-           style="transition: all 0.3s;" 
-           onmouseover="this.style.transform='scale(1.1)'; this.style.filter='drop-shadow(0 4px 12px rgba(0,0,0,0.4))'" 
-           onmouseout="this.style.transform='scale(1)'; this.style.filter='none'"/></a>
-    <!-- Forks -->
-    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/forks"><img src="https://img.shields.io/github/forks/cybernahid-dev/StreamX-Ultra?style=for-the-badge&colorA=36d1dc&colorB=5b86e5" alt="Forks"
-           style="transition: all 0.3s;" 
-           onmouseover="this.style.transform='scale(1.1)'; this.style.filter='drop-shadow(0 4px 12px rgba(0,0,0,0.4))'" 
-           onmouseout="this.style.transform='scale(1)'; this.style.filter='none'"/></a>
-    <!-- Open Issues -->
-    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/issues"><img src="https://img.shields.io/github/issues/cybernahid-dev/StreamX-Ultra?style=for-the-badge&colorA=ff416c&colorB=ff4b2b" alt="Open Issues"
-           style="transition: all 0.3s;" 
-           onmouseover="this.style.transform='scale(1.1)'; this.style.filter='drop-shadow(0 4px 12px rgba(0,0,0,0.4))'" 
-           onmouseout="this.style.transform='scale(1)'; this.style.filter='none'"/></a>
-    <!-- CI / Build -->
-    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android-build.yml"><img src="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android_build.yml/badge.svg?style=for-the-badge" alt="Android Build"
-           style="transition: all 0.3s;" 
-           onmouseover="this.style.transform='scale(1.1)'; this.style.filter='drop-shadow(0 4px 12px rgba(0,0,0,0.4))'" 
-           onmouseout="this.style.transform='scale(1)'; this.style.filter='none'"/></a>
-    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/create_release.yml"><img src="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/create_release.yml/badge.svg?style=for-the-badge" alt="Create Release"
-           style="transition: all 0.3s;" 
-           onmouseover="this.style.transform='scale(1.1)'; this.style.filter='drop-shadow(0 4px 12px rgba(0,0,0,0.4))'" 
-           onmouseout="this.style.transform='scale(1)'; this.style.filter='none'"/></a>
+
+  <!-- Latest Release Badge -->
+    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/releases">
+      <img src="https://img.shields.io/github/v/release/cybernahid-dev/StreamX-Ultra?include_prereleases=false&label=Release&color=2ea44f&style=for-the-badge" alt="Latest Release">
+    </a>
+
+  <!-- Platform Android Badge -->
+    <img src="https://img.shields.io/badge/Platform-Android-2ea44f?style=for-the-badge" alt="Platform Android">
+
   </div>
 </div>
 
