@@ -1,30 +1,33 @@
 <div align="center">
 
   <a href="https://github.com/cybernahid-dev/StreamX-Ultra">
-    <img src="assets/logo.png" alt="StreamX Ultra Logo" width="180" height="180">
+    <img src="assets/logo.png" alt="StreamX Ultra Logo" width="180">
   </a>
 
-  <h1 style="font-size: 2.5rem; font-weight: bold; margin-top: 20px;">StreamX Ultra</h1>
-
-  <p style="font-size: 1.2rem; margin-bottom: 20px;">
-    <strong>Next-Generation Live TV & Streaming Platform</strong>
-  </p>
-
-  <p>
+  <h1 align="center">StreamX Ultra</h1>
+  <p align="center">
+    <strong>Next-Generation Live TV & Streaming Platform</strong><br />
     Built with ❤️ by <a href="https://github.com/cybernahid-dev"><strong>AeonCoreX</strong></a>
   </p>
 
   <p align="center">
-  <a href="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android-build.yml">
-    <img src="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android-build.yml/badge.svg?branch=main" alt="Build Status">
-  </a>
-  <a href="https://github.com/cybernahid-dev/StreamX-Ultra/releases">
-    <img src="https://img.shields.io/github/v/release/cybernahid-dev/StreamX-Ultra?label=Latest%20Release&color=success&style=flat-square" alt="Latest Release">
-  </a>
-  <img src="https://img.shields.io/badge/Platform-Android-2ea44f?style=flat-square&logo=android" alt="Platform">
-  <img src="https://img.shields.io/github/license/cybernahid-dev/StreamX-Ultra?style=flat-square&color=blue" alt="License">
-</p>
+    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android-build.yml">
+      <img src="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android-build.yml/badge.svg?branch=main&event=push" alt="Build Status">
+    </a>
+    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/releases">
+      <img src="https://img.shields.io/github/v/release/cybernahid-dev/StreamX-Ultra?label=Version&color=2ea44f&style=flat-square&logo=github" alt="Latest Version">
+    </a>
+    <img src="https://img.shields.io/badge/Platform-Android-2ea44f?style=flat-square&logo=android&logoColor=white" alt="Platform">
+    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/blob/main/LICENSE">
+      <img src="https://img.shields.io/github/license/cybernahid-dev/StreamX-Ultra?style=flat-square&color=blue" alt="License">
+    </a>
+  </p>
 
+  <p align="center">
+    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/releases/latest/download/app-release.apk">
+      <img src="https://img.shields.io/badge/Download-Latest%20APK-0078D4?style=for-the-badge&logo=android&logoColor=white" alt="Download APK">
+    </a>
+  </p>
 
 </div>
 
