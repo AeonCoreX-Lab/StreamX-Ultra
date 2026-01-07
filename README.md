@@ -14,16 +14,17 @@
     Built with ❤️ by <a href="https://github.com/cybernahid-dev"><strong>AeonCoreX</strong></a>
   </p>
 
-  <p>
-    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android-build.yml">
-      <img src="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android-build.yml/badge.svg?branch=main" alt="Android Build">
-    </a>
-    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/releases">
-      <img src="https://img.shields.io/github/v/release/cybernahid-dev/StreamX-Ultra?include_prereleases=false&label=Release&color=2ea44f&style=flat-square" alt="Latest Release">
-    </a>
-    <img src="https://img.shields.io/badge/Platform-Android-2ea44f?style=flat-square&logo=android" alt="Platform Android">
-    <img src="https://img.shields.io/github/license/cybernahid-dev/StreamX-Ultra?style=flat-square&color=blue" alt="License">
-  </p>
+  <p align="center">
+  <a href="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android-build.yml">
+    <img src="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android-build.yml/badge.svg?branch=main" alt="Build Status">
+  </a>
+  <a href="https://github.com/cybernahid-dev/StreamX-Ultra/releases">
+    <img src="https://img.shields.io/github/v/release/cybernahid-dev/StreamX-Ultra?label=Latest%20Release&color=success&style=flat-square" alt="Latest Release">
+  </a>
+  <img src="https://img.shields.io/badge/Platform-Android-2ea44f?style=flat-square&logo=android" alt="Platform">
+  <img src="https://img.shields.io/github/license/cybernahid-dev/StreamX-Ultra?style=flat-square&color=blue" alt="License">
+</p>
+
 
 </div>
 
