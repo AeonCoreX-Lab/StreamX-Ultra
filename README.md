@@ -40,94 +40,140 @@
 
 ---
 
-# 🧭 Executive Summary
+## 🧭 Executive Summary
 
-**StreamX Ultra** is a **next-generation live streaming platform** delivering **low-latency, high-performance TV streaming** on Android devices.  
-Developed by **AeonCoreX**, it emphasizes **native performance, scalable architecture, and a clean, futuristic UX**.
+**StreamX Ultra** is a high-performance, future-ready **live television and streaming platform** designed to deliver seamless, low-latency content experiences on Android devices.
 
-# 🎯 Product Vision
+Built by **AeonCoreX**, the platform prioritizes **native performance**, **scalable architecture**, and a **clean, futuristic user experience**, making it suitable for both consumer-facing deployments and enterprise-level streaming solutions.
 
-> Deliver a reliable, scalable, and modern live-streaming experience  
-> that feels fast, intuitive, and future-proof — even under real-world network conditions.
+---
 
-# 🚀 Key Features
+## 🎯 Product Vision
 
-| Feature | Status |
-|---------|--------|
-| Real-time Live TV Streaming | ✅ Implemented |
-| Low-latency Playback | ✅ Implemented |
-| Futuristic, Immersive UI | ✅ Implemented |
-| Mobile & Tablet Optimization | ✅ Implemented |
-| Modular Architecture | ✅ Implemented |
-| Secure Foundation | ✅ Implemented |
-| User Profiles & Personalization | 🚧 In Progress |
-| Analytics & Monitoring | 🚧 In Progress |
-| Play Store Release Pipeline | 🚧 In Progress |
+Deliver a reliable, scalable, and modern live-streaming experience that feels fast, intuitive, and future-proof — even under real-world network conditions.
 
-# 🧠 Core Modules
+---
+
+## 🚀 Key Capabilities
+
+- 📺 Real-time Live TV streaming
+- ⚡ Low-latency playback pipeline
+- 🎨 Futuristic, distraction-free UI
+- 📱 Mobile & tablet optimized layouts
+- 🧱 Architecture designed for scale
+- 🔒 Secure, production-grade foundations
+
+---
+
+## 🧠 Core Feature Set
 
 ### 📡 Live Streaming Engine
-- Adaptive, real-time playback  
-- Fast channel switching  
-- Handles variable network conditions  
+- Optimized real-time stream playback
+- Fast channel switching
+- Adaptive handling for varying network conditions
+- Designed for long-running live sessions
 
-### 🎨 User Experience
-- Minimalist, distraction-free UI  
-- Dark-mode friendly  
-- Touch-optimized navigation  
+### 🎨 User Experience & Design
+- Clean, futuristic visual language
+- Dark-mode friendly UI
+- Minimal UI chrome for immersive viewing
+- Touch-optimized navigation patterns
 
 ### ⚙️ Performance & Reliability
-- Native Android rendering  
-- Memory-efficient streaming  
-- Stable for long sessions  
+- Native Android rendering pipeline
+- Memory-efficient media handling
+- Optimized for mid-range and high-end devices
+- Stable behavior during prolonged usage
 
 ### 🔐 Security & Stability
-- Secure session lifecycle  
-- Safe networking & future DRM ready  
+- Secure session lifecycle handling
+- Safe networking practices
+- Foundation ready for authentication and DRM layers
 
-# 🏗️ Architecture Overview
+---
 
-StreamX Ultra (Android App) ├─ UI Layer (Jetpack Compose) ├─ Media Playback Layer (ExoPlayer) ├─ Network & Streaming Layer └─ Streaming Backend / CDN 
+## 🏗️ Architecture
 
-**Modular design enables future expansion:** accounts, analytics, personalization, subscription models.
+StreamX Ultra (Android Application)  
+├── UI Layer (Jetpack Compose)  
+├── Media Playback Layer  
+├── Network & Streaming Layer  
+└── Streaming Backend / CDN Infrastructure
 
-# 📁 Repository Structure
+---
 
-StreamX-Ultra/ ├── app/ │   ├── ui/           # Screens & layouts │   ├── player/       # Media playback logic │   ├── network/      # Streaming & networking │   └── MainActivity.kt ├── assets/ │   └── logo.png ├── README.md ├── LICENSE └── build.gradle
+## 📁 Repository Structure
+
+StreamX-Ultra/ ├── app/ │   ├── ui/             # Screens & layouts │   ├── player/         # Media playback logic │   ├── network/        # Streaming & networking │   └── MainActivity.kt ├── assets/ │   └── logo.png ├── README.md ├── LICENSE └── build.gradle
 
 
-# 🛠️ Technology Stack
+---
+
+## 🛠️ Technology Stack
 
 - **Platform:** Android  
 - **Language:** Kotlin  
 - **UI Framework:** Jetpack Compose  
-- **Media Engine:** Native / ExoPlayer  
+- **Media Engine:** Native player / ExoPlayer  
 - **Build System:** Gradle  
 - **Min SDK:** Android 8.0 (API 26)
 
-# 🗺️ Roadmap
+---
 
-- Channel categorization & discovery  
-- Live program notifications  
-- User profile & personalization  
-- Global streaming optimization  
-- Play Store release  
-- QoS analytics
+## 📱 Device Requirements
 
-# 🤝 Contribution Guidelines
+- Android 8.0 or higher  
+- Stable internet connection  
+- Recommended RAM: 4GB+  
+- Headphones or speakers for optimal experience
 
-1. Fork the repo  
-2. Create a feature/fix branch  
+---
+
+## 🧪 Development & Release Status
+
+- ✅ Core streaming foundation complete  
+- ✅ UI framework established  
+- ✅ Advanced channel management  
+- 🚧 User personalization  
+- 🚧 Analytics & monitoring  
+- 🚧 Store-ready release pipeline
+
+---
+
+## 🗺️ Roadmap
+
+- 📺 Channel categorization & discovery  
+- 🔔 Live program notifications  
+- 👤 User profile system  
+- 🌍 Global streaming optimization  
+- 🏪 Play Store release  
+- 📊 Quality-of-service analytics
+
+---
+
+## 🤝 Contribution Policy
+
+StreamX Ultra welcomes contributions from developers and researchers.
+
+**Contribution flow:**
+1. Fork the repository  
+2. Create a feature or fix branch  
 3. Commit with clear messages  
 4. Submit a Pull Request
 
-# 📄 License
+---
 
-MIT License – see [LICENSE](LICENSE)
+## 📄 License
 
-# 🏢 About AeonCoreX
+This project is licensed under the **MIT License**.  
+See the [LICENSE](LICENSE) file for full legal details.
 
-AeonCoreX builds **next-gen digital platforms** emphasizing **performance, scalability, and clean architecture**.  
-Developed by **cybernahid-dev**.
+---
 
-© 2025 AeonCoreX
+## 🏢 About AeonCoreX
+
+**AeonCoreX** builds next-generation digital platforms that emphasize performance, scalability, and clean system design.
+
+---
+
+© 2026 AeonCoreX. All trademarks, logos, and brand names are the property of their respective owners.
