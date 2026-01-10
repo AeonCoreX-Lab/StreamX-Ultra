@@ -20,7 +20,6 @@ android {
         }
     }
 
-    // --- Signing Configs ---
     signingConfigs {
         create("release") {
             val storeFileValue = project.findProperty("RELEASE_KEYSTORE_FILE") as? String ?: System.getenv("RELEASE_KEYSTORE_FILE")
@@ -44,19 +43,29 @@ android {
             signingConfig = signingConfigs.getByName("release")
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
+
     kotlinOptions {
         jvmTarget = "1.8"
+        [span_0](start_span)// এটি গ্লোবালি অপ্ট-ইন সেট করে যাতে কোডে বারবার এরর না আসে[span_0](end_span)
+        freeCompilerArgs += listOf(
+            "-opt-in=androidx.media3.common.util.UnstableApi",
+            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"
+        )
     }
+
     buildFeatures {
         compose = true
     }
+
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.10"
     }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -88,10 +97,10 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.android.gms:play-services-auth:21.0.0")
 
-    // --- ADDED: Facebook Login Dependency (Fixes AuthScreen Errors) ---
+    // Facebook Login
     implementation("com.facebook.android:facebook-login:16.3.0")
 
-    // MEDIA3 (EXOPLAYER)
+    [span_1](start_span)// MEDIA3 (EXOPLAYER)[span_1](end_span)
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-common:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")

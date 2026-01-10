@@ -63,9 +63,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import java.net.URLDecoder
 
-// Fix: File-level OptIn to resolve ambiguity and cover all Media3 usages
-@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-
 // --- Themes Colors ---
 val NeonBlue = Color(0xFF00FFFF)
 val NeonPurple = Color(0xFFBC13FE)
@@ -605,7 +602,6 @@ fun AdvancedPlayerControls(
     }
 }
 
-// Fix: Explicitly opt-in for ExperimentalMaterial3Api for ModalBottomSheet
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerSettingsSheet(
@@ -732,7 +728,6 @@ fun SleepTimerDialog(currentValue: Int, onDismiss: () -> Unit, onTimeSelected: (
 
 @Composable
 fun QualitySelectorDialog(trackSelector: DefaultTrackSelector, onDismiss: () -> Unit, onQualitySelected: (String) -> Unit) {
-    // Media3 specific components are covered by the file-level OptIn
     val tracks = remember { trackSelector.currentMappedTrackInfo }
     val rendererIndex = 0 
     val trackGroups = tracks?.getTrackGroups(rendererIndex)
