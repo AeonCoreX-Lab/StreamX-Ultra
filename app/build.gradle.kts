@@ -51,7 +51,7 @@ android {
 
     kotlinOptions {
         jvmTarget = "1.8"
-        [span_0](start_span)// এটি গ্লোবালি অপ্ট-ইন সেট করে যাতে কোডে বারবার এরর না আসে[span_0](end_span)
+        // এটি গ্লোবালি অপ্ট-ইন সেট করে যাতে কোডে বারবার এরর না আসে
         freeCompilerArgs += listOf(
             "-opt-in=androidx.media3.common.util.UnstableApi",
             "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"
@@ -100,7 +100,7 @@ dependencies {
     // Facebook Login
     implementation("com.facebook.android:facebook-login:16.3.0")
 
-    [span_1](start_span)// MEDIA3 (EXOPLAYER)[span_1](end_span)
+    // MEDIA3 (EXOPLAYER)
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-common:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
@@ -108,14 +108,14 @@ dependencies {
 
     // Coil for Image Loading
     implementation("io.coil-kt:coil-compose:2.6.0")
-    
+
     // DataStore Preferences
     implementation("androidx.datastore:datastore-preferences:1.0.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
-    
+
     // Shimmer Effect
     implementation("com.valentinilk.shimmer:compose-shimmer:1.2.0")
-    
+
     // Icons
     implementation("androidx.compose.material:material-icons-extended:1.6.7")
 }
