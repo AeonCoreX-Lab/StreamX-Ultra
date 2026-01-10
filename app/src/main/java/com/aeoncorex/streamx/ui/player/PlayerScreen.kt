@@ -3,7 +3,6 @@ package com.aeoncorex.streamx.ui.player
 import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.Context
-import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -13,7 +12,6 @@ import android.util.Rational
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.annotation.OptIn
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -41,7 +39,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,7 +62,9 @@ import androidx.navigation.NavController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import java.net.URLDecoder
-import java.util.concurrent.TimeUnit
+
+// Fix: File-level OptIn to resolve ambiguity and cover all Media3 usages
+@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 
 // --- Themes Colors ---
 val NeonBlue = Color(0xFF00FFFF)
@@ -79,7 +78,6 @@ fun isInternetAvailable(context: Context): Boolean {
     return activeNetwork.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
 }
 
-@OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(navController: NavController, encodedUrl: String) {
     val context = LocalContext.current
@@ -383,7 +381,6 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
                 onPlayPause = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
                 onLockToggle = { isLocked = !isLocked },
                 onRotateToggle = {
-                    // Cycle resize modes on click instead of double tap (Clean UX)
                      resizeMode = when (resizeMode) {
                         AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_FILL
                         AspectRatioFrameLayout.RESIZE_MODE_FILL -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -601,13 +598,14 @@ fun AdvancedPlayerControls(
                 }
                 
                 IconButton(onClick = onRotateToggle) {
-                    Icon(Icons.Default.AspectRatio, null, tint = Color.White) // Changed Icon to AspectRatio
+                    Icon(Icons.Default.AspectRatio, null, tint = Color.White)
                 }
             }
         }
     }
 }
 
+// Fix: Explicitly opt-in for ExperimentalMaterial3Api for ModalBottomSheet
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerSettingsSheet(
@@ -732,9 +730,9 @@ fun SleepTimerDialog(currentValue: Int, onDismiss: () -> Unit, onTimeSelected: (
     }
 }
 
-@OptIn(UnstableApi::class)
 @Composable
 fun QualitySelectorDialog(trackSelector: DefaultTrackSelector, onDismiss: () -> Unit, onQualitySelected: (String) -> Unit) {
+    // Media3 specific components are covered by the file-level OptIn
     val tracks = remember { trackSelector.currentMappedTrackInfo }
     val rendererIndex = 0 
     val trackGroups = tracks?.getTrackGroups(rendererIndex)
