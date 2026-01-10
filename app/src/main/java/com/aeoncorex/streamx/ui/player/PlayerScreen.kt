@@ -3,6 +3,7 @@ package com.aeoncorex.streamx.ui.player
 import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -13,7 +14,6 @@ import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -111,7 +111,7 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
     var isControlsVisible by remember { mutableStateOf(true) }
     var isLocked by remember { mutableStateOf(false) }
     var resizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
-    var showSettingsSheet by remember { mutableStateOf(false) } // New Bottom Sheet State
+    var showSettingsSheet by remember { mutableStateOf(false) }
     
     // Seekbar States
     var currentPos by remember { mutableLongStateOf(0L) }
@@ -370,22 +370,39 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
         ) {
             AdvancedPlayerControls(
                 title = "STREAMX LIVE",
+                // Passing Network Stats Here
+                networkSpeed = downloadSpeed,
+                dataUsed = totalDataUsed,
                 isPlaying = isPlaying,
                 isLocked = isLocked,
                 currentPos = currentPos,
                 duration = duration,
+                qualityLabel = currentQualityLabel,
                 onBack = { navController.popBackStack() },
                 onPlayPause = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
                 onLockToggle = { isLocked = !isLocked },
-                onRotateToggle = {
+                onRotateScreen = {
+                    // Actual Screen Rotation (Landscape/Portrait)
+                    val currentOrientation = activity?.resources?.configuration?.orientation
+                    if (currentOrientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+                         activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    } else {
+                         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    }
+                },
+                onResizeToggle = {
+                    // Zoom/Fit Toggle (Aspect Ratio)
                      resizeMode = when (resizeMode) {
                         AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_FILL
                         AspectRatioFrameLayout.RESIZE_MODE_FILL -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                         else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
-                    Toast.makeText(context, "Scale Changed", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Aspect Ratio Changed", Toast.LENGTH_SHORT).show()
                 },
                 onSettingsClick = { showSettingsSheet = true },
+                onQualityClick = { showQualityDialog = true },
+                onSleepTimerClick = { showSleepTimerDialog = true },
+                onAudioModeClick = { isAudioOnlyMode = !isAudioOnlyMode },
                 onPipClick = {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         val params = PictureInPictureParams.Builder()
@@ -474,21 +491,28 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
 }
 
 // -----------------------------------------------------------------------------
-// NEW PRO UI COMPONENTS
+// NEW PRO UI COMPONENTS (RESTORED TO OLD STYLE)
 // -----------------------------------------------------------------------------
 
 @Composable
 fun AdvancedPlayerControls(
     title: String,
+    networkSpeed: String,
+    dataUsed: String,
     isPlaying: Boolean,
     isLocked: Boolean,
     currentPos: Long,
     duration: Long,
+    qualityLabel: String,
     onBack: () -> Unit,
     onPlayPause: () -> Unit,
     onLockToggle: () -> Unit,
-    onRotateToggle: () -> Unit,
+    onRotateScreen: () -> Unit,
+    onResizeToggle: () -> Unit,
     onSettingsClick: () -> Unit,
+    onQualityClick: () -> Unit,
+    onSleepTimerClick: () -> Unit,
+    onAudioModeClick: () -> Unit,
     onPipClick: () -> Unit,
     onRewind: () -> Unit,
     onForward: () -> Unit,
@@ -513,58 +537,79 @@ fun AdvancedPlayerControls(
             return
         }
 
-        // --- TOP BAR ---
+        // --- TOP BAR (Restored Network Stats) ---
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopStart),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White) }
             Spacer(Modifier.width(8.dp))
-            Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            
+            // Title & Network Info
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, color = NeonBlue, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                // Restored: Network Stats Display
+                Text("$networkSpeed • $dataUsed", color = Color.LightGray, fontSize = 11.sp)
+            }
             
             IconButton(onClick = onPipClick) { Icon(Icons.Default.PictureInPictureAlt, null, tint = Color.White) }
+            // Quality Button in Top Bar
+            Box(
+                modifier = Modifier
+                    .clickable(onClick = onQualityClick)
+                    .border(1.dp, NeonPurple, RoundedCornerShape(4.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(qualityLabel, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.width(8.dp))
             IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Settings, null, tint = Color.White) }
         }
 
-        // --- CENTER CONTROLS (Big Play Button) ---
+        // --- CENTER CONTROLS (Restored Gradient Play & 10s Skips) ---
         Row(
             modifier = Modifier.align(Alignment.Center),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(50.dp)
+            horizontalArrangement = Arrangement.spacedBy(40.dp)
         ) {
+            // Rewind 10s (Circular Style)
             IconButton(onClick = onRewind, modifier = Modifier.size(50.dp)) {
-                Icon(Icons.Default.Replay10, null, tint = Color.White, modifier = Modifier.fillMaxSize())
+                Icon(Icons.Default.Replay10, null, tint = Color.White, modifier = Modifier.fillMaxSize().padding(8.dp))
             }
 
-            IconButton(
-                onClick = onPlayPause,
+            // Gradient Play Button (Restored)
+            Box(
                 modifier = Modifier
-                    .size(70.dp)
-                    .background(NeonBlue, CircleShape)
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(Brush.linearGradient(listOf(NeonBlue, NeonPurple))) // Gradient Ager Moto
+                    .clickable(onClick = onPlayPause),
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
                     if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    null, tint = Color.Black, modifier = Modifier.size(40.dp)
+                    null, tint = Color.White, modifier = Modifier.size(40.dp)
                 )
             }
 
+            // Forward 10s (Circular Style)
             IconButton(onClick = onForward, modifier = Modifier.size(50.dp)) {
-                Icon(Icons.Default.Forward10, null, tint = Color.White, modifier = Modifier.fillMaxSize())
+                Icon(Icons.Default.Forward10, null, tint = Color.White, modifier = Modifier.fillMaxSize().padding(8.dp))
             }
         }
 
-        // --- BOTTOM BAR (Seekbar & Tools) ---
+        // --- BOTTOM BAR (Restored Layout with Separate Rotate & Resize) ---
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.9f))))
-                .padding(start = 16.dp, end = 16.dp, bottom = 24.dp, top = 40.dp)
+                .padding(horizontal = 16.dp, vertical = 16.dp)
         ) {
-            // Timeline & Slider
+            // Row 1: Time & Seekbar
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
             ) {
                 Text(formatTime(currentPos), color = Color.White, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                 
@@ -575,7 +620,7 @@ fun AdvancedPlayerControls(
                     valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
                     colors = SliderDefaults.colors(
                         thumbColor = NeonBlue,
-                        activeTrackColor = NeonBlue,
+                        activeTrackColor = Brush.horizontalGradient(listOf(NeonBlue, NeonPurple)).let { NeonBlue }, // Fallback to solid for API compat, or use custom track
                         inactiveTrackColor = Color.Gray.copy(0.5f)
                     ),
                     modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
@@ -584,23 +629,45 @@ fun AdvancedPlayerControls(
                 Text(formatTime(duration), color = Color.White, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
             }
 
-            // Bottom Buttons
+            // Row 2: Action Icons (Timer, Audio, Rotate, Lock) - Restored Layout
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onLockToggle) {
-                    Icon(Icons.Default.LockOpen, null, tint = Color.White)
+                // Sleep Timer Button
+                IconButton(onClick = onSleepTimerClick) {
+                    Icon(Icons.Rounded.Timer, null, tint = Color.White)
+                }
+
+                // Audio Only Toggle
+                IconButton(onClick = onAudioModeClick) {
+                    Icon(Icons.Rounded.Headphones, null, tint = Color.White)
+                }
+
+                // Screen Rotation Button (Landscape/Portrait)
+                IconButton(onClick = onRotateScreen) {
+                    Icon(Icons.Default.ScreenRotation, null, tint = Color.White)
+                }
+
+                // Resize/Aspect Ratio Button (Moved here)
+                IconButton(onClick = onResizeToggle) {
+                    Icon(Icons.Default.AspectRatio, null, tint = Color.White)
                 }
                 
-                IconButton(onClick = onRotateToggle) {
-                    Icon(Icons.Default.AspectRatio, null, tint = Color.White)
+                // Lock Button
+                IconButton(onClick = onLockToggle) {
+                    Icon(Icons.Default.LockOpen, null, tint = Color.White)
                 }
             }
         }
     }
 }
+
+// ... (Rest of settings sheet, dialogs, helpers remain same) ...
+// The rest of the file (PlayerSettingsSheet, SettingsItem, CyberSlider, Dialogs, Utils) 
+// should be kept as is from previous correct versions or pasted below if needed.
+// Only AdvancedPlayerControls and PlayerScreen (logic passing) were heavily modified above.
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

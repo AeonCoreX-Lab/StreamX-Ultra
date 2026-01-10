@@ -6,6 +6,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -25,8 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.rounded.SignalWifiOff
-import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
@@ -38,6 +38,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -119,6 +120,14 @@ fun HomeScreen(navController: NavController) {
     val favoriteIds by context.dataStore.data
         .map { preferences -> preferences[FAVORITES_KEY] ?: emptySet() }
         .collectAsState(initial = emptySet())
+
+    // Channel Counts Map (For UI)
+    val categoryCounts = remember(allChannels.value, favoriteIds) {
+        val counts = allChannels.value.groupingBy { it.category }.eachCount().toMutableMap()
+        counts["All"] = allChannels.value.size
+        counts["Favorites"] = favoriteIds.size
+        counts
+    }
 
     val fetchData: (isRetry: Boolean) -> Unit = { isRetry ->
         scope.launch {
@@ -340,9 +349,14 @@ fun HomeScreen(navController: NavController) {
                                 }
                             }
 
-                            // 2. Categories
+                            // 2. UPGRADED: Smart Category Pills (HD Streamz Style)
                             item { 
-                                NeonCategoryTabs(categories.value, selectedCategory) { selectedCategory = it } 
+                                ModernCategorySelector(
+                                    categories = categories.value,
+                                    selected = selectedCategory,
+                                    counts = categoryCounts,
+                                    onSelect = { selectedCategory = it }
+                                )
                             }
 
                             // 3. Ultra Grid
@@ -533,35 +547,99 @@ fun HolographicChannelCard(
     }
 }
 
+// ----------------------------------------------------------------------------------
+// UPGRADED CATEGORY SYSTEM (HD STREAMZ STYLE)
+// ----------------------------------------------------------------------------------
+
 @Composable
-fun NeonCategoryTabs(categories: List<String>, selected: String, onSelect: (String) -> Unit) {
+fun ModernCategorySelector(
+    categories: List<String>,
+    selected: String,
+    counts: Map<String, Int>,
+    onSelect: (String) -> Unit
+) {
     val primaryColor = MaterialTheme.colorScheme.primary
     
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        items(categories) { cat ->
-            val isSelected = cat == selected
-            val color = if (isSelected) primaryColor else Color.White.copy(0.1f)
-            val textColor = if (isSelected) Color.Black else Color.Gray
+    Column {
+        Text(
+            "BROWSE CATEGORIES //",
+            style = TextStyle(color = primaryColor, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, fontSize = 12.sp),
+            modifier = Modifier.padding(start = 24.dp, top = 24.dp, bottom = 12.dp)
+        )
 
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(color)
-                    .clickable { onSelect(cat) }
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-            ) {
-                Text(
-                    text = cat.uppercase(),
-                    color = textColor,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    letterSpacing = 1.sp
-                )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(categories) { cat ->
+                val isSelected = cat == selected
+                val count = counts[cat] ?: 0
+                val icon = getCategoryIcon(cat)
+                
+                // Animation
+                val bgColor by animateColorAsState(if (isSelected) primaryColor else Color(0xFF202020), label = "bg")
+                val contentColor by animateColorAsState(if (isSelected) Color.Black else Color.White, label = "content")
+
+                Surface(
+                    shape = RoundedCornerShape(50), // Pill Shape
+                    color = bgColor,
+                    border = if (!isSelected) BorderStroke(1.dp, Color.White.copy(0.1f)) else null,
+                    modifier = Modifier
+                        .clickable { onSelect(cat) }
+                        .animateContentSize()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = icon, 
+                            contentDescription = null, 
+                            tint = contentColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = cat.uppercase(),
+                            color = contentColor,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            letterSpacing = 0.5.sp
+                        )
+                        if (count > 0) {
+                            Spacer(Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .background(if (isSelected) Color.Black.copy(0.2f) else Color.White.copy(0.1f), CircleShape)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = count.toString(),
+                                    color = contentColor,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+// Helper: Smart Icon Mapping based on Category Name
+fun getCategoryIcon(category: String): ImageVector {
+    return when {
+        category.contains("All", true) -> Icons.Rounded.Apps
+        category.contains("Favorite", true) -> Icons.Rounded.Favorite
+        category.contains("Sport", true) || category.contains("Cricket", true) || category.contains("Football", true) -> Icons.Rounded.SportsSoccer
+        category.contains("News", true) -> Icons.Rounded.Newspaper
+        category.contains("Movie", true) || category.contains("Cinema", true) -> Icons.Rounded.Movie
+        category.contains("Music", true) -> Icons.Rounded.MusicNote
+        category.contains("Kid", true) || category.contains("Cartoon", true) -> Icons.Rounded.ChildCare
+        category.contains("Live", true) -> Icons.Rounded.LiveTv
+        else -> Icons.Rounded.Tv
     }
 }
 
