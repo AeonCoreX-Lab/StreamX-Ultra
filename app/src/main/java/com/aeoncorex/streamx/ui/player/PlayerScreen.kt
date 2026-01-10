@@ -3,12 +3,14 @@ package com.aeoncorex.streamx.ui.player
 import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.TrafficStats
 import android.os.Build
+import android.provider.Settings
 import android.util.Rational
 import android.view.WindowManager
 import android.widget.Toast
@@ -27,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material3.*
@@ -370,7 +373,6 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
         ) {
             AdvancedPlayerControls(
                 title = "STREAMX LIVE",
-                // Passing Network Stats Here
                 networkSpeed = downloadSpeed,
                 dataUsed = totalDataUsed,
                 isPlaying = isPlaying,
@@ -382,7 +384,6 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
                 onPlayPause = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
                 onLockToggle = { isLocked = !isLocked },
                 onRotateScreen = {
-                    // Actual Screen Rotation (Landscape/Portrait)
                     val currentOrientation = activity?.resources?.configuration?.orientation
                     if (currentOrientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
                          activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -391,7 +392,6 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
                     }
                 },
                 onResizeToggle = {
-                    // Zoom/Fit Toggle (Aspect Ratio)
                      resizeMode = when (resizeMode) {
                         AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_FILL
                         AspectRatioFrameLayout.RESIZE_MODE_FILL -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -400,9 +400,6 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
                     Toast.makeText(context, "Aspect Ratio Changed", Toast.LENGTH_SHORT).show()
                 },
                 onSettingsClick = { showSettingsSheet = true },
-                onQualityClick = { showQualityDialog = true },
-                onSleepTimerClick = { showSleepTimerDialog = true },
-                onAudioModeClick = { isAudioOnlyMode = !isAudioOnlyMode },
                 onPipClick = {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         val params = PictureInPictureParams.Builder()
@@ -444,10 +441,22 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
                 onSleepTimerClick = { showSettingsSheet = false; showSleepTimerDialog = true },
                 playbackSpeed = playbackSpeed,
                 onSpeedClick = {
-                    // Cycle speeds: 0.5 -> 1.0 -> 1.5 -> 2.0
                     val newSpeed = if(playbackSpeed >= 2.0f) 0.5f else playbackSpeed + 0.5f
                     playbackSpeed = newSpeed
                     exoPlayer.setPlaybackSpeed(newSpeed)
+                },
+                onCastClick = {
+                    showSettingsSheet = false
+                    try {
+                        // Standard Android Cast Settings
+                        context.startActivity(Intent("android.settings.CAST_SETTINGS"))
+                    } catch (e: Exception) {
+                        // Fallback: Show generic display settings or toast instructions
+                        Toast.makeText(context, "Please open Quick Settings -> Screen Cast", Toast.LENGTH_LONG).show()
+                        try {
+                             context.startActivity(Intent(Settings.ACTION_DISPLAY_SETTINGS))
+                        } catch (e2: Exception) { /* safe */ }
+                    }
                 }
             )
         }
@@ -491,7 +500,7 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
 }
 
 // -----------------------------------------------------------------------------
-// NEW PRO UI COMPONENTS (RESTORED TO OLD STYLE)
+// UI COMPONENTS
 // -----------------------------------------------------------------------------
 
 @Composable
@@ -510,9 +519,6 @@ fun AdvancedPlayerControls(
     onRotateScreen: () -> Unit,
     onResizeToggle: () -> Unit,
     onSettingsClick: () -> Unit,
-    onQualityClick: () -> Unit,
-    onSleepTimerClick: () -> Unit,
-    onAudioModeClick: () -> Unit,
     onPipClick: () -> Unit,
     onRewind: () -> Unit,
     onForward: () -> Unit,
@@ -537,7 +543,7 @@ fun AdvancedPlayerControls(
             return
         }
 
-        // --- TOP BAR (Restored Network Stats) ---
+        // --- TOP BAR ---
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopStart),
             verticalAlignment = Alignment.CenterVertically
@@ -548,41 +554,35 @@ fun AdvancedPlayerControls(
             // Title & Network Info
             Column(modifier = Modifier.weight(1f)) {
                 Text(title, color = NeonBlue, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                // Restored: Network Stats Display
                 Text("$networkSpeed • $dataUsed", color = Color.LightGray, fontSize = 11.sp)
             }
             
             IconButton(onClick = onPipClick) { Icon(Icons.Default.PictureInPictureAlt, null, tint = Color.White) }
-            // Quality Button in Top Bar
-            Box(
-                modifier = Modifier
-                    .clickable(onClick = onQualityClick)
-                    .border(1.dp, NeonPurple, RoundedCornerShape(4.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Text(qualityLabel, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            
+            // ZOOM/RESIZE button
+            IconButton(onClick = onResizeToggle) { 
+                Icon(Icons.Default.AspectRatio, null, tint = Color.White) 
             }
+            
             Spacer(Modifier.width(8.dp))
             IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Settings, null, tint = Color.White) }
         }
 
-        // --- CENTER CONTROLS (Restored Gradient Play & 10s Skips) ---
+        // --- CENTER CONTROLS ---
         Row(
             modifier = Modifier.align(Alignment.Center),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(40.dp)
         ) {
-            // Rewind 10s (Circular Style)
             IconButton(onClick = onRewind, modifier = Modifier.size(50.dp)) {
                 Icon(Icons.Default.Replay10, null, tint = Color.White, modifier = Modifier.fillMaxSize().padding(8.dp))
             }
 
-            // Gradient Play Button (Restored)
             Box(
                 modifier = Modifier
                     .size(72.dp)
                     .clip(CircleShape)
-                    .background(Brush.linearGradient(listOf(NeonBlue, NeonPurple))) // Gradient Ager Moto
+                    .background(Brush.linearGradient(listOf(NeonBlue, NeonPurple)))
                     .clickable(onClick = onPlayPause),
                 contentAlignment = Alignment.Center
             ) {
@@ -592,13 +592,12 @@ fun AdvancedPlayerControls(
                 )
             }
 
-            // Forward 10s (Circular Style)
             IconButton(onClick = onForward, modifier = Modifier.size(50.dp)) {
                 Icon(Icons.Default.Forward10, null, tint = Color.White, modifier = Modifier.fillMaxSize().padding(8.dp))
             }
         }
 
-        // --- BOTTOM BAR (Restored Layout with Separate Rotate & Resize) ---
+        // --- BOTTOM BAR ---
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -620,7 +619,7 @@ fun AdvancedPlayerControls(
                     valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
                     colors = SliderDefaults.colors(
                         thumbColor = NeonBlue,
-                        activeTrackColor = Brush.horizontalGradient(listOf(NeonBlue, NeonPurple)).let { NeonBlue }, // Fallback to solid for API compat, or use custom track
+                        activeTrackColor = NeonBlue,
                         inactiveTrackColor = Color.Gray.copy(0.5f)
                     ),
                     modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
@@ -629,33 +628,16 @@ fun AdvancedPlayerControls(
                 Text(formatTime(duration), color = Color.White, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
             }
 
-            // Row 2: Action Icons (Timer, Audio, Rotate, Lock) - Restored Layout
+            // Row 2: Only Screen Rotate & Lock
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Sleep Timer Button
-                IconButton(onClick = onSleepTimerClick) {
-                    Icon(Icons.Rounded.Timer, null, tint = Color.White)
-                }
-
-                // Audio Only Toggle
-                IconButton(onClick = onAudioModeClick) {
-                    Icon(Icons.Rounded.Headphones, null, tint = Color.White)
-                }
-
-                // Screen Rotation Button (Landscape/Portrait)
                 IconButton(onClick = onRotateScreen) {
                     Icon(Icons.Default.ScreenRotation, null, tint = Color.White)
                 }
 
-                // Resize/Aspect Ratio Button (Moved here)
-                IconButton(onClick = onResizeToggle) {
-                    Icon(Icons.Default.AspectRatio, null, tint = Color.White)
-                }
-                
-                // Lock Button
                 IconButton(onClick = onLockToggle) {
                     Icon(Icons.Default.LockOpen, null, tint = Color.White)
                 }
@@ -664,10 +646,7 @@ fun AdvancedPlayerControls(
     }
 }
 
-// ... (Rest of settings sheet, dialogs, helpers remain same) ...
-// The rest of the file (PlayerSettingsSheet, SettingsItem, CyberSlider, Dialogs, Utils) 
-// should be kept as is from previous correct versions or pasted below if needed.
-// Only AdvancedPlayerControls and PlayerScreen (logic passing) were heavily modified above.
+// ... (Rest of settings sheet, dialogs, helpers remain unchanged) ...
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -680,7 +659,8 @@ fun PlayerSettingsSheet(
     sleepTimerSeconds: Long,
     onSleepTimerClick: () -> Unit,
     playbackSpeed: Float,
-    onSpeedClick: () -> Unit
+    onSpeedClick: () -> Unit,
+    onCastClick: () -> Unit // Added Callback
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -691,17 +671,20 @@ fun PlayerSettingsSheet(
             Text("Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = NeonBlue)
             Spacer(Modifier.height(16.dp))
 
-            // 1. Quality
+            // 1. Cast To Device (New Feature)
+            SettingsItem(icon = Icons.Rounded.Cast, title = "Cast to Device", value = "TV / PC", onClick = onCastClick)
+
+            // 2. Quality
             SettingsItem(icon = Icons.Default.Hd, title = "Quality", value = qualityLabel, onClick = onQualityClick)
             
-            // 2. Playback Speed
+            // 3. Playback Speed
             SettingsItem(icon = Icons.Default.Speed, title = "Playback Speed", value = "${playbackSpeed}x", onClick = onSpeedClick)
 
-            // 3. Sleep Timer
+            // 4. Sleep Timer
             val timerText = if(sleepTimerSeconds > 0) "${sleepTimerSeconds/60} min left" else "Off"
             SettingsItem(icon = Icons.Rounded.Timer, title = "Sleep Timer", value = timerText, onClick = onSleepTimerClick)
 
-            // 4. Audio Mode
+            // 5. Audio Mode
             SettingsItem(
                 icon = Icons.Rounded.Headphones, 
                 title = "Audio Only Mode", 

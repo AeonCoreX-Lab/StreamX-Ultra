@@ -7,9 +7,9 @@ import android.net.NetworkCapabilities
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize // Added
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke // Added
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -90,7 +90,7 @@ fun isInternetAvailable(context: Context): Boolean {
     return activeNetwork.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(navController: NavController) {
     val context = LocalContext.current
@@ -116,7 +116,7 @@ fun HomeScreen(navController: NavController) {
     var latestReleaseInfo by remember { mutableStateOf<GitHubRelease?>(null) }
     var showNoInternetDialog by remember { mutableStateOf(false) }
     var isRefreshing by remember { mutableStateOf(false) }
-    
+
     val pullRefreshState = rememberPullToRefreshState()
 
     val favoriteIds by context.dataStore.data
@@ -224,9 +224,9 @@ fun HomeScreen(navController: NavController) {
                         .border(1.dp, Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f))), RoundedCornerShape(24.dp))
                     ) {
                         CenterAlignedTopAppBar(
-                            title = { 
+                            title = {
                                 Text(
-                                    "STREAMX", 
+                                    "STREAMX",
                                     style = TextStyle(
                                         fontFamily = MaterialTheme.typography.displayMedium.fontFamily,
                                         fontWeight = FontWeight.Black,
@@ -234,7 +234,7 @@ fun HomeScreen(navController: NavController) {
                                         letterSpacing = 2.sp,
                                         brush = Brush.horizontalGradient(listOf(primaryColor, secondaryColor))
                                     )
-                                ) 
+                                )
                             },
                             navigationIcon = {
                                 IconButton(onClick = { scope.launch { drawerState.open() } }) {
@@ -333,13 +333,13 @@ fun HomeScreen(navController: NavController) {
                             state = rememberLazyListState(),
                             contentPadding = PaddingValues(bottom = 100.dp)
                         ) {
-                            // 1. Featured Section
+                            // 1. Featured Section (BIG SLIDER) - Now Top Priority
                             val featured = allChannels.value.filter { it.isFeatured }
                             if (featured.isNotEmpty()) {
-                                item { 
-                                    Spacer(Modifier.height(16.dp))
-                                    HolographicCarousel(
-                                        featured = featured, 
+                                item {
+                                    Spacer(Modifier.height(8.dp))
+                                    HeroCarousel(
+                                        featured = featured,
                                         navController = navController,
                                         onChannelClick = { channel ->
                                             if (channel.streamUrls.isNotEmpty()) {
@@ -347,18 +347,24 @@ fun HomeScreen(navController: NavController) {
                                                 showLinkSelectorDialog = true
                                             }
                                         }
-                                    ) 
+                                    )
+                                    Spacer(Modifier.height(16.dp))
                                 }
                             }
 
-                            // 2. UPGRADED: Smart Category Pills (HD Streamz Style)
-                            item { 
-                                ModernCategorySelector(
-                                    categories = categories.value,
-                                    selected = selectedCategory,
-                                    counts = categoryCounts,
-                                    onSelect = { selectedCategory = it }
-                                )
+                            // 2. STICKY HEADER CATEGORY BAR (HD Streamz Style)
+                            stickyHeader {
+                                Surface(
+                                    color = Color.Black.copy(0.8f), // Transparent backing for sticky effect
+                                    modifier = Modifier.fillMaxWidth().animateContentSize()
+                                ) {
+                                    ModernCategorySelector(
+                                        categories = categories.value,
+                                        selected = selectedCategory,
+                                        counts = categoryCounts,
+                                        onSelect = { selectedCategory = it }
+                                    )
+                                }
                             }
 
                             // 3. Ultra Grid
@@ -367,7 +373,7 @@ fun HomeScreen(navController: NavController) {
                             } else {
                                 items(filteredChannels.chunked(3)) { rowItems ->
                                     Row(
-                                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp), 
+                                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                                         Arrangement.spacedBy(12.dp)
                                     ) {
                                         rowItems.forEach { channel ->
@@ -486,10 +492,10 @@ fun HolographicChannelCard(
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
     val interactionSource = remember { MutableInteractionSource() }
-    
+
     Card(
         modifier = modifier
-            .aspectRatio(0.8f)
+            .aspectRatio(0.85f)
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
@@ -499,7 +505,7 @@ fun HolographicChannelCard(
             modifier = Modifier
                 .fillMaxSize()
                 .background(GlassWhite)
-                .border(1.dp, Brush.verticalGradient(listOf(Color.White.copy(0.3f), Color.Transparent)), RoundedCornerShape(16.dp))
+                .border(1.dp, Brush.verticalGradient(listOf(Color.White.copy(0.2f), Color.Transparent)), RoundedCornerShape(16.dp))
                 .clip(RoundedCornerShape(16.dp))
         ) {
             // Logo Area
@@ -550,7 +556,7 @@ fun HolographicChannelCard(
 }
 
 // ----------------------------------------------------------------------------------
-// UPGRADED CATEGORY SYSTEM (HD STREAMZ STYLE)
+// UPGRADED CATEGORY SYSTEM (HD STREAMZ STYLE - STICKY & PILLS)
 // ----------------------------------------------------------------------------------
 
 @Composable
@@ -561,72 +567,65 @@ fun ModernCategorySelector(
     onSelect: (String) -> Unit
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
-    
-    Column {
-        Text(
-            "BROWSE CATEGORIES //",
-            style = TextStyle(color = primaryColor, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, fontSize = 12.sp),
-            modifier = Modifier.padding(start = 24.dp, top = 24.dp, bottom = 12.dp)
-        )
 
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+    ) {
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(categories) { cat ->
                 val isSelected = cat == selected
                 val count = counts[cat] ?: 0
                 val icon = getCategoryIcon(cat)
-                
-                // Animation
-                val bgColor by animateColorAsState(if (isSelected) primaryColor else Color(0xFF202020), label = "bg")
-                val contentColor by animateColorAsState(if (isSelected) Color.Black else Color.White, label = "content")
+
+                // HD Streamz Style Pill
+                val backgroundColor = if (isSelected) primaryColor else Color(0xFF2A2A2A)
+                val contentColor = if (isSelected) Color.Black else Color.White
+                val borderColor = if (isSelected) primaryColor else Color.Gray.copy(0.3f)
 
                 Surface(
-                    shape = RoundedCornerShape(50), // Pill Shape
-                    color = bgColor,
-                    border = if (!isSelected) BorderStroke(1.dp, Color.White.copy(0.1f)) else null,
+                    shape = RoundedCornerShape(8.dp), // Less rounded, more like tabs
+                    color = backgroundColor,
+                    border = BorderStroke(1.dp, borderColor),
                     modifier = Modifier
+                        .height(40.dp)
                         .clickable { onSelect(cat) }
                         .animateContentSize()
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = icon, 
-                            contentDescription = null, 
+                            imageVector = icon,
+                            contentDescription = null,
                             tint = contentColor,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = cat.uppercase(),
+                            text = cat,
                             color = contentColor,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            letterSpacing = 0.5.sp
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp
                         )
                         if (count > 0) {
                             Spacer(Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .background(if (isSelected) Color.Black.copy(0.2f) else Color.White.copy(0.1f), CircleShape)
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = count.toString(),
-                                    color = contentColor,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Black
-                                )
-                            }
+                            Text(
+                                text = "($count)",
+                                color = contentColor.copy(0.7f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Normal
+                            )
                         }
                     }
                 }
             }
         }
+        // Bottom divider for the sticky header look
+        HorizontalDivider(color = Color.White.copy(0.1f))
     }
 }
 
@@ -645,81 +644,113 @@ fun getCategoryIcon(category: String): ImageVector {
     }
 }
 
+// ----------------------------------------------------------------------------------
+// HERO CAROUSEL (BIG SLIDER - AUTO SCROLL)
+// ----------------------------------------------------------------------------------
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun HolographicCarousel(featured: List<Channel>, navController: NavController, onChannelClick: (Channel) -> Unit) {
+fun HeroCarousel(featured: List<Channel>, navController: NavController, onChannelClick: (Channel) -> Unit) {
     val pagerState = rememberPagerState(pageCount = { featured.size })
     val primaryColor = MaterialTheme.colorScheme.primary
-    val secondaryColor = MaterialTheme.colorScheme.secondary
 
+    // Auto-Scroll Logic
     LaunchedEffect(pagerState.currentPage) {
         if (featured.isNotEmpty()) {
-            delay(5000)
-            try { pagerState.animateScrollToPage((pagerState.currentPage + 1) % featured.size, animationSpec = tween(800)) } catch (e: Exception) {}
+            delay(4000) // 4 seconds delay
+            try {
+                // Circular scroll effect
+                val nextPage = (pagerState.currentPage + 1) % featured.size
+                pagerState.animateScrollToPage(nextPage, animationSpec = tween(800))
+            } catch (e: Exception) { /* safe */ }
         }
     }
 
     Column {
         Text(
-            "FEATURED_STREAMS //",
-            style = TextStyle(color = primaryColor, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, fontSize = 12.sp),
-            modifier = Modifier.padding(start = 24.dp, bottom = 12.dp)
+            "FEATURED LIVE",
+            style = TextStyle(color = primaryColor, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, fontSize = 12.sp),
+            modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
         )
 
         HorizontalPager(
             state = pagerState,
-            contentPadding = PaddingValues(horizontal = 40.dp),
-            pageSpacing = 20.dp
+            contentPadding = PaddingValues(horizontal = 24.dp), // Shows peek of next item
+            pageSpacing = 16.dp
         ) { page ->
+            // Parallax/Scale Effect
             val pageOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-            val scale = lerp(0.85f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f))
-            val alpha = lerp(0.5f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f))
+            val scale = lerp(0.92f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f))
 
             Card(
                 modifier = Modifier
                     .graphicsLayer {
                         scaleX = scale
                         scaleY = scale
-                        this.alpha = alpha
-                        shadowElevation = 20.dp.toPx()
-                        shape = RoundedCornerShape(24.dp)
-                        clip = true
                     }
-                    .height(200.dp)
+                    .height(220.dp) // Much Taller
                     .fillMaxWidth()
                     .clickable { onChannelClick(featured[page]) },
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.Black)
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.Black),
+                elevation = CardDefaults.cardElevation(8.dp)
             ) {
                 Box(Modifier.fillMaxSize()) {
+                    // Background Image
                     AsyncImage(
                         model = featured[page].logoUrl,
                         contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
+                        contentScale = ContentScale.Crop, // Fill the card
+                        modifier = Modifier.fillMaxSize().alpha(0.8f)
                     )
-                    // Gradient Overlay
-                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.8f), Color.Black))))
-                    
-                    // Info
+
+                    // Gradient Overlay for text readability
+                    Box(
+                        Modifier.fillMaxSize()
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.6f), Color.Black.copy(0.9f))))
+                    )
+
+                    // Content
                     Column(
-                        modifier = Modifier.align(Alignment.BottomStart).padding(20.dp)
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(16.dp)
                     ) {
-                        Box(Modifier.background(secondaryColor, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                            Text("LIVE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        // Live Tag
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(8.dp).background(Color.Red, CircleShape))
+                            Spacer(Modifier.width(6.dp))
+                            Text("LIVE NOW", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
-                        Spacer(Modifier.height(8.dp))
+                        
+                        Spacer(Modifier.height(4.dp))
+                        
                         Text(
                             featured[page].name,
                             color = Color.White,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Black
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Black,
+                            maxLines = 1
                         )
+                        
+                        Spacer(Modifier.height(8.dp))
+                        
+                        // Watch Button
+                        Box(
+                            modifier = Modifier
+                                .background(primaryColor, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text("WATCH STREAM", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
-                    
-                    // Play Icon
+
+                    // Play Icon Overlay (Center)
                     Box(
-                        modifier = Modifier.align(Alignment.Center).size(50.dp).background(GlassWhite, CircleShape).border(1.dp, primaryColor, CircleShape),
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(48.dp)
+                            .background(Color.Black.copy(0.4f), CircleShape)
+                            .border(1.dp, Color.White, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Default.PlayArrow, null, tint = Color.White)
@@ -734,7 +765,7 @@ fun HolographicCarousel(featured: List<Channel>, navController: NavController, o
 fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
     val primaryColor = MaterialTheme.colorScheme.primary
     val bgColor = MaterialTheme.colorScheme.background
-    
+
     ModalDrawerSheet(
         drawerContainerColor = Color(0xFF101010),
         drawerContentColor = Color.White
@@ -749,7 +780,7 @@ fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
         }
         HorizontalDivider(color = Color.White.copy(0.1f))
         Spacer(Modifier.height(12.dp))
-        
+
         val itemModifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
         NavigationDrawerItem(
             label = { Text("DASHBOARD") }, selected = true, onClick = onCloseDrawer,
@@ -809,7 +840,7 @@ fun EmptyState(isFavorites: Boolean) {
 fun LinkSelectorDialog(channel: Channel, onDismiss: () -> Unit, onLinkSelected: (String) -> Unit) {
     val primaryColor = MaterialTheme.colorScheme.primary
     val surfaceColor = MaterialTheme.colorScheme.surface
-    
+
     Dialog(onDismissRequest = onDismiss) {
         Card(
             shape = RoundedCornerShape(16.dp),
@@ -832,7 +863,7 @@ fun LinkSelectorDialog(channel: Channel, onDismiss: () -> Unit, onLinkSelected: 
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(Icons.Default.PlayArrow, null, tint = primaryColor)
-                            Spacer(modifier = Modifier.width(16.dp)) 
+                            Spacer(modifier = Modifier.width(16.dp))
                             Text("SERVER 0${index + 1}", color = Color.White, fontWeight = FontWeight.Medium, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                         }
                     }
