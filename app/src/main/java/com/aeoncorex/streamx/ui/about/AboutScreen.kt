@@ -25,7 +25,7 @@ import com.aeoncorex.streamx.ui.home.CyberMeshBackground // ফাংশনট�
 fun AboutScreen(navController: NavController) {
     val context = LocalContext.current
     val packageInfo = getPackageInfo(context)
-    val versionName = packageInfo?.versionName ?: "1.2"
+    val versionName = packageInfo?.versionName ?: "1.2.1"
     
     Box(modifier = Modifier.fillMaxSize()) {
         CyberMeshBackground() // নতুন ব্যাকগ্রাউন্ড ফাংশন
