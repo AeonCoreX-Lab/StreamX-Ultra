@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.* // FIXED: Import for animations (tween, infiniteRepeatable, etc.)
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -30,6 +31,8 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue // FIXED: Required for 'by' delegates
+import androidx.compose.runtime.setValue // FIXED: Required for 'by' delegates
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -48,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.zIndex // FIXED: Import for zIndex
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -206,7 +210,6 @@ fun LiveTVScreen(navController: NavController) {
         // ULTRA BACKGROUND
         CyberMeshBackground()
 
-        // --- SCAFFOLD REMOVED ---
         // Using Box to layer content
         Box(
             modifier = Modifier
@@ -443,7 +446,7 @@ fun LiveTVScreen(navController: NavController) {
 }
 
 // ----------------------------------------------------------------------------------
-// COMPONENTS (Included from previous file for completeness)
+// COMPONENTS
 // ----------------------------------------------------------------------------------
 
 @Composable
