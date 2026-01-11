@@ -6,9 +6,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
 import android.widget.Toast
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -73,8 +71,7 @@ import kotlin.math.absoluteValue
 private val Context.dataStore by preferencesDataStore(name = "favorites_prefs")
 private val FAVORITES_KEY = stringSetPreferencesKey("favorite_ids")
 
-// NOTE: Hardcoded colors removed. Using MaterialTheme instead.
-val GlassWhite = Color(0x1AFFFFFF) // Keeping this as a neutral overlay
+val GlassWhite = Color(0x1AFFFFFF)
 
 interface IPTVApi {
     @GET("index.json")
@@ -92,7 +89,7 @@ fun isInternetAvailable(context: Context): Boolean {
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun HomeScreen(navController: NavController) {
+fun LiveTVScreen(navController: NavController) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -123,7 +120,6 @@ fun HomeScreen(navController: NavController) {
         .map { preferences -> preferences[FAVORITES_KEY] ?: emptySet() }
         .collectAsState(initial = emptySet())
 
-    // Channel Counts Map (For UI)
     val categoryCounts = remember(allChannels.value, favoriteIds) {
         val counts = allChannels.value.groupingBy { it.category }.eachCount().toMutableMap()
         counts["All"] = allChannels.value.size
@@ -207,52 +203,18 @@ fun HomeScreen(navController: NavController) {
             AppDrawer(navController, onCloseDrawer = { scope.launch { drawerState.close() } })
         }
     ) {
-        // ULTRA BACKGROUND - Now Dynamic
+        // ULTRA BACKGROUND
         CyberMeshBackground()
 
-        Scaffold(
-            modifier = Modifier.nestedScroll(pullRefreshState.nestedScrollConnection),
-            containerColor = Color.Transparent,
-            topBar = {
-                if (!isSearchActive) {
-                    // Glassmorphic Top Bar
-                    Box(modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(GlassWhite)
-                        .border(1.dp, Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f))), RoundedCornerShape(24.dp))
-                    ) {
-                        CenterAlignedTopAppBar(
-                            title = {
-                                Text(
-                                    "STREAMX",
-                                    style = TextStyle(
-                                        fontFamily = MaterialTheme.typography.displayMedium.fontFamily,
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 22.sp,
-                                        letterSpacing = 2.sp,
-                                        brush = Brush.horizontalGradient(listOf(primaryColor, secondaryColor))
-                                    )
-                                )
-                            },
-                            navigationIcon = {
-                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(Icons.Default.Menu, "Menu", tint = Color.White)
-                                }
-                            },
-                            actions = {
-                                IconButton(onClick = { isSearchActive = true }) {
-                                    Icon(Icons.Default.Search, "Search", tint = Color.White)
-                                }
-                            },
-                            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
-                        )
-                    }
-                }
-            }
-        ) { padding ->
-
+        // --- SCAFFOLD REMOVED ---
+        // Using Box to layer content
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(pullRefreshState.nestedScrollConnection)
+        ) {
+            
+            // 1. Content Area
             val filteredChannels = remember(searchQuery, selectedCategory, allChannels.value, favoriteIds) {
                 allChannels.value.filter { channel ->
                     val matchesSearch = channel.name.contains(searchQuery, ignoreCase = true)
@@ -264,11 +226,11 @@ fun HomeScreen(navController: NavController) {
                     matchesSearch && matchesCategory
                 }
             }
-
+            
             if (isSearchActive) {
-                // Futuristic Search View
-                Box(modifier = Modifier.fillMaxSize().background(backgroundColor.copy(0.95f))) {
-                    SearchBar(
+                // Full Screen Search Overlay
+                Box(modifier = Modifier.fillMaxSize().background(backgroundColor.copy(0.95f)).zIndex(2f)) {
+                     SearchBar(
                         query = searchQuery,
                         onQueryChange = { searchQuery = it },
                         onSearch = { isSearchActive = false },
@@ -320,89 +282,127 @@ fun HomeScreen(navController: NavController) {
                     }
                 }
             } else {
-                // MAIN CONTENT BOX
-                Box(modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding) // Respect TopBar
-                ) {
-                    if (isLoading) {
-                        LoadingShimmerEffect()
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            state = rememberLazyListState(),
-                            contentPadding = PaddingValues(bottom = 100.dp)
-                        ) {
-                            // 1. Featured Section (BIG SLIDER) - Now Top Priority
-                            val featured = allChannels.value.filter { it.isFeatured }
-                            if (featured.isNotEmpty()) {
-                                item {
-                                    Spacer(Modifier.height(8.dp))
-                                    HeroCarousel(
-                                        featured = featured,
-                                        navController = navController,
-                                        onChannelClick = { channel ->
-                                            if (channel.streamUrls.isNotEmpty()) {
-                                                selectedChannelForLinks = channel
-                                                showLinkSelectorDialog = true
-                                            }
+                // Main List Content
+                if (isLoading) {
+                     // Add some top padding to avoid overlap with TopBar since Scaffold is gone
+                    Box(modifier = Modifier.padding(top = 80.dp)) {
+                         LoadingShimmerEffect()
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        state = rememberLazyListState(),
+                        contentPadding = PaddingValues(top = 80.dp, bottom = 100.dp) // Added top padding for custom TopBar
+                    ) {
+                        // 1. Featured Section
+                        val featured = allChannels.value.filter { it.isFeatured }
+                        if (featured.isNotEmpty()) {
+                            item {
+                                Spacer(Modifier.height(8.dp))
+                                HeroCarousel(
+                                    featured = featured,
+                                    navController = navController,
+                                    onChannelClick = { channel ->
+                                        if (channel.streamUrls.isNotEmpty()) {
+                                            selectedChannelForLinks = channel
+                                            showLinkSelectorDialog = true
                                         }
-                                    )
-                                    Spacer(Modifier.height(16.dp))
-                                }
+                                    }
+                                )
+                                Spacer(Modifier.height(16.dp))
                             }
+                        }
 
-                            // 2. STICKY HEADER CATEGORY BAR (HD Streamz Style)
-                            stickyHeader {
-                                Surface(
-                                    color = Color.Black.copy(0.8f), // Transparent backing for sticky effect
-                                    modifier = Modifier.fillMaxWidth().animateContentSize()
+                        // 2. Sticky Header
+                        stickyHeader {
+                            Surface(
+                                color = Color.Black.copy(0.8f),
+                                modifier = Modifier.fillMaxWidth().animateContentSize()
+                            ) {
+                                ModernCategorySelector(
+                                    categories = categories.value,
+                                    selected = selectedCategory,
+                                    counts = categoryCounts,
+                                    onSelect = { selectedCategory = it }
+                                )
+                            }
+                        }
+
+                        // 3. Channel Grid
+                        if (filteredChannels.isEmpty()) {
+                            item { EmptyState(isFavorites = selectedCategory == "Favorites") }
+                        } else {
+                            items(filteredChannels.chunked(3)) { rowItems ->
+                                Row(
+                                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                    Arrangement.spacedBy(12.dp)
                                 ) {
-                                    ModernCategorySelector(
-                                        categories = categories.value,
-                                        selected = selectedCategory,
-                                        counts = categoryCounts,
-                                        onSelect = { selectedCategory = it }
-                                    )
-                                }
-                            }
-
-                            // 3. Ultra Grid
-                            if (filteredChannels.isEmpty()) {
-                                item { EmptyState(isFavorites = selectedCategory == "Favorites") }
-                            } else {
-                                items(filteredChannels.chunked(3)) { rowItems ->
-                                    Row(
-                                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                                        Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        rowItems.forEach { channel ->
-                                            HolographicChannelCard(
-                                                channel = channel,
-                                                isFavorite = channel.id in favoriteIds,
-                                                modifier = Modifier.weight(1f),
-                                                onFavoriteToggle = {
-                                                    scope.launch {
-                                                        context.dataStore.edit { prefs ->
-                                                            val current = prefs[FAVORITES_KEY] ?: emptySet()
-                                                            prefs[FAVORITES_KEY] = if (channel.id in current) current - channel.id else current + channel.id
-                                                        }
-                                                    }
-                                                },
-                                                onClick = {
-                                                    if (channel.streamUrls.isNotEmpty()) {
-                                                        selectedChannelForLinks = channel
-                                                        showLinkSelectorDialog = true
+                                    rowItems.forEach { channel ->
+                                        HolographicChannelCard(
+                                            channel = channel,
+                                            isFavorite = channel.id in favoriteIds,
+                                            modifier = Modifier.weight(1f),
+                                            onFavoriteToggle = {
+                                                scope.launch {
+                                                    context.dataStore.edit { prefs ->
+                                                        val current = prefs[FAVORITES_KEY] ?: emptySet()
+                                                        prefs[FAVORITES_KEY] = if (channel.id in current) current - channel.id else current + channel.id
                                                     }
                                                 }
-                                            )
-                                        }
-                                        repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
+                                            },
+                                            onClick = {
+                                                if (channel.streamUrls.isNotEmpty()) {
+                                                    selectedChannelForLinks = channel
+                                                    showLinkSelectorDialog = true
+                                                }
+                                            }
+                                        )
                                     }
+                                    repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
                                 }
                             }
                         }
                     }
+                }
+            }
+
+            // 2. Custom Top Bar (Floating Overlay)
+            // Removed Scaffold topBar, placed manually here
+            if (!isSearchActive) {
+                Box(modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(GlassWhite)
+                    .border(1.dp, Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f))), RoundedCornerShape(24.dp))
+                    .zIndex(1f) // Ensure it's on top of list
+                ) {
+                    CenterAlignedTopAppBar(
+                        title = {
+                            Text(
+                                "STREAMX",
+                                style = TextStyle(
+                                    fontFamily = MaterialTheme.typography.displayMedium.fontFamily,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 22.sp,
+                                    letterSpacing = 2.sp,
+                                    brush = Brush.horizontalGradient(listOf(primaryColor, secondaryColor))
+                                )
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Default.Menu, "Menu", tint = Color.White)
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = { isSearchActive = true }) {
+                                Icon(Icons.Default.Search, "Search", tint = Color.White)
+                            }
+                        },
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                    )
                 }
             }
         }
@@ -443,7 +443,7 @@ fun HomeScreen(navController: NavController) {
 }
 
 // ----------------------------------------------------------------------------------
-// ULTRA FUTURISTIC COMPONENTS (Dynamic Theming)
+// COMPONENTS (Included from previous file for completeness)
 // ----------------------------------------------------------------------------------
 
 @Composable
@@ -454,13 +454,11 @@ fun CyberMeshBackground() {
         animationSpec = infiniteRepeatable(tween(20000, easing = LinearEasing), RepeatMode.Reverse), label = ""
     )
 
-    // Dynamic Colors
     val bgColor = MaterialTheme.colorScheme.background
     val primary = MaterialTheme.colorScheme.primary
     val secondary = MaterialTheme.colorScheme.secondary
 
     Canvas(modifier = Modifier.fillMaxSize().background(bgColor)) {
-        // Deep Space Gradient
         drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(Color(0xFF0F0F15), bgColor),
@@ -468,7 +466,6 @@ fun CyberMeshBackground() {
                 radius = size.maxDimension
             )
         )
-        // Moving Neon Orbs (Simulated Mesh)
         drawCircle(
             brush = Brush.radialGradient(listOf(secondary.copy(0.15f), Color.Transparent)),
             radius = size.minDimension * 0.6f,
@@ -508,7 +505,6 @@ fun HolographicChannelCard(
                 .border(1.dp, Brush.verticalGradient(listOf(Color.White.copy(0.2f), Color.Transparent)), RoundedCornerShape(16.dp))
                 .clip(RoundedCornerShape(16.dp))
         ) {
-            // Logo Area
             Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
                 AsyncImage(
                     model = channel.logoUrl,
@@ -517,8 +513,6 @@ fun HolographicChannelCard(
                     contentScale = ContentScale.Fit
                 )
             }
-
-            // Bottom Gradient Overlay
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -526,8 +520,6 @@ fun HolographicChannelCard(
                     .height(50.dp)
                     .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.9f))))
             )
-
-            // Name
             Text(
                 text = channel.name.uppercase(),
                 color = Color.White,
@@ -538,8 +530,6 @@ fun HolographicChannelCard(
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 8.dp, start = 4.dp, end = 4.dp)
             )
-
-            // Fav Button
             IconButton(
                 onClick = onFavoriteToggle,
                 modifier = Modifier.align(Alignment.TopEnd).size(30.dp)
@@ -555,10 +545,6 @@ fun HolographicChannelCard(
     }
 }
 
-// ----------------------------------------------------------------------------------
-// UPGRADED CATEGORY SYSTEM (HD STREAMZ STYLE - STICKY & PILLS)
-// ----------------------------------------------------------------------------------
-
 @Composable
 fun ModernCategorySelector(
     categories: List<String>,
@@ -567,10 +553,7 @@ fun ModernCategorySelector(
     onSelect: (String) -> Unit
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
-
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-    ) {
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -579,14 +562,12 @@ fun ModernCategorySelector(
                 val isSelected = cat == selected
                 val count = counts[cat] ?: 0
                 val icon = getCategoryIcon(cat)
-
-                // HD Streamz Style Pill
                 val backgroundColor = if (isSelected) primaryColor else Color(0xFF2A2A2A)
                 val contentColor = if (isSelected) Color.Black else Color.White
                 val borderColor = if (isSelected) primaryColor else Color.Gray.copy(0.3f)
 
                 Surface(
-                    shape = RoundedCornerShape(8.dp), // Less rounded, more like tabs
+                    shape = RoundedCornerShape(8.dp),
                     color = backgroundColor,
                     border = BorderStroke(1.dp, borderColor),
                     modifier = Modifier
@@ -598,38 +579,21 @@ fun ModernCategorySelector(
                         modifier = Modifier.padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = contentColor,
-                            modifier = Modifier.size(16.dp)
-                        )
+                        Icon(imageVector = icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = cat,
-                            color = contentColor,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp
-                        )
+                        Text(text = cat, color = contentColor, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                         if (count > 0) {
                             Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = "($count)",
-                                color = contentColor.copy(0.7f),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Normal
-                            )
+                            Text(text = "($count)", color = contentColor.copy(0.7f), fontSize = 11.sp, fontWeight = FontWeight.Normal)
                         }
                     }
                 }
             }
         }
-        // Bottom divider for the sticky header look
         HorizontalDivider(color = Color.White.copy(0.1f))
     }
 }
 
-// Helper: Smart Icon Mapping based on Category Name
 fun getCategoryIcon(category: String): ImageVector {
     return when {
         category.contains("All", true) -> Icons.Rounded.Apps
@@ -644,21 +608,16 @@ fun getCategoryIcon(category: String): ImageVector {
     }
 }
 
-// ----------------------------------------------------------------------------------
-// HERO CAROUSEL (BIG SLIDER - AUTO SCROLL)
-// ----------------------------------------------------------------------------------
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HeroCarousel(featured: List<Channel>, navController: NavController, onChannelClick: (Channel) -> Unit) {
     val pagerState = rememberPagerState(pageCount = { featured.size })
     val primaryColor = MaterialTheme.colorScheme.primary
 
-    // Auto-Scroll Logic
     LaunchedEffect(pagerState.currentPage) {
         if (featured.isNotEmpty()) {
-            delay(4000) // 4 seconds delay
+            delay(4000)
             try {
-                // Circular scroll effect
                 val nextPage = (pagerState.currentPage + 1) % featured.size
                 pagerState.animateScrollToPage(nextPage, animationSpec = tween(800))
             } catch (e: Exception) { /* safe */ }
@@ -671,23 +630,18 @@ fun HeroCarousel(featured: List<Channel>, navController: NavController, onChanne
             style = TextStyle(color = primaryColor, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, fontSize = 12.sp),
             modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
         )
-
         HorizontalPager(
             state = pagerState,
-            contentPadding = PaddingValues(horizontal = 24.dp), // Shows peek of next item
+            contentPadding = PaddingValues(horizontal = 24.dp),
             pageSpacing = 16.dp
         ) { page ->
-            // Parallax/Scale Effect
             val pageOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
             val scale = lerp(0.92f, 1f, 1f - pageOffset.absoluteValue.coerceIn(0f, 1f))
 
             Card(
                 modifier = Modifier
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                    }
-                    .height(220.dp) // Much Taller
+                    .graphicsLayer { scaleX = scale; scaleY = scale }
+                    .height(220.dp)
                     .fillMaxWidth()
                     .clickable { onChannelClick(featured[page]) },
                 shape = RoundedCornerShape(16.dp),
@@ -695,62 +649,28 @@ fun HeroCarousel(featured: List<Channel>, navController: NavController, onChanne
                 elevation = CardDefaults.cardElevation(8.dp)
             ) {
                 Box(Modifier.fillMaxSize()) {
-                    // Background Image
                     AsyncImage(
                         model = featured[page].logoUrl,
                         contentDescription = null,
-                        contentScale = ContentScale.Crop, // Fill the card
+                        contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize().alpha(0.8f)
                     )
-
-                    // Gradient Overlay for text readability
-                    Box(
-                        Modifier.fillMaxSize()
-                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.6f), Color.Black.copy(0.9f))))
-                    )
-
-                    // Content
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(16.dp)
-                    ) {
-                        // Live Tag
+                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.6f), Color.Black.copy(0.9f)))))
+                    Column(modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(8.dp).background(Color.Red, CircleShape))
                             Spacer(Modifier.width(6.dp))
                             Text("LIVE NOW", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
-                        
                         Spacer(Modifier.height(4.dp))
-                        
-                        Text(
-                            featured[page].name,
-                            color = Color.White,
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Black,
-                            maxLines = 1
-                        )
-                        
+                        Text(featured[page].name, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black, maxLines = 1)
                         Spacer(Modifier.height(8.dp))
-                        
-                        // Watch Button
-                        Box(
-                            modifier = Modifier
-                                .background(primaryColor, RoundedCornerShape(4.dp))
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
+                        Box(modifier = Modifier.background(primaryColor, RoundedCornerShape(4.dp)).padding(horizontal = 12.dp, vertical = 6.dp)) {
                             Text("WATCH STREAM", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
-
-                    // Play Icon Overlay (Center)
                     Box(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .size(48.dp)
-                            .background(Color.Black.copy(0.4f), CircleShape)
-                            .border(1.dp, Color.White, CircleShape),
+                        modifier = Modifier.align(Alignment.Center).size(48.dp).background(Color.Black.copy(0.4f), CircleShape).border(1.dp, Color.White, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Default.PlayArrow, null, tint = Color.White)
@@ -770,9 +690,7 @@ fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
         drawerContainerColor = Color(0xFF101010),
         drawerContentColor = Color.White
     ) {
-        Box(modifier = Modifier.fillMaxWidth().height(200.dp).background(
-            Brush.linearGradient(listOf(bgColor, Color(0xFF1A1A1A)))
-        ), contentAlignment = Alignment.CenterStart) {
+        Box(modifier = Modifier.fillMaxWidth().height(200.dp).background(Brush.linearGradient(listOf(bgColor, Color(0xFF1A1A1A)))), contentAlignment = Alignment.CenterStart) {
             Column(Modifier.padding(24.dp)) {
                 Text("STREAMX", color = primaryColor, fontSize = 30.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
                 Text("ULTRA EDITION", color = Color.Gray, fontSize = 12.sp, letterSpacing = 4.sp)
@@ -780,7 +698,6 @@ fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
         }
         HorizontalDivider(color = Color.White.copy(0.1f))
         Spacer(Modifier.height(12.dp))
-
         val itemModifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
         NavigationDrawerItem(
             label = { Text("DASHBOARD") }, selected = true, onClick = onCloseDrawer,
