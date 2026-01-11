@@ -831,6 +831,7 @@ fun SleepTimerDialog(currentValue: Int, onDismiss: () -> Unit, onTimeSelected: (
     }
 }
 
+@OptIn(UnstableApi::class)
 @Composable
 fun QualitySelectorDialog(trackSelector: DefaultTrackSelector, onDismiss: () -> Unit, onQualitySelected: (String) -> Unit) {
     val tracks = remember { trackSelector.currentMappedTrackInfo }
