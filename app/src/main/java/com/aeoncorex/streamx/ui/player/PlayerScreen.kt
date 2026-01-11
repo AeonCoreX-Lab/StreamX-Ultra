@@ -16,7 +16,6 @@ import android.view.HapticFeedbackConstants
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.annotation.OptIn
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -55,7 +54,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.*
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -79,7 +77,6 @@ fun isInternetAvailable(context: Context): Boolean {
     return activeNetwork.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
 }
 
-@OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(navController: NavController, encodedUrl: String) {
     val context = LocalContext.current
@@ -705,7 +702,6 @@ fun SeekAnimation(visible: Boolean, isForward: Boolean, modifier: Modifier = Mod
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerSettingsSheet(
     onDismiss: () -> Unit,
@@ -831,7 +827,6 @@ fun SleepTimerDialog(currentValue: Int, onDismiss: () -> Unit, onTimeSelected: (
     }
 }
 
-@OptIn(UnstableApi::class)
 @Composable
 fun QualitySelectorDialog(trackSelector: DefaultTrackSelector, onDismiss: () -> Unit, onQualitySelected: (String) -> Unit) {
     val tracks = remember { trackSelector.currentMappedTrackInfo }
