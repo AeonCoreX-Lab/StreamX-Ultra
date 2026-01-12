@@ -4,6 +4,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -47,11 +48,12 @@ fun MainScreen(navController: NavController) {
                     .shadow(20.dp, RoundedCornerShape(35.dp), ambientColor = primaryColor, spotColor = primaryColor)
                     .background(
                         brush = Brush.verticalGradient(
-                            listOf(Color(0xFF1A1A1A).copy(0.9f), Color.Black)
+                            listOf(Color(0xFF1A1A1A).copy(alpha = 0.9f), Color.Black)
                         ),
                         shape = RoundedCornerShape(35.dp)
                     )
-                    .border(1.dp, Color.White.withAlpha(25), RoundedCornerShape(35.dp)),
+                    // [FIX] withAlpha deprecated chilo, copy(alpha = ...) use kora hoyeche
+                    .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(35.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Row(
@@ -89,7 +91,7 @@ fun MainScreen(navController: NavController) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = 0.dp) // Floating Nav এর জন্য প্যাডিং দরকার নেই
+                .padding(bottom = 0.dp) 
         ) {
             when (selectedTab) {
                 0 -> MovieHomeScreen(navController)
@@ -110,12 +112,14 @@ fun NavItem(
 ) {
     val animatedColor by animateColorAsState(
         targetValue = if (isSelected) primaryColor else Color.Gray,
-        animationSpec = tween(500)
+        animationSpec = tween(500),
+        label = "color"
     )
     
     val animatedSize by animateDpAsState(
         targetValue = if (isSelected) 30.dp else 24.dp,
-        animationSpec = tween(300)
+        animationSpec = tween(300),
+        label = "size"
     )
 
     Column(
@@ -129,7 +133,6 @@ fun NavItem(
             )
             .padding(8.dp)
     ) {
-        // সেকশন গ্লো ইফেক্ট
         if (isSelected) {
             Box(
                 modifier = Modifier

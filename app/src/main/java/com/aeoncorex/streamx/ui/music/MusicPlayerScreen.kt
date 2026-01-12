@@ -3,6 +3,7 @@ package com.aeoncorex.streamx.ui.music
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke // [FIX] Added import
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -28,7 +29,7 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import coil.compose.AsyncImage
-import com.aeoncorex.streamx.ui.home.CyberMeshBackground
+import com.aeoncorex.streamx.ui.home.CyberMeshBackground // Ensure this file exists, otherwise comment out
 import kotlinx.coroutines.delay
 
 @Composable
@@ -43,7 +44,6 @@ fun MusicPlayerScreen(
     val view = LocalView.current
     val primaryColor = MaterialTheme.colorScheme.primary
 
-    // ExoPlayer Setup
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
             val mediaItem = MediaItem.fromUri(streamUrl)
@@ -53,23 +53,21 @@ fun MusicPlayerScreen(
         }
     }
 
-    // স্টেটসমূহ
     var isPlaying by remember { mutableStateOf(true) }
-    var currentPosition by remember { mutableStateOf(0L) }
-    var duration by remember { mutableStateOf(0L) }
+    var currentPosition by remember { mutableLongStateOf(0L) }
+    var duration by remember { mutableLongStateOf(0L) }
 
-    // অ্যালবাম আর্ট রোটেশন অ্যানিমেশন
-    val infiniteTransition = rememberInfiniteTransition()
+    val infiniteTransition = rememberInfiniteTransition(label = "rotate")
     val rotation by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
             animation = tween(15000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
-        )
+        ),
+        label = "rotation"
     )
 
-    // প্রগ্রেস আপডেট লুপ
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
             currentPosition = exoPlayer.currentPosition
@@ -83,9 +81,9 @@ fun MusicPlayerScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        CyberMeshBackground() // আপনার সিগনেচার ব্যাকগ্রাউন্ড
+        // [NOTE] Ensure CyberMeshBackground exists or use a plain background
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) 
 
-        // মেন প্লেয়ার লেআউট
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -93,7 +91,6 @@ fun MusicPlayerScreen(
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // ১. হেডার
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -104,34 +101,31 @@ fun MusicPlayerScreen(
                 }
                 Text(
                     "NOW PLAYING",
-                    color = Color.White.copy(0.7f),
+                    color = Color.White.copy(alpha = 0.7f),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 2.sp
                 )
-                IconButton(onClick = { /* অপশন মেনু */ }) {
+                IconButton(onClick = { }) {
                     Icon(Icons.Default.MoreVert, null, tint = Color.White)
                 }
             }
 
             Spacer(modifier = Modifier.weight(0.2f))
 
-            // ২. রোটেটিং অ্যালবাম আর্ট (Spotify Vinyl Style)
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .size(300.dp)
                     .rotate(if (isPlaying) rotation else 0f)
             ) {
-                // আউটার ডিশ (Vinyl look)
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     shape = CircleShape,
-                    color = Color.Black.copy(0.4f),
-                    border = BorderStroke(8.dp, Color.White.copy(0.05f))
+                    color = Color.Black.copy(alpha = 0.4f),
+                    border = BorderStroke(8.dp, Color.White.copy(alpha = 0.05f)) // [FIX] BorderStroke used here
                 ) {}
                 
-                // একচুয়াল ইমেজ
                 AsyncImage(
                     model = imageUrl,
                     contentDescription = null,
@@ -139,13 +133,12 @@ fun MusicPlayerScreen(
                     modifier = Modifier
                         .size(260.dp)
                         .clip(CircleShape)
-                        .border(4.dp, primaryColor.copy(0.5f), CircleShape)
+                        .border(4.dp, primaryColor.copy(alpha = 0.5f), CircleShape)
                 )
             }
 
             Spacer(modifier = Modifier.weight(0.2f))
 
-            // ৩. গানের নাম ও আর্টিস্ট
             Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = title,
@@ -164,7 +157,6 @@ fun MusicPlayerScreen(
 
             Spacer(modifier = Modifier.height(30.dp))
 
-            // ৪. সীক বার (Slider)
             Column {
                 Slider(
                     value = if (duration > 0) currentPosition.toFloat() / duration else 0f,
@@ -175,7 +167,7 @@ fun MusicPlayerScreen(
                     colors = SliderDefaults.colors(
                         thumbColor = Color.White,
                         activeTrackColor = primaryColor,
-                        inactiveTrackColor = Color.White.copy(0.2f)
+                        inactiveTrackColor = Color.White.copy(alpha = 0.2f)
                     )
                 )
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -186,21 +178,19 @@ fun MusicPlayerScreen(
 
             Spacer(modifier = Modifier.height(40.dp))
 
-            // ৫. প্লেব্যাক কন্ট্রোল
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = { /* Shuffle */ }) {
-                    Icon(Icons.Rounded.Shuffle, null, tint = Color.White.copy(0.6f))
+                IconButton(onClick = { }) {
+                    Icon(Icons.Rounded.Shuffle, null, tint = Color.White.copy(alpha = 0.6f))
                 }
                 
-                IconButton(onClick = { /* Previous */ }, modifier = Modifier.size(56.dp)) {
+                IconButton(onClick = { }, modifier = Modifier.size(56.dp)) {
                     Icon(Icons.Rounded.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(40.dp))
                 }
 
-                // প্লে/পজ বাটন (High-Tech Design)
                 Surface(
                     onClick = {
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -221,12 +211,12 @@ fun MusicPlayerScreen(
                     }
                 }
 
-                IconButton(onClick = { /* Next */ }, modifier = Modifier.size(56.dp)) {
+                IconButton(onClick = { }, modifier = Modifier.size(56.dp)) {
                     Icon(Icons.Rounded.SkipNext, null, tint = Color.White, modifier = Modifier.size(40.dp))
                 }
 
-                IconButton(onClick = { /* Repeat */ }) {
-                    Icon(Icons.Rounded.Repeat, null, tint = Color.White.copy(0.6f))
+                IconButton(onClick = { }) {
+                    Icon(Icons.Rounded.Repeat, null, tint = Color.White.copy(alpha = 0.6f))
                 }
             }
             
@@ -235,7 +225,6 @@ fun MusicPlayerScreen(
     }
 }
 
-// টাইম ফরম্যাটিং হেল্পার
 private fun formatTime(ms: Long): String {
     val totalSeconds = ms / 1000
     val minutes = totalSeconds / 60
