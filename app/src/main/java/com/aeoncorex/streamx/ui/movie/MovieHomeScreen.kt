@@ -11,8 +11,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,87 +22,254 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.util.lerp
+import androidx.compose.ui.zIndex
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.aeoncorex.streamx.data.MovieRepository
 import com.aeoncorex.streamx.model.Movie
-import com.aeoncorex.streamx.ui.home.CyberMeshBackground
+import com.aeoncorex.streamx.ui.home.CyberMeshBackground // Ensure this import exists or use the function at bottom
 import com.valentinilk.shimmer.shimmer
+import kotlinx.coroutines.launch
 import java.net.URLEncoder
-import kotlin.math.absoluteValue
 
+// Define GlassWhite color locally if not available globally
+val GlassWhite = Color(0x1AFFFFFF)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MovieHomeScreen(navController: NavController) {
-    // Collect Data
+    val scope = rememberCoroutineScope()
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+
+    // Colors
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val secondaryColor = MaterialTheme.colorScheme.secondary
+    val backgroundColor = MaterialTheme.colorScheme.background
+
+    // Data Collection
     val moviesState = MovieRepository.getMoviesFlow().collectAsState(initial = emptyList())
     val allMovies = moviesState.value
-    
+
+    // Search State
+    var searchQuery by remember { mutableStateOf("") }
+    var isSearchActive by remember { mutableStateOf(false) }
+
     // Derived States
+    val filteredMovies = remember(allMovies, searchQuery) {
+        if (searchQuery.isEmpty()) allMovies else allMovies.filter {
+            it.title.contains(searchQuery, ignoreCase = true)
+        }
+    }
+    
     val featuredMovies = remember(allMovies) { allMovies.filter { it.isFeatured }.take(5) }
     val topRatedMovies = remember(allMovies) { allMovies.sortedByDescending { it.rating }.take(10) }
     val categories = remember(allMovies) { allMovies.groupBy { it.category } }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        CyberMeshBackground() // Your existing background
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            MovieAppDrawer(navController, onCloseDrawer = { scope.launch { drawerState.close() } })
+        }
+    ) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            // Background
+            CyberMeshBackground() 
 
-        if (allMovies.isEmpty()) {
-            LoadingShimmer()
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 100.dp)
-            ) {
-                // 1. Hero Pager (Netflix Style)
-                item {
-                    if (featuredMovies.isNotEmpty()) {
-                        HeroCarousel(movies = featuredMovies, onPlay = { playMovie(navController, it.streamUrl) }, onDetail = { navController.navigate("movie_detail/${it.id}") })
-                    }
-                }
-
-                // 2. Top 10 Row (Special UI)
-                if (topRatedMovies.isNotEmpty()) {
-                    item {
-                        CategoryTitle("Top 10 Movies Today")
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            itemsIndexed(topRatedMovies) { index, movie ->
-                                Top10Card(index + 1, movie) { navController.navigate("movie_detail/${movie.id}") }
+            // Content
+            if (isSearchActive) {
+                // --- SEARCH OVERLAY ---
+                Box(modifier = Modifier.fillMaxSize().background(backgroundColor.copy(0.95f)).zIndex(2f)) {
+                    SearchBar(
+                        query = searchQuery,
+                        onQueryChange = { searchQuery = it },
+                        onSearch = { isSearchActive = false },
+                        active = true,
+                        onActiveChange = { isSearchActive = it },
+                        placeholder = { Text("Search Movies...", color = Color.Gray) },
+                        leadingIcon = { Icon(Icons.Default.Search, null, tint = primaryColor) },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Close, "Clear", tint = Color.White) }
+                            } else {
+                                IconButton(onClick = { isSearchActive = false }) { Icon(Icons.Default.Close, "Close", tint = Color.White) }
+                            }
+                        },
+                        colors = SearchBarDefaults.colors(
+                            containerColor = Color.Black,
+                            dividerColor = secondaryColor,
+                            inputFieldColors = TextFieldDefaults.colors(focusedTextColor = Color.White)
+                        ),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        LazyColumn(contentPadding = PaddingValues(16.dp)) {
+                            items(filteredMovies) { movie ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { 
+                                            navController.navigate("movie_detail/${movie.id}")
+                                            isSearchActive = false 
+                                        }
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    AsyncImage(
+                                        model = movie.posterUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier.width(50.dp).aspectRatio(0.7f).clip(RoundedCornerShape(4.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    Spacer(Modifier.width(16.dp))
+                                    Column {
+                                        Text(movie.title, color = Color.White, fontWeight = FontWeight.Bold)
+                                        Text(movie.year, color = Color.Gray, fontSize = 12.sp)
+                                    }
+                                }
+                                HorizontalDivider(color = Color.White.copy(0.1f))
                             }
                         }
                     }
                 }
+            } else {
+                // --- MAIN CONTENT ---
+                if (allMovies.isEmpty()) {
+                    // Added top padding for shimmer so it doesn't hide behind header
+                    Box(modifier = Modifier.padding(top = 80.dp)) {
+                        LoadingShimmer()
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        // Add top padding (80.dp) for the header and bottom padding for nav bar
+                        contentPadding = PaddingValues(bottom = 100.dp) 
+                    ) {
+                        // 1. Hero Pager (Netflix Style)
+                        item {
+                            if (featuredMovies.isNotEmpty()) {
+                                HeroCarousel(movies = featuredMovies, onPlay = { playMovie(navController, it.streamUrl) }, onDetail = { navController.navigate("movie_detail/${it.id}") })
+                            }
+                        }
 
-                // 3. Standard Categories
-                categories.forEach { (categoryName, movies) ->
-                    item {
-                        CategoryTitle(categoryName)
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(movies) { movie ->
-                                StandardMovieCard(movie) { navController.navigate("movie_detail/${movie.id}") }
+                        // 2. Top 10 Row
+                        if (topRatedMovies.isNotEmpty()) {
+                            item {
+                                CategoryTitle("Top 10 Movies Today")
+                                LazyRow(
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    itemsIndexed(topRatedMovies) { index, movie ->
+                                        Top10Card(index + 1, movie) { navController.navigate("movie_detail/${movie.id}") }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 3. Standard Categories
+                        categories.forEach { (categoryName, movies) ->
+                            item {
+                                CategoryTitle(categoryName)
+                                LazyRow(
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    items(movies) { movie ->
+                                        StandardMovieCard(movie) { navController.navigate("movie_detail/${movie.id}") }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
+
+            // --- CUSTOM FLOATING HEADER (LiveTV Style) ---
+            if (!isSearchActive) {
+                Box(modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(GlassWhite)
+                    .border(1.dp, Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f))), RoundedCornerShape(24.dp))
+                    .zIndex(1f)
+                ) {
+                    CenterAlignedTopAppBar(
+                        title = {
+                            Text(
+                                "MOVIES", // Title Changed to MOVIES
+                                style = TextStyle(
+                                    fontFamily = MaterialTheme.typography.displayMedium.fontFamily,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 22.sp,
+                                    letterSpacing = 2.sp,
+                                    brush = Brush.horizontalGradient(listOf(primaryColor, secondaryColor))
+                                )
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Default.Menu, "Menu", tint = Color.White)
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = { isSearchActive = true }) {
+                                Icon(Icons.Default.Search, "Search", tint = Color.White)
+                            }
+                        },
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                    )
+                }
+            }
         }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// COMPONENTS (Copied/Adapted for Movies)
+// -----------------------------------------------------------------------------
+
+@Composable
+fun MovieAppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val bgColor = MaterialTheme.colorScheme.background
+
+    ModalDrawerSheet(
+        drawerContainerColor = Color(0xFF101010),
+        drawerContentColor = Color.White
+    ) {
+        Box(modifier = Modifier.fillMaxWidth().height(200.dp).background(Brush.linearGradient(listOf(bgColor, Color(0xFF1A1A1A)))), contentAlignment = Alignment.CenterStart) {
+            Column(Modifier.padding(24.dp)) {
+                Text("STREAMX", color = primaryColor, fontSize = 30.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                Text("CINEMA HUB", color = Color.Gray, fontSize = 12.sp, letterSpacing = 4.sp)
+            }
+        }
+        HorizontalDivider(color = Color.White.copy(0.1f))
+        Spacer(Modifier.height(12.dp))
         
-        // Gradient Top Bar
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(80.dp)
-                .background(Brush.verticalGradient(listOf(Color.Black.copy(0.8f), Color.Transparent)))
+        val itemModifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+        
+        NavigationDrawerItem(
+            label = { Text("HOME") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("home") }, // Assuming home route exists
+            icon = { Icon(Icons.Default.Home, null, tint = Color.Gray) },
+            colors = NavigationDrawerItemDefaults.colors(unselectedTextColor = Color.Gray),
+            modifier = itemModifier
+        )
+        NavigationDrawerItem(
+            label = { Text("MOVIES") }, selected = true, onClick = onCloseDrawer,
+            icon = { Icon(Icons.Default.Movie, null, tint = primaryColor) },
+            colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = primaryColor.copy(0.1f), selectedTextColor = primaryColor, unselectedTextColor = Color.Gray),
+            modifier = itemModifier
+        )
+         NavigationDrawerItem(
+            label = { Text("LIVE TV") }, selected = false, onClick = { onCloseDrawer(); navController.navigate("livetv") }, // Assuming livetv route
+            icon = { Icon(Icons.Default.LiveTv, null, tint = Color.Gray) },
+            colors = NavigationDrawerItemDefaults.colors(unselectedTextColor = Color.Gray),
+            modifier = itemModifier
         )
     }
 }
@@ -190,20 +356,20 @@ fun Top10Card(rank: Int, movie: Movie, onClick: () -> Unit) {
             text = "$rank",
             fontSize = 110.sp,
             fontWeight = FontWeight.Black,
-            color = Color.White.copy(0.5f), // Outline effect simulation
+            color = Color.White.copy(0.5f), 
             modifier = Modifier.align(Alignment.BottomStart).offset(x = (-15).dp, y = 15.dp).graphicsLayer { alpha = 1f },
             style = LocalTextStyle.current.copy(
                 shadow = androidx.compose.ui.graphics.Shadow(offset = androidx.compose.ui.geometry.Offset(2f, 2f), blurRadius = 4f)
             )
         )
-        // Poster overlapping number
+        // Poster
         AsyncImage(
             model = movie.posterUrl,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.padding(start = 25.dp).fillMaxSize().clip(RoundedCornerShape(8.dp))
         )
-        // Top 10 SVG Badge (Simulated)
+        // Top 10 Badge
         Box(Modifier.align(Alignment.TopEnd).padding(4.dp).background(Color.Red, RoundedCornerShape(2.dp)).padding(horizontal = 4.dp)) {
             Text("TOP 10", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
         }
