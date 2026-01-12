@@ -726,11 +726,42 @@ fun AppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
 @Composable
 fun LoadingShimmerEffect() {
     Column(Modifier.padding(16.dp)) {
-        Box(Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(24.dp)).shimmer().background(Color.DarkGray))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .shimmer()
+                .background(Color.DarkGray)
+        )
         Spacer(Modifier.height(24.dp))
-        Row { repeat(3) { Box(Modifier.width(80.dp).height(30.dp).clip(RoundedCornerShape(8.dp)).shimmer().background(Color.DarkGray); Spacer(Modifier.width(10.dp)) } }
+        Row {
+            repeat(3) {
+                Box(
+                    Modifier
+                        .width(80.dp)
+                        .height(30.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .shimmer()
+                        .background(Color.DarkGray)
+                )
+                Spacer(Modifier.width(10.dp))
+            }
+        }
         Spacer(Modifier.height(24.dp))
-        Row { repeat(3) { Box(Modifier.weight(1f).height(120.dp).clip(RoundedCornerShape(16.dp)).shimmer().background(Color.DarkGray)); Spacer(Modifier.width(10.dp)) } }
+        Row {
+            repeat(3) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(120.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .shimmer()
+                        .background(Color.DarkGray)
+                )
+                Spacer(Modifier.width(10.dp))
+            }
+        }
     }
 }
 
