@@ -19,8 +19,7 @@ android {
             useSupportLibrary = true
         }
 
-        // GitHub Secrets বা Termux Environment থেকে ডাটা নিয়ে BuildConfig তৈরি করা
-        // যদি ভ্যালু না পায় তবে খালি স্ট্রিং সেট করবে
+        // GitHub Secrets বা Environment ভেরিয়েবল হ্যান্ডলিং
         buildConfigField("String", "SUPABASE_URL", "\"${System.getenv("SUPABASE_URL") ?: ""}\"")
         buildConfigField("String", "SUPABASE_KEY", "\"${System.getenv("SUPABASE_KEY") ?: ""}\"")
         buildConfigField("String", "TMDB_KEY", "\"${System.getenv("TMDB_API_KEY") ?: ""}\"")
@@ -49,7 +48,6 @@ android {
             signingConfig = signingConfigs.getByName("release")
         }
         debug {
-            // Debug বিল্ডেও যাতে BuildConfig কাজ করে
             buildConfigField("String", "SUPABASE_URL", "\"${System.getenv("SUPABASE_URL") ?: ""}\"")
             buildConfigField("String", "SUPABASE_KEY", "\"${System.getenv("SUPABASE_KEY") ?: ""}\"")
             buildConfigField("String", "TMDB_KEY", "\"${System.getenv("TMDB_API_KEY") ?: ""}\"")
@@ -67,7 +65,7 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = true // এটি অত্যন্ত গুরুত্বপূর্ণ, এটি ছাড়া কোড BuildConfig খুঁজে পাবে না
+        buildConfig = true
     }
 
     composeOptions {
@@ -86,11 +84,24 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
-    implementation(platform("androidx.compose:compose-bom:2023.08.00"))
+
+    // [FIX] Updated BOM to ensure Material3 1.2.0+ (Required for PullToRefresh & AutoMirrored Icons)
+    implementation(platform("androidx.compose:compose-bom:2024.02.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+
+    // [FIX] Added Material Icons Extended (Fixes: Unresolved reference LiveTv, MusicNote, etc.)
+    implementation("androidx.compose.material:material-icons-extended")
+
+    // [FIX] Added Retrofit & Gson (Fixes: Unresolved reference retrofit2, Gson, SerializedName)
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    implementation("com.google.code.gson:gson:2.10.1")
+
+    // [FIX] Added Shimmer (Fixes: Unresolved reference shimmer)
+    implementation("com.valentinilk.shimmer:compose-shimmer:1.3.0")
 
     // Network & API (Supabase এর জন্য দরকারি)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -102,7 +113,7 @@ dependencies {
     // Foundation Pager
     implementation("androidx.compose.foundation:foundation:1.6.7")
 
-    // Firebase (আপনার বিদ্যমান কোডের জন্য রাখা হলো)
+    // Firebase
     implementation(platform("com.google.firebase:firebase-bom:32.7.4"))
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
