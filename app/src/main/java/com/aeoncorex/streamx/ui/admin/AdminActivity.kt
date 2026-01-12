@@ -9,7 +9,8 @@ class AdminActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            StreamXTheme {
+            // [FIX] Changed StreamXTheme to match the imported StreamXUltraTheme
+            StreamXUltraTheme {
                 AdminAppScreen(onExit = { finish() })
             }
         }
