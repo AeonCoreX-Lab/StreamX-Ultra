@@ -2,6 +2,7 @@ package com.aeoncorex.streamx.ui.music
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -48,6 +49,10 @@ object MusicManager {
                             _duration.value = duration
                         }
                     }
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        Log.e("MusicManager", "ExoPlayer Error: ${error.message}")
+                        _isPlaying.value = false
+                    }
                 })
             }
         }
@@ -60,11 +65,14 @@ object MusicManager {
         exoPlayer?.apply {
             stop()
             clearMediaItems()
-            // Uri.parse ব্যবহার করে নিশ্চিত করা হলো যাতে স্পেস বা ক্যারেক্টার সমস্যা না করে
-            val mediaItem = MediaItem.fromUri(Uri.parse(track.streamUrl))
-            setMediaItem(mediaItem)
-            prepare()
-            playWhenReady = true // সরাসরি প্লে করার জন্য ফোর্স করা হলো
+            try {
+                val mediaItem = MediaItem.fromUri(Uri.parse(track.streamUrl))
+                setMediaItem(mediaItem)
+                prepare()
+                playWhenReady = true
+            } catch (e: Exception) {
+                Log.e("MusicManager", "Error setting media item: ${e.message}")
+            }
         }
     }
 
@@ -74,7 +82,6 @@ object MusicManager {
         }
     }
 
-    // লাইভ টিভি বা অন্য প্লেয়ার চালু হলে এটি কল হবে
     fun pause() {
         exoPlayer?.pause()
         _isPlaying.value = false
