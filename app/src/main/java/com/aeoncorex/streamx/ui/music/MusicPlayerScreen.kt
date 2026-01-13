@@ -1,4 +1,3 @@
-
 package com.aeoncorex.streamx.ui.music
 
 import androidx.compose.animation.*
@@ -108,7 +107,7 @@ fun MusicPlayerScreen(navController: NavController) {
                     Canvas(modifier = Modifier.size(300.dp)) {
                         drawCircle(
                             color = primaryColor,
-                            style = Stroke(width = 1.dp),
+                            style = Stroke(width = 1.dp.toPx()), // FIX: .toPx() added
                             alpha = 0.2f
                         )
                     }
@@ -116,7 +115,7 @@ fun MusicPlayerScreen(navController: NavController) {
                         drawCircle(
                             color = primaryColor,
                             style = Stroke(
-                                width = 4.dp, 
+                                width = 4.dp.toPx(), // FIX: .toPx() added
                                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 15f))
                             ),
                             alpha = 0.1f
