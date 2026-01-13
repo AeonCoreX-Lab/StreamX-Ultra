@@ -23,11 +23,19 @@
     </a>
   </p>
 
-  <p align="center">
-    <a href="https://github.com/cybernahid-dev/StreamX-Ultra/releases/latest/download/app-release.apk">
-      <img src="https://img.shields.io/badge/Download-Latest%20APK-0078D4?style=for-the-badge&logo=android&logoColor=white" alt="Download APK">
+  <br />
+
+  <div align="center">
+    <h3>📥 Official Download</h3>
+    <a href='https://streamx-ultra.en.uptodown.com/android' title='Download StreamX Ultra on Uptodown'>
+      <img src='https://stc.utdstc.com/img/mediakit/download-gio-big.png' width="250" alt='Download StreamX Ultra from Uptodown'>
     </a>
-  </p>
+    <p>
+      <a href="https://github.com/cybernahid-dev/StreamX-Ultra/releases/latest/download/app-release.apk">
+        <img src="https://img.shields.io/badge/Alternative-Direct%20APK-0078D4?style=for-the-badge&logo=android&logoColor=white" alt="Download APK from GitHub">
+      </a>
+    </p>
+  </div>
 
 </div>
 
@@ -51,7 +59,8 @@
 
 ## 🧭 About the Project
 
-**StreamX Ultra** is a high-performance, enterprise-grade **live television and streaming platform** engineered for Android. It is designed to deliver a seamless, buffer-free experience even in challenging network conditions.
+**StreamX Ultra** is an enterprise-grade streaming engine designed for the modern Android ecosystem. By integrating **Live IPTV Protocols** and a **Spotify-Inspired Music Engine**, it provides a unified platform for all your media needs without the bloat.
+
 
 Developed by **AeonCoreX**, this project focuses on **native performance**, **scalable architecture**, and a **distraction-free UI**, making it an ideal solution for modern media consumption.
 
@@ -62,12 +71,16 @@ To deliver a reliable, scalable, and modern live-streaming experience that feels
 
 ## 🚀 Key Features
 
-| Category | Capabilities |
-| :--- | :--- |
-| **📡 Streaming** | Real-time Live TV, Low-latency pipeline, Adaptive bitrate streaming (HLS/DASH). |
-| **🎨 UI/UX** | Futuristic design, Dark mode native, Minimalist "Cinema" view, Touch-optimized. |
-| **⚙️ Performance** | Native Android rendering, Memory efficient, Optimized for mid-range devices. |
-| **🔐 Security** | Secure session lifecycle, DRM-ready foundation, Safe networking. |
+### 🎧 Spotify-Grade Music Experience
+* **Global Library Access**: Stream millions of tracks directly via JioSaavn API integration.
+* **Dynamic Player UI**: Immersive, color-adaptive player interface that rivals industry leaders.
+* **Background Playback**: Full support for background audio with system media control integration.
+* **High-Fidelity Audio**: Optimized audio buffers for crystal clear sound quality.
+
+### 📺 Next-Gen Live TV
+* **Low-Latency Pipeline**: Minimal buffering even on 3G/Slow Wi-Fi networks.
+* **Adaptive Bitrate**: Automatically switches quality based on network health (HLS/DASH support).
+* **Minimalist View**: A distraction-free "Cinema Mode" for an immersive viewing experience.
 
 ---
 

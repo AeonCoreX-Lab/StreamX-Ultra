@@ -7,10 +7,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
@@ -53,7 +51,6 @@ interface SaavnApi {
 fun MusicScreen(navController: NavController) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val primaryColor = MaterialTheme.colorScheme.primary
     
     // State
     var searchQuery by remember { mutableStateOf("Trending Bangla") }
@@ -111,7 +108,6 @@ fun MusicScreen(navController: NavController) {
 
                 if (!mp3.isNullOrBlank()) {
                     MusicManager.play(track.copy(streamUrl = mp3))
-                    // Note: We don't navigate immediately here, we let the MiniPlayer appear
                 } else {
                     Toast.makeText(context, "Premium content - Link not found", Toast.LENGTH_SHORT).show()
                 }
@@ -170,7 +166,7 @@ fun MusicScreen(navController: NavController) {
             // List
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
-                contentPadding = PaddingValues(16.dp, bottom = 120.dp), // Bottom padding for MiniPlayer
+                contentPadding = PaddingValues(16.dp, bottom = 120.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -194,48 +190,55 @@ fun MusicScreen(navController: NavController) {
                         .height(64.dp)
                         .clickable { navController.navigate("music_player") },
                     shape = RoundedCornerShape(8.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF282828)) // Spotify Dark Grey
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF282828))
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize().padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Thumbnail
-                        AsyncImage(
-                            model = track.coverUrl,
-                            contentDescription = null,
-                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                        
-                        Spacer(modifier = Modifier.width(12.dp))
-                        
-                        // Info
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(track.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                            Text(track.artist, color = Color.LightGray, fontSize = 12.sp, maxLines = 1)
-                        }
-
-                        // Play/Pause Button
-                        IconButton(onClick = { MusicManager.togglePlayPause() }) {
-                            Icon(
-                                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    // FIX: Wrapped content in Box to allow Alignment.BottomCenter
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Row(
+                            modifier = Modifier.fillMaxSize().padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Thumbnail
+                            AsyncImage(
+                                model = track.coverUrl,
                                 contentDescription = null,
-                                tint = Color.White
+                                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
+                                contentScale = ContentScale.Crop
                             )
+                            
+                            Spacer(modifier = Modifier.width(12.dp))
+                            
+                            // Info
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(track.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                Text(track.artist, color = Color.LightGray, fontSize = 12.sp, maxLines = 1)
+                            }
+
+                            // Play/Pause Button
+                            IconButton(onClick = { MusicManager.togglePlayPause() }) {
+                                Icon(
+                                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color.White
+                                )
+                            }
                         }
+                        
+                        // Progress Indicator at bottom of MiniPlayer
+                        val position by MusicManager.currentPosition.collectAsState()
+                        val duration by MusicManager.duration.collectAsState()
+                        val progress = if (duration > 0) position.toFloat() / duration else 0f
+                        
+                        LinearProgressIndicator(
+                            progress = { progress }, // Note: If your M3 version requires Float, remove the {} brackets.
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(2.dp)
+                                .align(Alignment.BottomCenter), // Now valid inside Box
+                            color = Color.White,
+                            trackColor = Color.Transparent,
+                        )
                     }
-                    // Progress Indicator at bottom of MiniPlayer
-                    val position by MusicManager.currentPosition.collectAsState()
-                    val duration by MusicManager.duration.collectAsState()
-                    val progress = if (duration > 0) position.toFloat() / duration else 0f
-                    
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier.fillMaxWidth().height(2.dp).align(Alignment.BottomCenter),
-                        color = Color.White,
-                        trackColor = Color.Transparent,
-                    )
                 }
             }
         }
