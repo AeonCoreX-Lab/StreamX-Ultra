@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow // এই ইমপোর্টটি যুক্ত করা হয়েছে
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
@@ -72,11 +73,17 @@ fun MusicPlayerScreen(navController: NavController) {
                 Spacer(modifier = Modifier.height(40.dp))
 
                 // --- ALBUM ART ---
+                // ফিক্স: shadow মডিফায়ারটি এখন কাজ করবে
                 Card(
                     modifier = Modifier
                         .fillMaxWidth(0.9f)
                         .aspectRatio(1f)
-                        .shadow(30.dp, RoundedCornerShape(20.dp), ambientColor = primaryColor, spotColor = primaryColor),
+                        .shadow(
+                            elevation = 30.dp,
+                            shape = RoundedCornerShape(20.dp),
+                            ambientColor = primaryColor,
+                            spotColor = primaryColor
+                        ),
                     shape = RoundedCornerShape(20.dp),
                     border = BorderStroke(1.dp, Color.White.copy(0.1f))
                 ) {
@@ -144,7 +151,7 @@ fun MusicPlayerScreen(navController: NavController) {
                     IconButton(onClick = {}) {
                         Icon(Icons.Rounded.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(40.dp))
                     }
-                    
+
                     // Play/Pause Button
                     Box(
                         modifier = Modifier
