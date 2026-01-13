@@ -29,15 +29,13 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         composable("auth") { AuthScreen(navController) }
         composable("home") { MainScreen(navController) }
         
-        // ভিডিও প্লেয়ার রুট - NavType এবং navArgument ফিক্স করা হয়েছে
+        // ভিডিও প্লেয়ার রুট
         composable(
             route = "player/{encodedUrl}",
-            arguments = listOf(
-                navArgument("encodedUrl") { type = NavType.StringType }
-            )
+            arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
         ) { backStackEntry ->
             val encodedUrl = backStackEntry.arguments?.getString("encodedUrl") ?: ""
-            PlayerScreen(navController = navController, encodedUrl = encodedUrl, encodedTitle = "Streaming...") 
+            PlayerScreen(navController = navController, encodedUrl = encodedUrl)
         }
         
         // --- MUSIC SECTION ROUTES ---
