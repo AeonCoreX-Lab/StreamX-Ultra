@@ -59,6 +59,7 @@ import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.navigation.NavController
+import com.aeoncorex.streamx.ui.music.MusicManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -84,6 +85,11 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
     val scope = rememberCoroutineScope()
     val streamUrl = remember(encodedUrl) { URLDecoder.decode(encodedUrl, "UTF-8") }
     val activity = context as? Activity
+    
+    // --- FIX: Stop Music when Video Starts ---
+    LaunchedEffect(Unit) {
+        MusicManager.pause()
+    }
 
     // --- Player Core ---
     val trackSelector = remember { DefaultTrackSelector(context) }

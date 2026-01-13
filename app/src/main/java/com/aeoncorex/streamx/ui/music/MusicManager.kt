@@ -41,8 +41,13 @@ object MusicManager {
     }
 
     fun play(track: MusicTrack) {
+        // যদি স্ট্রিমিং লিঙ্ক খালি থাকে তবে প্লে হবে না
+        if (track.streamUrl.isBlank()) return
+
         _currentSong.value = track
         exoPlayer?.apply {
+            stop()
+            clearMediaItems()
             setMediaItem(MediaItem.fromUri(track.streamUrl))
             prepare()
             play()
@@ -50,10 +55,20 @@ object MusicManager {
     }
 
     fun togglePlayPause() {
-        exoPlayer?.let { if (it.isPlaying) it.pause() else it.play() }
+        exoPlayer?.let {
+            if (it.isPlaying) it.pause() else it.play()
+        }
     }
 
-    fun seekTo(position: Long) { exoPlayer?.seekTo(position) }
+    fun pause() {
+        if (exoPlayer?.isPlaying == true) {
+            exoPlayer?.pause()
+        }
+    }
+
+    fun seekTo(position: Long) {
+        exoPlayer?.seekTo(position)
+    }
 
     private fun startProgressUpdater() {
         progressJob?.cancel()
@@ -65,6 +80,12 @@ object MusicManager {
         }
     }
 
-    private fun stopProgressUpdater() { progressJob?.cancel() }
-    fun release() { exoPlayer?.release(); exoPlayer = null }
+    private fun stopProgressUpdater() {
+        progressJob?.cancel()
+    }
+
+    fun release() {
+        exoPlayer?.release()
+        exoPlayer = null
+    }
 }

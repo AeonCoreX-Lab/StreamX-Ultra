@@ -13,7 +13,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -30,238 +29,161 @@ fun MusicPlayerScreen(navController: NavController) {
     val position by MusicManager.currentPosition.collectAsState()
     val duration by MusicManager.duration.collectAsState()
 
-    // যদি কোনো গান সিলেক্ট করা না থাকে, তবে স্ক্রিনটি বন্ধ হয়ে যাবে
+    // যদি কোনো গান না থাকে তবে ব্যাকে চলে যাবে
     LaunchedEffect(currentSong) {
         if (currentSong == null) {
             navController.popBackStack()
         }
     }
 
-    currentSong?.let { song ->
+    currentSong?.let { track ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black) // Live TV এর মতো ডার্ক ব্যাকগ্রাউন্ড
+                .background(Brush.verticalGradient(listOf(Color(0xFF1A1A2E), Color(0xFF16213E), Color(0xFF0F3460))))
         ) {
-            // Futuristic Glow Background
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(primaryColor.copy(0.12f), Color.Transparent),
-                            radius = 1500f
-                        )
-                    )
-            )
-
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(24.dp)
-                    .systemBarsPadding(),
+                    .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // --- TOP ACTION BAR ---
+                // --- TOP BAR ---
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(
-                            Icons.Rounded.KeyboardArrowDown,
-                            contentDescription = "Minimize",
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
-                        )
+                        Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Color.White, modifier = Modifier.size(32.dp))
                     }
-                    
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            "SYSTEM PLAYER",
-                            color = primaryColor,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 2.sp
-                        )
-                        Text(
-                            "DECODING AUDIO...",
-                            color = Color.White.copy(0.4f),
-                            fontSize = 8.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-
-                    IconButton(onClick = { }) {
-                        Icon(Icons.Default.MoreVert, "Options", tint = Color.White)
-                    }
-                }
-
-                Spacer(modifier = Modifier.weight(0.15f))
-
-                // --- CIRCULAR NEON ALBUM ART ---
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(300.dp)) {
-                    // Outer Neon Rings
-                    Canvas(modifier = Modifier.size(300.dp)) {
-                        drawCircle(
-                            color = primaryColor,
-                            style = Stroke(width = 1.dp.toPx()), // FIX: .toPx() added
-                            alpha = 0.2f
-                        )
-                    }
-                    Canvas(modifier = Modifier.size(280.dp)) {
-                        drawCircle(
-                            color = primaryColor,
-                            style = Stroke(
-                                width = 4.dp.toPx(), // FIX: .toPx() added
-                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 15f))
-                            ),
-                            alpha = 0.1f
-                        )
-                    }
-
-                    // Main Artwork
-                    Box(
-                        modifier = Modifier
-                            .size(240.dp)
-                            .clip(CircleShape)
-                            .border(2.dp, primaryColor.copy(0.5f), CircleShape)
-                    ) {
-                        AsyncImage(
-                            model = song.coverUrl,
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.weight(0.15f))
-
-                // --- SONG INFO (Futuristic Style) ---
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.Start
-                ) {
                     Text(
-                        text = song.title.uppercase(),
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.ExtraBold,
+                        "NOW PLAYING",
+                        color = Color.White.copy(0.7f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 2.sp
+                    )
+                    IconButton(onClick = { /* More options */ }) {
+                        Icon(Icons.Default.MoreVert, null, tint = Color.White)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(40.dp))
+
+                // --- ALBUM ART ---
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .aspectRatio(1f)
+                        .shadow(30.dp, RoundedCornerShape(20.dp), ambientColor = primaryColor, spotColor = primaryColor),
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.dp, Color.White.copy(0.1f))
+                ) {
+                    AsyncImage(
+                        model = track.coverUrl,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(40.dp))
+
+                // --- INFO ---
+                Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        track.title,
                         color = Color.White,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        fontFamily = FontFamily.Monospace
+                        overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = song.artist.uppercase(),
-                        fontSize = 14.sp,
+                        track.artist,
                         color = primaryColor,
-                        letterSpacing = 1.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
                     )
                 }
 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(30.dp))
 
-                // --- NEON PROGRESS SLIDER ---
-                Slider(
-                    value = if (duration > 0) position.toFloat() / duration.toFloat() else 0f,
-                    onValueChange = { progress ->
-                        MusicManager.seekTo((progress * duration).toLong())
-                    },
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color.White,
-                        activeTrackColor = primaryColor,
-                        inactiveTrackColor = Color.White.copy(0.1f)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        formatTime(position),
-                        color = Color.White.copy(0.5f),
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace
+                // --- SEEK BAR ---
+                Column {
+                    Slider(
+                        value = if (duration > 0) position.toFloat() / duration else 0f,
+                        onValueChange = { MusicManager.seekTo((it * duration).toLong()) },
+                        colors = SliderDefaults.colors(
+                            thumbColor = primaryColor,
+                            activeTrackColor = primaryColor,
+                            inactiveTrackColor = Color.White.copy(0.2f)
+                        )
                     )
-                    Text(
-                        formatTime(duration),
-                        color = Color.White.copy(0.5f),
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(formatTime(position), color = Color.Gray, fontSize = 12.sp)
+                        Text(formatTime(duration), color = Color.Gray, fontSize = 12.sp)
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(30.dp))
 
-                // --- CYBER CONTROLS ---
+                // --- CONTROLS ---
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = {}) { 
-                        Icon(Icons.Rounded.Shuffle, null, tint = Color.White.copy(0.4f)) 
+                    IconButton(onClick = {}) {
+                        Icon(Icons.Rounded.Shuffle, null, tint = Color.White.copy(0.4f))
+                    }
+                    IconButton(onClick = {}) {
+                        Icon(Icons.Rounded.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(40.dp))
                     }
                     
-                    IconButton(onClick = {}, modifier = Modifier.size(56.dp)) { 
-                        Icon(Icons.Rounded.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(40.dp)) 
-                    }
-                    
-                    // Main Play/Pause Button with Neon Border
+                    // Play/Pause Button
                     Box(
                         modifier = Modifier
-                            .size(80.dp)
-                            .border(2.dp, primaryColor, CircleShape)
-                            .background(primaryColor.copy(0.1f), CircleShape)
+                            .size(70.dp)
                             .clip(CircleShape)
+                            .background(primaryColor)
                             .clickable { MusicManager.togglePlayPause() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                             contentDescription = null,
-                            tint = primaryColor,
-                            modifier = Modifier.size(42.dp)
+                            tint = Color.Black,
+                            modifier = Modifier.size(35.dp)
                         )
                     }
 
-                    IconButton(onClick = {}, modifier = Modifier.size(56.dp)) { 
-                        Icon(Icons.Rounded.SkipNext, null, tint = Color.White, modifier = Modifier.size(40.dp)) 
+                    IconButton(onClick = {}) {
+                        Icon(Icons.Rounded.SkipNext, null, tint = Color.White, modifier = Modifier.size(40.dp))
                     }
-
-                    IconButton(onClick = {}) { 
-                        Icon(Icons.Rounded.Repeat, null, tint = Color.White.copy(0.4f)) 
+                    IconButton(onClick = {}) {
+                        Icon(Icons.Rounded.Repeat, null, tint = Color.White.copy(0.4f))
                     }
                 }
 
-                Spacer(modifier = Modifier.weight(0.1f))
-                
-                // --- STATUS FOOTER (Live TV style) ---
+                Spacer(modifier = Modifier.weight(1f))
+
+                // --- FOOTER ---
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .border(1.dp, primaryColor.copy(0.2f), RoundedCornerShape(4.dp))
                         .padding(horizontal = 12.dp, vertical = 4.dp)
                 ) {
-                    Icon(
-                        Icons.Rounded.SpeakerGroup, 
-                        null, 
-                        tint = primaryColor, 
-                        modifier = Modifier.size(14.dp)
-                    )
+                    Icon(Icons.Rounded.SpeakerGroup, null, tint = primaryColor, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        "STREAMX AUDIO ENGINE V1.2.1 - ACTIVE", 
-                        color = primaryColor, 
+                        "STREAMX AUDIO ENGINE V1.2.1 - ACTIVE",
+                        color = primaryColor,
                         fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace
                     )
@@ -271,7 +193,7 @@ fun MusicPlayerScreen(navController: NavController) {
     }
 }
 
-// মিলিসেকেন্ড থেকে মিনিট:সেকেন্ড বানানোর জন্য হেল্পার ফাংশন
+// টাইম ফরম্যাট করার জন্য ফাংশন
 private fun formatTime(ms: Long): String {
     if (ms < 0) return "00:00"
     val totalSeconds = ms / 1000
