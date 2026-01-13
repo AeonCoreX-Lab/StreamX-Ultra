@@ -24,6 +24,15 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         composable("auth") { AuthScreen(navController) }
         composable("home") { MainScreen(navController) }
         
+        // ভিডিও প্লেয়ার রুট
+        composable(
+            route = "player/{encodedUrl}",
+            arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val encodedUrl = backStackEntry.arguments?.getString("encodedUrl") ?: ""
+            PlayerScreen(navController = navController, encodedUrl = encodedUrl)
+        }
+        
         // --- MUSIC SECTION ROUTES ---
         composable("music") { 
             MusicScreen(navController) 
@@ -38,5 +47,6 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         composable("theme") { ThemeScreen(navController, themeViewModel) }
         composable("privacy") { PrivacyPolicyScreen(navController) }
         composable("about") { AboutScreen(navController) }
+        composable("copyright") { CopyrightScreen(navController) }
     }
 }
