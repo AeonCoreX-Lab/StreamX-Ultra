@@ -82,14 +82,27 @@ object MusicManager {
             _isPlaying.value = false
             
             // Fetch tracks
-            val tracks = MusicModels.getCollectionTracks(collectionId, type)
+            val tracks = MusicRepository.getCollectionTracks(collectionId, type)
             if (tracks.isNotEmpty()) {
-                playlist = tracks
-                _queue.value = tracks
-                currentIndex = 0
-                resolveAndPlay(playlist[0])
+                playTrackList(tracks, 0)
             }
         }
+    }
+
+    // --- Play a specific list of tracks (used by search results) ---
+    fun playTrackList(tracks: List<MusicTrack>, startIndex: Int) {
+        playlist = tracks
+        _queue.value = tracks
+        currentIndex = startIndex
+        if (playlist.isNotEmpty() && currentIndex in playlist.indices) {
+            resolveAndPlay(playlist[currentIndex])
+        }
+    }
+
+    // --- Explicit Pause (used by Video Player) ---
+    fun pause() {
+        exoPlayer?.pause()
+        _isPlaying.value = false
     }
 
     private fun resolveAndPlay(track: MusicTrack) {
@@ -102,14 +115,25 @@ object MusicManager {
 
         scope.launch {
             try {
-                // If streamUrl is empty, fetch it (assuming fetchStreamUrl exists or using generic)
-                // For now using track.streamUrl directly as per your model
-                val mediaItem = MediaItem.fromUri(track.streamUrl)
-                exoPlayer?.setMediaItem(mediaItem)
-                exoPlayer?.prepare()
-                exoPlayer?.play()
+                // If streamUrl is just an ID (YouTube), resolve it
+                val finalUrl = if (track.source == "YouTube") {
+                     MusicRepository.getYouTubeAudioUrl(track.streamUrl)
+                } else {
+                     track.streamUrl
+                }
+                
+                if (finalUrl.isNotEmpty()) {
+                    val mediaItem = MediaItem.fromUri(finalUrl)
+                    exoPlayer?.setMediaItem(mediaItem)
+                    exoPlayer?.prepare()
+                    exoPlayer?.play()
+                } else {
+                    Log.e("MusicManager", "Failed to resolve URL for ${track.title}")
+                    playNext()
+                }
             } catch (e: Exception) {
                 Log.e("MusicManager", "Error loading media: ${e.message}")
+                playNext()
             }
         }
     }
@@ -119,9 +143,7 @@ object MusicManager {
         _lyrics.value = "Searching lyrics for ${track.title}..."
         scope.launch {
             try {
-                // Assuming you added a getLyrics function in MusicModels or similar
-                // If not, this is where you call your new API
-                val lyricsData = MusicModels.getLyrics(track.title, track.artist)
+                val lyricsData = MusicRepository.getLyrics(track.title, track.artist)
                 _lyrics.value = lyricsData?.plainLyrics ?: "No lyrics found for this track."
             } catch (e: Exception) {
                 _lyrics.value = "Lyrics not available."

@@ -38,6 +38,7 @@ data class LyricsDto(
     val artistName: String?,
     val plainLyrics: String?,
     val syncedLyrics: String?
+)
 
 // --- DTOs: Piped (YouTube) ---
 data class PipedResponse(val items: List<PipedItem>)
@@ -208,6 +209,15 @@ object MusicRepository {
                 ?: ""
         } catch (e: Exception) {
             ""
+        }
+    }
+
+    // --- Wrapper for Lyrics ---
+    suspend fun getLyrics(trackName: String, artistName: String): LyricsDto? = withContext(Dispatchers.IO) {
+        try {
+            lyricsApi.getLyrics(trackName, artistName)
+        } catch (e: Exception) {
+            null
         }
     }
 
