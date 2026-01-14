@@ -105,6 +105,15 @@ object MusicManager {
         _isPlaying.value = false
     }
 
+    // --- NEW: Release Resources ---
+    fun release() {
+        exoPlayer?.release()
+        exoPlayer = null
+        stopProgressUpdater()
+        _isPlaying.value = false
+        _currentSong.value = null
+    }
+
     private fun resolveAndPlay(track: MusicTrack) {
         _currentSong.value = track
         _currentPosition.value = 0
