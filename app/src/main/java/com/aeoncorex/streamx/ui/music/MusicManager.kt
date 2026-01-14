@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 object MusicManager {
     private var exoPlayer: ExoPlayer? = null
     private var progressJob: Job? = null
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     // Playlist Queue
     private var playlist: List<MusicTrack> = emptyList()
@@ -73,27 +74,52 @@ object MusicManager {
         if (list.isEmpty()) return
         playlist = list
         currentIndex = startIndex.coerceIn(0, list.lastIndex)
-        loadAndPlay(playlist[currentIndex])
+        resolveAndPlay(playlist[currentIndex])
     }
 
     fun play(track: MusicTrack) {
         playTrackList(listOf(track), 0)
     }
 
-    private fun loadAndPlay(track: MusicTrack) {
-        if (track.streamUrl.isBlank()) return
-
+    // UPDATED: Handles URL resolution for YouTube sources
+    private fun resolveAndPlay(track: MusicTrack) {
         _currentSong.value = track
-        exoPlayer?.apply {
-            stop()
-            clearMediaItems()
-            try {
-                val mediaItem = MediaItem.fromUri(Uri.parse(track.streamUrl))
-                setMediaItem(mediaItem)
-                prepare()
-                playWhenReady = true
-            } catch (e: Exception) {
-                Log.e("MusicManager", "Error loading media: ${e.message}")
+        
+        scope.launch {
+            var finalStreamUrl = track.streamUrl
+            
+            // If source is YouTube, the streamUrl is actually just the Video ID.
+            // We need to fetch the real MP3/M4A link.
+            if (track.source == "YouTube") {
+                val resolvedUrl = MusicRepository.getYouTubeAudioUrl(track.streamUrl)
+                if (resolvedUrl.isNotEmpty()) {
+                    finalStreamUrl = resolvedUrl
+                } else {
+                    Log.e("MusicManager", "Failed to resolve YouTube URL")
+                    playNext() // Skip if failed
+                    return@launch
+                }
+            }
+
+            if (finalStreamUrl.isBlank()) {
+                playNext()
+                return@launch
+            }
+
+            // Now play on Main Thread
+            withContext(Dispatchers.Main) {
+                exoPlayer?.apply {
+                    stop()
+                    clearMediaItems()
+                    try {
+                        val mediaItem = MediaItem.fromUri(Uri.parse(finalStreamUrl))
+                        setMediaItem(mediaItem)
+                        prepare()
+                        playWhenReady = true
+                    } catch (e: Exception) {
+                        Log.e("MusicManager", "Error loading media: ${e.message}")
+                    }
+                }
             }
         }
     }
@@ -104,7 +130,6 @@ object MusicManager {
         }
     }
 
-    // --- FIX: Added this function to resolve the error in PlayerScreen.kt ---
     fun pause() {
         exoPlayer?.pause()
     }
@@ -112,17 +137,17 @@ object MusicManager {
     fun playNext() {
         if (playlist.isNotEmpty() && currentIndex < playlist.lastIndex) {
             currentIndex++
-            loadAndPlay(playlist[currentIndex])
+            resolveAndPlay(playlist[currentIndex])
         } else {
              currentIndex = 0
-             loadAndPlay(playlist[0])
+             resolveAndPlay(playlist[0])
         }
     }
 
     fun playPrevious() {
         if (playlist.isNotEmpty() && currentIndex > 0) {
             currentIndex--
-            loadAndPlay(playlist[currentIndex])
+            resolveAndPlay(playlist[currentIndex])
         } else {
             seekTo(0)
         }
