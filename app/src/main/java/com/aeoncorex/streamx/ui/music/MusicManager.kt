@@ -104,6 +104,11 @@ object MusicManager {
         }
     }
 
+    // --- FIX: Added this function to resolve the error in PlayerScreen.kt ---
+    fun pause() {
+        exoPlayer?.pause()
+    }
+
     fun playNext() {
         if (playlist.isNotEmpty() && currentIndex < playlist.lastIndex) {
             currentIndex++
