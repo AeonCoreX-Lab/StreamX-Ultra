@@ -38,14 +38,7 @@ fun MusicPlayerScreen(navController: NavController) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0xFF404040), // Dark Grey Top
-                            Color(0xFF121212)  // Pure Black Bottom
-                        )
-                    )
-                )
+                .background(Brush.verticalGradient(colors = listOf(Color(0xFF4A148C).copy(0.4f), Color(0xFF121212))))
         ) {
             Column(
                 modifier = Modifier
@@ -62,64 +55,35 @@ fun MusicPlayerScreen(navController: NavController) {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Color.White, modifier = Modifier.size(32.dp))
                     }
-                    Text(
-                        "NOW PLAYING",
-                        color = Color.White.copy(0.7f),
-                        fontSize = 12.sp,
-                        letterSpacing = 2.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    IconButton(onClick = {}) {
-                        Icon(Icons.Rounded.MoreHoriz, null, tint = Color.White)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("NOW PLAYING", color = Color.White.copy(0.7f), fontSize = 10.sp, letterSpacing = 2.sp)
+                        if(track.albumName.isNotEmpty()) {
+                            Text(track.albumName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
                     }
+                    IconButton(onClick = {}) { Icon(Icons.Rounded.MoreHoriz, null, tint = Color.White) }
                 }
 
                 Spacer(modifier = Modifier.weight(1f))
 
                 // Album Art
                 Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .shadow(elevation = 24.dp, shape = RoundedCornerShape(16.dp)),
-                    shape = RoundedCornerShape(16.dp)
+                    modifier = Modifier.fillMaxWidth().aspectRatio(1f).shadow(elevation = 24.dp, shape = RoundedCornerShape(24.dp)),
+                    shape = RoundedCornerShape(24.dp)
                 ) {
-                    AsyncImage(
-                        model = track.coverUrl,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
+                    AsyncImage(model = track.coverUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 }
 
                 Spacer(modifier = Modifier.height(48.dp))
 
                 // Track Info
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            track.title,
-                            color = Color.White,
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Text(track.title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            track.artist,
-                            color = Color.White.copy(0.7f),
-                            fontSize = 18.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Text(track.artist, color = Color.White.copy(0.7f), fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    IconButton(onClick = {}) {
-                        Icon(Icons.Rounded.FavoriteBorder, null, tint = Color.White, modifier = Modifier.size(28.dp))
-                    }
+                    IconButton(onClick = {}) { Icon(Icons.Rounded.FavoriteBorder, null, tint = Color.White, modifier = Modifier.size(28.dp)) }
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -129,19 +93,10 @@ fun MusicPlayerScreen(navController: NavController) {
                     Slider(
                         value = if (duration > 0) position.toFloat() / duration else 0f,
                         onValueChange = { MusicManager.seekTo((it * duration).toLong()) },
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color.White,
-                            activeTrackColor = Color.White,
-                            inactiveTrackColor = Color.White.copy(0.2f)
-                        ),
-                        thumb = {
-                            Box(modifier = Modifier.size(12.dp).background(Color.White, CircleShape))
-                        }
+                        colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(0.2f)),
+                        thumb = { Box(modifier = Modifier.size(16.dp).background(Color.White, CircleShape)) }
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(formatTime(position), color = Color.White.copy(0.5f), fontSize = 12.sp)
                         Text(formatTime(duration), color = Color.White.copy(0.5f), fontSize = 12.sp)
                     }
@@ -156,29 +111,16 @@ fun MusicPlayerScreen(navController: NavController) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(Icons.Rounded.Shuffle, null, tint = Color.White, modifier = Modifier.size(28.dp))
-                    Icon(Icons.Rounded.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(42.dp))
-                    
-                    // Play Button
+                    IconButton(onClick = { MusicManager.playPrevious() }) { Icon(Icons.Rounded.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(42.dp)) }
                     Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
-                            .background(Color.White)
-                            .clickable { MusicManager.togglePlayPause() },
+                        modifier = Modifier.size(72.dp).clip(CircleShape).background(Color.White).clickable { MusicManager.togglePlayPause() },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            contentDescription = null,
-                            tint = Color.Black,
-                            modifier = Modifier.size(36.dp)
-                        )
+                        Icon(imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(36.dp))
                     }
-                    
-                    Icon(Icons.Rounded.SkipNext, null, tint = Color.White, modifier = Modifier.size(42.dp))
+                    IconButton(onClick = { MusicManager.playNext() }) { Icon(Icons.Rounded.SkipNext, null, tint = Color.White, modifier = Modifier.size(42.dp)) }
                     Icon(Icons.Rounded.Repeat, null, tint = Color.White, modifier = Modifier.size(28.dp))
                 }
-                
                 Spacer(modifier = Modifier.weight(1f))
             }
         }

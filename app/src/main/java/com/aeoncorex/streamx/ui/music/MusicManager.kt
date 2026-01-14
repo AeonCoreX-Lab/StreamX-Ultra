@@ -7,6 +7,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,6 +16,10 @@ import kotlinx.coroutines.flow.asStateFlow
 object MusicManager {
     private var exoPlayer: ExoPlayer? = null
     private var progressJob: Job? = null
+
+    // Playlist Queue
+    private var playlist: List<MusicTrack> = emptyList()
+    private var currentIndex: Int = -1
 
     private val _currentSong = MutableStateFlow<MusicTrack?>(null)
     val currentSong = _currentSong.asStateFlow()
@@ -37,28 +42,45 @@ object MusicManager {
 
             exoPlayer = ExoPlayer.Builder(context).build().apply {
                 setAudioAttributes(audioAttributes, true)
-                repeatMode = Player.REPEAT_MODE_ALL
+                repeatMode = Player.REPEAT_MODE_OFF 
                 
                 addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(playing: Boolean) {
                         _isPlaying.value = playing
                         if (playing) startProgressUpdater() else stopProgressUpdater()
                     }
+                    
                     override fun onPlaybackStateChanged(state: Int) {
                         if (state == Player.STATE_READY) {
                             _duration.value = duration
                         }
+                        if (state == Player.STATE_ENDED) {
+                            playNext()
+                        }
                     }
-                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        Log.e("MusicManager", "ExoPlayer Error: ${error.message}")
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        Log.e("MusicManager", "Error: ${error.message}")
                         _isPlaying.value = false
+                        playNext() 
                     }
                 })
             }
         }
     }
 
+    fun playTrackList(list: List<MusicTrack>, startIndex: Int) {
+        if (list.isEmpty()) return
+        playlist = list
+        currentIndex = startIndex.coerceIn(0, list.lastIndex)
+        loadAndPlay(playlist[currentIndex])
+    }
+
     fun play(track: MusicTrack) {
+        playTrackList(listOf(track), 0)
+    }
+
+    private fun loadAndPlay(track: MusicTrack) {
         if (track.streamUrl.isBlank()) return
 
         _currentSong.value = track
@@ -71,7 +93,7 @@ object MusicManager {
                 prepare()
                 playWhenReady = true
             } catch (e: Exception) {
-                Log.e("MusicManager", "Error setting media item: ${e.message}")
+                Log.e("MusicManager", "Error loading media: ${e.message}")
             }
         }
     }
@@ -82,10 +104,23 @@ object MusicManager {
         }
     }
 
-    fun pause() {
-        exoPlayer?.pause()
-        _isPlaying.value = false
-        stopProgressUpdater()
+    fun playNext() {
+        if (playlist.isNotEmpty() && currentIndex < playlist.lastIndex) {
+            currentIndex++
+            loadAndPlay(playlist[currentIndex])
+        } else {
+             currentIndex = 0
+             loadAndPlay(playlist[0])
+        }
+    }
+
+    fun playPrevious() {
+        if (playlist.isNotEmpty() && currentIndex > 0) {
+            currentIndex--
+            loadAndPlay(playlist[currentIndex])
+        } else {
+            seekTo(0)
+        }
     }
 
     fun seekTo(position: Long) {
@@ -98,7 +133,7 @@ object MusicManager {
             while (isActive) {
                 exoPlayer?.let { 
                     _currentPosition.value = it.currentPosition
-                    if (_duration.value == 0L && it.duration > 0) {
+                    if (_duration.value <= 0L && it.duration > 0) {
                         _duration.value = it.duration
                     }
                 }
