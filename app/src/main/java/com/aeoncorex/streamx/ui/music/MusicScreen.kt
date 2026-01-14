@@ -1,50 +1,30 @@
 package com.aeoncorex.streamx.ui.music
 
-import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.*
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
-import retrofit2.http.*
-
-// --- Data Models ---
-data class SaavnResponse(val success: Boolean?, val data: SaavnData?)
-data class SaavnData(val songs: SaavnContent?, val results: List<SaavnSong>?)
-data class SaavnContent(val results: List<SaavnSong>?)
-data class SongDetailResponse(val success: Boolean?, val data: List<DetailedSong>?)
-data class DetailedSong(val id: String?, val downloadUrl: List<UrlLink>?)
-data class SaavnSong(val id: String?, val title: String?, val primaryArtists: String?, val image: List<UrlLink>?, val url: String?)
-data class UrlLink(val link: String?, val url: String?, val quality: String?)
-data class MusicTrack(val id: String, val title: String, val artist: String, val coverUrl: String, val streamUrl: String)
-
-interface SaavnApi {
-    @GET("api/search/songs")
-    suspend fun searchSongs(@Query("query") q: String): SaavnResponse
-    @GET("api/songs")
-    suspend fun getSongDetails(@Query("id") id: String): SongDetailResponse
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,193 +32,115 @@ fun MusicScreen(navController: NavController) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
-    // State
-    var searchQuery by remember { mutableStateOf("Trending Bangla") }
+    // UI State
+    var searchQuery by remember { mutableStateOf("Arijit Singh") }
     var musicList by remember { mutableStateOf<List<MusicTrack>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     
-    // Global Music State for MiniPlayer
+    // Player State
     val currentSong by MusicManager.currentSong.collectAsState()
     val isPlaying by MusicManager.isPlaying.collectAsState()
 
-    val api = remember {
-        Retrofit.Builder()
-            .baseUrl("https://jiosaavn-api-kappa-seven.vercel.app/")
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(SaavnApi::class.java)
+    // Initial Load
+    LaunchedEffect(Unit) {
+        isLoading = true
+        musicList = MusicRepository.search(searchQuery)
+        isLoading = false
     }
 
-    fun searchMusic(q: String) {
-        if (q.isBlank()) return
+    fun playTrack(track: MusicTrack) {
         scope.launch {
-            isLoading = true
-            try {
-                val response = api.searchSongs(q)
-                val rawList = response.data?.songs?.results ?: response.data?.results
-                val tracks = rawList?.mapNotNull { song ->
-                    val cover = song.image?.lastOrNull()?.url ?: song.image?.lastOrNull()?.link
-                    if (song.id != null) {
-                        MusicTrack(
-                            id = song.id,
-                            title = song.title?.replace("&amp;", "&") ?: "Unknown",
-                            artist = song.primaryArtists ?: "Artist",
-                            coverUrl = cover ?: "",
-                            streamUrl = "" 
-                        )
-                    } else null
-                } ?: emptyList()
-                musicList = tracks
-            } catch (e: Exception) {
-                Log.e("MusicAPI", "Search Error: ${e.message}")
+            Toast.makeText(context, "Fetching: ${track.title}...", Toast.LENGTH_SHORT).show()
+            val streamUrl = MusicRepository.getStreamUrl(track.id)
+            if (streamUrl != null) {
+                MusicManager.play(track.copy(streamUrl = streamUrl))
+            } else {
+                Toast.makeText(context, "Stream URL not found!", Toast.LENGTH_SHORT).show()
             }
-            isLoading = false
         }
     }
 
-    fun fetchAndPlay(track: MusicTrack) {
-        Toast.makeText(context, "Playing: ${track.title}", Toast.LENGTH_SHORT).show()
-        scope.launch {
-            try {
-                val detailResponse = api.getSongDetails(track.id)
-                val songData = detailResponse.data?.firstOrNull()
-                val mp3 = songData?.downloadUrl?.lastOrNull()?.url 
-                          ?: songData?.downloadUrl?.lastOrNull()?.link
-                          ?: songData?.downloadUrl?.firstOrNull()?.url
-
-                if (!mp3.isNullOrBlank()) {
-                    MusicManager.play(track.copy(streamUrl = mp3))
-                } else {
-                    Toast.makeText(context, "Premium content - Link not found", Toast.LENGTH_SHORT).show()
+    Scaffold(
+        containerColor = Color(0xFF121212),
+        bottomBar = {
+            // --- SPOTIFY STYLE MINI PLAYER ---
+            AnimatedVisibility(
+                visible = currentSong != null,
+                enter = slideInVertically { it },
+                exit = slideOutVertically { it }
+            ) {
+                currentSong?.let { track ->
+                    MiniPlayer(
+                        track = track,
+                        isPlaying = isPlaying,
+                        onClick = { navController.navigate("music_player") },
+                        onTogglePlay = { MusicManager.togglePlayPause() }
+                    )
                 }
-            } catch (e: Exception) {
-                Log.e("MusicAPI", "Error: ${e.message}")
             }
         }
-    }
-
-    LaunchedEffect(Unit) { searchMusic(searchQuery) }
-
-    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF121212))) {
-        Column(modifier = Modifier.fillMaxSize()) {
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 16.dp)
+        ) {
             // Header
             Text(
-                "Search", 
-                color = Color.White, 
-                fontSize = 28.sp, 
+                "Find Your Vibe",
+                color = Color.White,
+                fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(top = 50.dp, start = 20.dp, bottom = 15.dp)
+                modifier = Modifier.padding(top = 40.dp, bottom = 20.dp)
             )
 
-            // Search Bar
-            OutlinedTextField(
+            // Search Field
+            TextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .background(Color.White, RoundedCornerShape(8.dp)),
-                placeholder = { Text("What do you want to listen to?", color = Color.Black.copy(0.7f)) },
-                shape = RoundedCornerShape(8.dp),
+                    .clip(RoundedCornerShape(8.dp)),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.White,
+                    unfocusedContainerColor = Color.White.copy(0.9f),
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedTextColor = Color.Black,
+                    unfocusedTextColor = Color.Black
+                ),
+                placeholder = { Text("Songs, Artists, Podcasts...", color = Color.Gray) },
                 leadingIcon = { Icon(Icons.Rounded.Search, null, tint = Color.Black) },
                 trailingIcon = {
-                    IconButton(onClick = { searchMusic(searchQuery) }) {
-                        Icon(Icons.Rounded.Search, null, tint = Color.Black)
+                    IconButton(onClick = { 
+                        scope.launch {
+                            isLoading = true
+                            musicList = MusicRepository.search(searchQuery)
+                            isLoading = false
+                        }
+                    }) {
+                        Icon(Icons.Rounded.ArrowForward, null, tint = Color.Black)
                     }
                 },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.Black,
-                    unfocusedTextColor = Color.Black,
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent,
-                    cursorColor = Color.Black
-                ),
                 singleLine = true
             )
 
-            if (isLoading) {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp), 
-                    color = Color(0xFF1DB954) // Spotify Green
-                )
-            }
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // List
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                contentPadding = PaddingValues(16.dp, bottom = 120.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                items(musicList) { track ->
-                    MusicTrackCard(track) { fetchAndPlay(track) }
+            if (isLoading) {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Color(0xFF1DB954))
                 }
             }
-        }
 
-        // --- MINI PLAYER (Spotify Style) ---
-        AnimatedVisibility(
-            visible = currentSong != null,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp, start = 8.dp, end = 8.dp),
-            enter = slideInVertically { it },
-            exit = slideOutVertically { it }
-        ) {
-            currentSong?.let { track ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(64.dp)
-                        .clickable { navController.navigate("music_player") },
-                    shape = RoundedCornerShape(8.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF282828))
-                ) {
-                    // FIX: Wrapped content in Box to allow Alignment.BottomCenter
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        Row(
-                            modifier = Modifier.fillMaxSize().padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Thumbnail
-                            AsyncImage(
-                                model = track.coverUrl,
-                                contentDescription = null,
-                                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
-                                contentScale = ContentScale.Crop
-                            )
-                            
-                            Spacer(modifier = Modifier.width(12.dp))
-                            
-                            // Info
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(track.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                Text(track.artist, color = Color.LightGray, fontSize = 12.sp, maxLines = 1)
-                            }
-
-                            // Play/Pause Button
-                            IconButton(onClick = { MusicManager.togglePlayPause() }) {
-                                Icon(
-                                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                    contentDescription = null,
-                                    tint = Color.White
-                                )
-                            }
-                        }
-                        
-                        // Progress Indicator at bottom of MiniPlayer
-                        val position by MusicManager.currentPosition.collectAsState()
-                        val duration by MusicManager.duration.collectAsState()
-                        val progress = if (duration > 0) position.toFloat() / duration else 0f
-                        
-                        LinearProgressIndicator(
-                            progress = { progress }, // Note: If your M3 version requires Float, remove the {} brackets.
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(2.dp)
-                                .align(Alignment.BottomCenter), // Now valid inside Box
-                            color = Color.White,
-                            trackColor = Color.Transparent,
-                        )
-                    }
+            // Song List
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 100.dp)
+            ) {
+                items(musicList) { track ->
+                    SongListItem(track) { playTrack(track) }
                 }
             }
         }
@@ -246,36 +148,123 @@ fun MusicScreen(navController: NavController) {
 }
 
 @Composable
-fun MusicTrackCard(track: MusicTrack, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier.width(160.dp).clickable { onClick() }
+fun SongListItem(track: MusicTrack, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Card(
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+            shape = RoundedCornerShape(4.dp),
+            modifier = Modifier.size(56.dp)
         ) {
             AsyncImage(
                 model = track.coverUrl,
                 contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
             )
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            track.title,
-            color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            track.artist,
-            color = Color.Gray,
-            fontSize = 12.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 16.dp)
+        ) {
+            Text(
+                track.title,
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                track.artist,
+                color = Color.LightGray,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        
+        Icon(Icons.Rounded.MoreVert, null, tint = Color.Gray)
+    }
+}
+
+@Composable
+fun MiniPlayer(
+    track: MusicTrack, 
+    isPlaying: Boolean, 
+    onClick: () -> Unit, 
+    onTogglePlay: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF282828)), // Dark Grey
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(8.dp)
+            .height(64.dp)
+            .clickable { onClick() }
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier.fillMaxSize().padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AsyncImage(
+                    model = track.coverUrl,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
+                    contentScale = ContentScale.Crop
+                )
+                
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 12.dp)
+                ) {
+                    Text(
+                        track.title, 
+                        color = Color.White, 
+                        fontSize = 14.sp, 
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                    Text(
+                        track.artist, 
+                        color = Color(0xFFB3B3B3), 
+                        fontSize = 12.sp,
+                        maxLines = 1
+                    )
+                }
+
+                IconButton(onClick = onTogglePlay) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        contentDescription = null,
+                        tint = Color.White
+                    )
+                }
+            }
+            
+            // Progress Bar at Bottom
+            val position by MusicManager.currentPosition.collectAsState()
+            val duration by MusicManager.duration.collectAsState()
+            val progress = if (duration > 0) position.toFloat() / duration else 0f
+            
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .align(Alignment.BottomCenter),
+                color = Color.White,
+                trackColor = Color.Transparent,
+            )
+        }
     }
 }
