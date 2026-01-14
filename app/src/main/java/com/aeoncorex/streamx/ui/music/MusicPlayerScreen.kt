@@ -26,10 +26,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 
-// Theme Colors (MusicScreen এর সাথে মিল রেখে)
-private val NeonPurple = Color(0xFFBC13FE)
-private val NeonCyan = Color(0xFF04D9FF)
-private val DeepDark = Color(0xFF05050A)
+// Removed duplicate color definitions. Uses colors from MusicScreen.kt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,7 +37,7 @@ fun MusicPlayerScreen(navController: NavController) {
     val position by MusicManager.currentPosition.collectAsState()
     val duration by MusicManager.duration.collectAsState()
 
-    // গান না থাকলে ব্যাক করা
+    // If no song, go back
     if (currentSong == null) {
         LaunchedEffect(Unit) { navController.popBackStack() }
         return
@@ -49,25 +46,25 @@ fun MusicPlayerScreen(navController: NavController) {
     currentSong?.let { track ->
         Box(modifier = Modifier.fillMaxSize().background(DeepDark)) {
             
-            // 1. Dynamic Background Blur (অ্যালবাম আর্ট থেকে ব্লার ব্যাকগ্রাউন্ড)
+            // 1. Dynamic Background Blur
             AsyncImage(
                 model = track.coverUrl,
                 contentDescription = null,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(60.dp) // ব্যাকগ্রাউন্ডে ঝাপসা এফেক্ট
+                    .blur(60.dp)
                     .alpha(0.35f),
                 contentScale = ContentScale.Crop
             )
 
-            // মেইন কন্টেন্ট লেআউট
+            // Main Content Layout
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .systemBarsPadding()
                     .padding(horizontal = 24.dp)
             ) {
-                // ২. টপ বার
+                // 2. Top Bar
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -101,7 +98,7 @@ fun MusicPlayerScreen(navController: NavController) {
 
                 Spacer(modifier = Modifier.weight(0.5f))
 
-                // ৩. রোটেটিং অ্যালবাম আর্ট (Futuristic Vinyl Style)
+                // 3. Rotating Album Art (Futuristic Vinyl Style)
                 val infiniteTransition = rememberInfiniteTransition(label = "rotation")
                 val rotation by infiniteTransition.animateFloat(
                     initialValue = 0f,
@@ -120,7 +117,7 @@ fun MusicPlayerScreen(navController: NavController) {
                         .padding(20.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    // নিয়ন গ্লো এফেক্ট (Outer Glow)
+                    // Neon Glow Effect
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -128,22 +125,22 @@ fun MusicPlayerScreen(navController: NavController) {
                             .blur(40.dp)
                     )
                     
-                    // মেইন আর্ট সার্কেল
+                    // Main Art Circle
                     AsyncImage(
                         model = track.coverUrl,
                         contentDescription = null,
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(CircleShape) // গোলাকার শেপ
-                            .rotate(if (isPlaying) rotation else 0f) // গান চললে ঘুরবে
-                            .border(4.dp, Brush.sweepGradient(listOf(NeonCyan, NeonPurple, NeonCyan)), CircleShape),
+                            .clip(CircleShape)
+                            .rotate(if (isPlaying) rotation else 0f)
+                            .border(4.dp, Brush.sweepGradient(colors = listOf(NeonCyan, NeonPurple, NeonCyan)), CircleShape),
                         contentScale = ContentScale.Crop
                     )
                 }
 
                 Spacer(modifier = Modifier.weight(0.5f))
 
-                // ৪. ট্র্যাক ইনফো (টাইটেল ও আর্টিস্ট)
+                // 4. Track Info
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         track.title,
@@ -164,7 +161,7 @@ fun MusicPlayerScreen(navController: NavController) {
 
                 Spacer(modifier = Modifier.height(32.dp))
 
-                // ৫. প্রগ্রেস বার (Slider)
+                // 5. Progress Bar
                 Column {
                     Slider(
                         value = if (duration > 0) position.toFloat() / duration else 0f,
@@ -186,7 +183,7 @@ fun MusicPlayerScreen(navController: NavController) {
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // ৬. কন্ট্রোল বাটনসমূহ (Play, Pause, Next, Prev)
+                // 6. Control Buttons
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -200,7 +197,7 @@ fun MusicPlayerScreen(navController: NavController) {
                         Icon(Icons.Rounded.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(45.dp))
                     }
 
-                    // প্লে/পজ ফ্লোটিং বাটন
+                    // Play/Pause Floating Button
                     Surface(
                         modifier = Modifier
                             .size(75.dp)
@@ -230,7 +227,7 @@ fun MusicPlayerScreen(navController: NavController) {
     }
 }
 
-// টাইম ফরম্যাটিং ফাংশন (00:00)
+// Time Formatting
 private fun formatTime(ms: Long): String {
     val totalSecs = ms / 1000
     val min = totalSecs / 60

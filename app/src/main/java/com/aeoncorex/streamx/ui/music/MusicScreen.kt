@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField // Added this import
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.*
@@ -37,7 +38,7 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// --- THEME CONSTANTS ---
+// --- THEME CONSTANTS (Shared across package) ---
 val NeonPurple = Color(0xFFBC13FE)
 val NeonCyan = Color(0xFF04D9FF)
 val DeepDark = Color(0xFF05050A)
@@ -543,7 +544,6 @@ fun CyberLoader() {
     )
 }
 
-// Reuse your existing Drawer and Background components if needed, or stick to this improved BG
 @Composable
 fun CyberMeshBackground() {
     val infiniteTransition = rememberInfiniteTransition(label = "bg")
