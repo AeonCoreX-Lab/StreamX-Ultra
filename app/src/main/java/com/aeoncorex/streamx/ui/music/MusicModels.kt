@@ -31,6 +31,14 @@ data class ArtistMap(val primary: List<ArtistDto>?, val all: List<ArtistDto>?)
 data class ArtistDto(val id: String?, val name: String?)
 data class QualityUrl(val url: String)
 
+// --- DTOs: Lyrics (New Free API) ---
+data class LyricsDto(
+    val id: Int?,
+    val trackName: String?,
+    val artistName: String?,
+    val plainLyrics: String?,
+    val syncedLyrics: String?
+
 // --- DTOs: Piped (YouTube) ---
 data class PipedResponse(val items: List<PipedItem>)
 data class PipedItem(
@@ -50,6 +58,7 @@ data class MusicTrack(
     val id: String,
     val title: String,
     val artist: String,
+    val album: String = "Unknown Album", // Added Album
     val coverUrl: String,
     val streamUrl: String, // If Source is YT, this is the VideoID initially
     val year: String = "",
@@ -95,6 +104,16 @@ interface SaavnApi {
     suspend fun getSongDetails(@Path("id") id: String): ApiResponse<List<SongDto>>
 }
 
+// New Free Lyrics API Interface (LrcLib)
+interface LyricsApi {
+    @GET("get")
+    suspend fun getLyrics(
+        @Query("track_name") trackName: String,
+        @Query("artist_name") artistName: String,
+        @Query("duration") duration: Double? = null
+    ): LyricsDto
+}
+
 // 2. Piped (YouTube) Interface - Free & Unlimited
 interface PipedApi {
     @GET("search")
@@ -111,8 +130,16 @@ object MusicRepository {
         .addConverterFactory(GsonConverterFactory.create())
         .build()
         .create(SaavnApi::class.java)
+    
+     // New Lyrics Client
+    private val lyricsRetrofit = Retrofit.Builder()
+        .baseUrl("https://lrclib.net/api/") // Free Unlimited API
+        .addConverterFactory(GsonConverterFactory.create())
+        .build()
 
-    // Client 2: Piped (YouTube Proxy) - Using a stable public instance
+    val lyricsApi: LyricsApi = lyricsRetrofit.create(LyricsApi::class.java)
+
+  // Client 3: Piped (YouTube Proxy) - Using a stable public instance
     private val pipedApi = Retrofit.Builder()
         .baseUrl("https://pipedapi.kavin.rocks/") 
         .addConverterFactory(GsonConverterFactory.create())
