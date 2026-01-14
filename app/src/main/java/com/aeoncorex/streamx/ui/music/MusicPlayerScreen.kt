@@ -3,14 +3,11 @@ package com.aeoncorex.streamx.ui.music
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.alpha
@@ -25,7 +22,6 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MusicPlayerScreen(navController: NavController) {
     // Collect states
@@ -35,38 +31,37 @@ fun MusicPlayerScreen(navController: NavController) {
     val duration by MusicManager.duration.collectAsState()
     val lyrics by MusicManager.lyrics.collectAsState()
 
-    // Pager for Tabs (Lyrics | Info)
-    val pagerState = rememberPagerState(pageCount = { 2 })
-    val coroutineScope = rememberCoroutineScope()
-    val titles = listOf("LYRICS", "ARTIST INFO")
+    val scrollState = rememberScrollState()
 
     if (currentSong == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = Color.Red)
+            CircularProgressIndicator(color = Color.White)
         }
         return
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // 1. Dynamic Blurred Background
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF121212))) {
+        // 1. Dynamic Blurred Background (Full Screen)
         AsyncImage(
             model = currentSong!!.coverUrl,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .fillMaxSize()
-                .blur(80.dp)
-                .alpha(0.6f)
+                .blur(60.dp)
+                .alpha(0.5f)
         )
-        // Dark Overlay for readability
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)))
+        // Dark Overlay for better contrast
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)))
 
+        // 2. Scrollable Content (Player + Lyrics + Artist)
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
+                .verticalScroll(scrollState)
         ) {
-            // --- Top Bar ---
+            // --- TOP HEADER ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -77,34 +72,39 @@ fun MusicPlayerScreen(navController: NavController) {
                 IconButton(onClick = { navController.popBackStack() }) {
                     Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Color.White, modifier = Modifier.size(32.dp))
                 }
-                Text("NOW PLAYING", color = Color.White.copy(0.7f), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "PLAYING FROM PLAYLIST",
+                        color = Color.White.copy(0.7f),
+                        fontSize = 10.sp,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        currentSong!!.source, // "Saavn" or "YouTube"
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
                 IconButton(onClick = { /* More Options */ }) {
                     Icon(Icons.Rounded.MoreVert, null, tint = Color.White)
                 }
             }
 
-            // --- Album Art (Rotating if playing) ---
-            val infiniteTransition = rememberInfiniteTransition()
-            val angle by infiniteTransition.animateFloat(
-                initialValue = 0f,
-                targetValue = 360f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(20000, easing = LinearEasing)
-                )
-            )
-            
+            Spacer(Modifier.height(20.dp))
+
+            // --- ALBUM ART ---
             Box(
                 modifier = Modifier
-                    .weight(1f) // Takes available upper space
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .padding(horizontal = 40.dp)
+                    .aspectRatio(1f), // Keeps it square
                 contentAlignment = Alignment.Center
             ) {
                 Card(
-                    modifier = Modifier
-                        .size(300.dp)
-                        .graphicsLayer { if(isPlaying) rotationZ = angle },
-                    shape = CircleShape,
-                    elevation = CardDefaults.cardElevation(20.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    elevation = CardDefaults.cardElevation(10.dp),
+                    modifier = Modifier.fillMaxSize()
                 ) {
                     AsyncImage(
                         model = currentSong!!.coverUrl,
@@ -113,67 +113,88 @@ fun MusicPlayerScreen(navController: NavController) {
                         modifier = Modifier.fillMaxSize()
                     )
                 }
-                // Central hole for Vinyl look
-                Box(Modifier.size(30.dp).background(Color(0xFF121212), CircleShape))
             }
 
-            // --- Track Info ---
+            Spacer(Modifier.height(40.dp))
+
+            // --- TRACK TITLE & ARTIST ---
             Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
             ) {
-                Text(
-                    text = currentSong!!.title,
-                    color = Color.White,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = currentSong!!.artist,
-                    color = Color.Gray,
-                    fontSize = 16.sp,
-                    maxLines = 1
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = currentSong!!.title,
+                            color = Color.White,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = currentSong!!.artist,
+                            color = Color.White.copy(0.7f),
+                            fontSize = 16.sp,
+                            maxLines = 1
+                        )
+                    }
+                    IconButton(onClick = { /* Like Action */ }) {
+                        Icon(Icons.Rounded.FavoriteBorder, null, tint = Color.White)
+                    }
+                }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
 
-            // --- Seek Bar ---
-            Column(Modifier.padding(horizontal = 24.dp)) {
+            // --- SEEK BAR ---
+            Column(Modifier.padding(horizontal = 12.dp)) {
                 Slider(
                     value = if (duration > 0) position.toFloat() / duration else 0f,
                     onValueChange = { MusicManager.seekTo((it * duration).toLong()) },
                     colors = SliderDefaults.colors(
                         thumbColor = Color.White,
-                        activeTrackColor = Color.Red,
-                        inactiveTrackColor = Color.White.copy(0.3f)
-                    )
+                        activeTrackColor = Color.White,
+                        inactiveTrackColor = Color.White.copy(0.2f)
+                    ),
+                    modifier = Modifier.height(20.dp)
                 )
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(formatTime(position), color = Color.Gray, fontSize = 12.sp)
-                    Text(formatTime(duration), color = Color.Gray, fontSize = 12.sp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(formatTime(position), color = Color.White.copy(0.6f), fontSize = 11.sp)
+                    Text(formatTime(duration), color = Color.White.copy(0.6f), fontSize = 11.sp)
                 }
             }
 
-            // --- Playback Controls ---
+            Spacer(Modifier.height(10.dp))
+
+            // --- PLAYBACK CONTROLS ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 16.dp),
+                    .padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = { MusicManager.playPrevious() }) {
-                    Icon(Icons.Rounded.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(40.dp))
+                IconButton(onClick = { /* Shuffle */ }) {
+                    Icon(Icons.Rounded.Shuffle, null, tint = Color.White.copy(0.7f))
+                }
+                IconButton(onClick = { MusicManager.playPrevious() }, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Rounded.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(36.dp))
                 }
                 
-                // Play Button
+                // Play/Pause
                 Box(
                     modifier = Modifier
-                        .size(70.dp)
+                        .size(72.dp)
                         .clip(CircleShape)
                         .background(Color.White)
                         .clickable { MusicManager.togglePlayPause() },
@@ -187,106 +208,143 @@ fun MusicPlayerScreen(navController: NavController) {
                     )
                 }
 
-                IconButton(onClick = { MusicManager.playNext() }) {
-                    Icon(Icons.Rounded.SkipNext, null, tint = Color.White, modifier = Modifier.size(40.dp))
+                IconButton(onClick = { MusicManager.playNext() }, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Rounded.SkipNext, null, tint = Color.White, modifier = Modifier.size(36.dp))
+                }
+                IconButton(onClick = { /* Repeat */ }) {
+                    Icon(Icons.Rounded.Repeat, null, tint = Color.White.copy(0.7f))
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(30.dp))
 
-            // --- NEW: Professional Lyrics & Info Section ---
+            // ==========================================
+            // --- SCROLL DOWN SECTIONS (SPOTIFY STYLE) ---
+            // ==========================================
+
+            // 1. LYRICS CARD
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFFBB5645)) // Spotify-like lyrical color (dynamic preferred, fixed for now)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Text(
+                            "Lyrics",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Color.Black.copy(0.2f))
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text("SHOW MORE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    
+                    Spacer(Modifier.height(16.dp))
+                    
+                    // Lyrics Text
+                    Text(
+                        text = lyrics,
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        lineHeight = 30.sp,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // 2. ARTIST INFO SECTION
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(0.8f) // Takes remaining space at bottom
-                    .background(Color.Black.copy(0.4f), RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFF2A2A2A)) // Dark grey card background
+                    .padding(16.dp)
             ) {
-                // Tab Header
-                TabRow(
-                    selectedTabIndex = pagerState.currentPage,
-                    containerColor = Color.Transparent,
-                    contentColor = Color.White,
-                    indicator = { tabPositions ->
-                        TabRowDefaults.SecondaryIndicator(
-                            Modifier.tabIndicatorOffset(tabPositions[pagerState.currentPage]),
-                            color = Color.Red
-                        )
-                    }
+                Text(
+                    "About the artist",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                // Artist Image
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .clip(RoundedCornerShape(12.dp))
                 ) {
-                    titles.forEachIndexed { index, title ->
-                        Tab(
-                            selected = pagerState.currentPage == index,
-                            onClick = { /* Switch via pager state if needed, usually auto with Pager */ },
-                            text = { Text(title, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                    AsyncImage(
+                        model = currentSong!!.coverUrl, // Using song art as placeholder for artist
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    // Artist Name Overlay
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black))),
+                        contentAlignment = Alignment.BottomStart
+                    ) {
+                        Text(
+                            text = currentSong!!.artist,
+                            color = Color.White,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(16.dp)
                         )
                     }
                 }
 
-                // Tab Content
-                HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxSize()
-                ) { page ->
-                    if (page == 0) {
-                        // --- LYRICS SECTION ---
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(20.dp)
-                                .verticalScroll(rememberScrollState())
-                        ) {
-                            Text(
-                                text = lyrics,
-                                color = Color.White.copy(0.9f),
-                                fontSize = 18.sp,
-                                lineHeight = 28.sp,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    } else {
-                        // --- ARTIST INFO SECTION ---
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(20.dp)
-                                .verticalScroll(rememberScrollState()),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            // Artist Image (Placeholder using song art or placeholder)
-                            Card(shape = CircleShape, modifier = Modifier.size(100.dp)) {
-                                AsyncImage(
-                                    model = currentSong!!.coverUrl, // Using song art as artist placeholder
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                            Spacer(Modifier.height(16.dp))
-                            Text(currentSong!!.artist, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.height(8.dp))
-                            Text("Artist verified", color = Color.Green, fontSize = 12.sp)
-                            
-                            Spacer(Modifier.height(16.dp))
-                            Text(
-                                "About the Artist",
-                                color = Color.Gray,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.align(Alignment.Start)
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                "Listen to ${currentSong!!.artist}, one of the top trending artists on StreamX. Enjoy the best quality audio and latest tracks right here.",
-                                color = Color.White.copy(0.7f),
-                                fontSize = 14.sp,
-                                lineHeight = 20.sp,
-                                textAlign = TextAlign.Justify
-                            )
-                        }
-                    }
+                Spacer(Modifier.height(16.dp))
+
+                // Artist Stats / Bio
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "10,543,201", // Placeholder number
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "monthly listeners",
+                        color = Color.Gray,
+                        fontSize = 14.sp
+                    )
                 }
+                
+                Spacer(Modifier.height(12.dp))
+                
+                Text(
+                    "Listen to ${currentSong!!.artist}, one of the top trending artists. Verified artist on StreamX.",
+                    color = Color.White.copy(0.8f),
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    maxLines = 4
+                )
             }
+
+            Spacer(Modifier.height(40.dp)) // Bottom padding for scrolling
         }
     }
 }
