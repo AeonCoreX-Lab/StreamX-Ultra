@@ -4,12 +4,7 @@ plugins {
     id("com.google.gms.google-services")
 }
 
-// local.properties ফাইল লোড করার লজিক
-val localProperties = java.util.Properties()
-val localPropertiesFile = rootProject.file("local.properties")
-if (localPropertiesFile.exists()) {
-    localProperties.load(java.io.FileInputStream(localPropertiesFile))
-}
+// REMOVED: java.util.Properties loading logic (local.properties removed)
 
 android {
     namespace = "com.aeoncorex.streamx"
@@ -19,7 +14,7 @@ android {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 24
         targetSdk = 34
-        versionCode = 5 // Version bumped
+        versionCode = 5 
         versionName = "1.3.0" 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -27,22 +22,22 @@ android {
         }
 
         // --- SECURE API KEY INJECTION ---
-        // এটি প্রথমে local.properties চেক করবে, না পেলে System Environment (GitHub Secrets) চেক করবে
-        val tmdbApiKey = localProperties.getProperty("TMDB_API_KEY") 
-            ?: System.getenv("TMDB_API_KEY") 
-            ?: "\"\"" // ডিফল্ট খালি স্ট্রিং যাতে এরর না খায়
+        // CHANGED: Now strictly relies on System Environment Variables (GitHub Secrets)
+        // localProperties.getProperty(...) অংশটি বাদ দেওয়া হয়েছে
+        val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\"" 
 
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
     }
 
     signingConfigs {
         create("release") {
-            val storeFileValue = project.findProperty("RELEASE_KEYSTORE_FILE") as? String ?: System.getenv("RELEASE_KEYSTORE_FILE")
-            val storePasswordValue = project.findProperty("RELEASE_KEYSTORE_PASSWORD") as? String ?: System.getenv("RELEASE_KEYSTORE_PASSWORD")
-            val keyAliasValue = project.findProperty("RELEASE_KEY_ALIAS") as? String ?: System.getenv("RELEASE_KEY_ALIAS")
-            val keyPasswordValue = project.findProperty("RELEASE_KEY_PASSWORD") as? String ?: System.getenv("RELEASE_KEY_PASSWORD")
+            // Signing keys will be fetched from Environment Variables (CI/CD) or gradle.properties
+            val storeFileValue = System.getenv("RELEASE_KEYSTORE_FILE") ?: project.findProperty("RELEASE_KEYSTORE_FILE") as? String
+            val storePasswordValue = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: project.findProperty("RELEASE_KEYSTORE_PASSWORD") as? String
+            val keyAliasValue = System.getenv("RELEASE_KEY_ALIAS") ?: project.findProperty("RELEASE_KEY_ALIAS") as? String
+            val keyPasswordValue = System.getenv("RELEASE_KEY_PASSWORD") ?: project.findProperty("RELEASE_KEY_PASSWORD") as? String
 
-            if (storeFileValue != null) {
+            if (storeFileValue != null && storePasswordValue != null && keyAliasValue != null && keyPasswordValue != null) {
                 storeFile = file(storeFileValue)
                 storePassword = storePasswordValue
                 keyAlias = keyAliasValue
@@ -74,7 +69,7 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = true // এটি অত্যন্ত গুরুত্বপূর্ণ BuildConfig ক্লাস জেনারেট করার জন্য
+        buildConfig = true 
     }
 
     composeOptions {

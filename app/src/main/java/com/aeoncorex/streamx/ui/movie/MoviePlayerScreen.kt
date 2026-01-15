@@ -42,7 +42,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         val originalOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         
-        // Hide System Bars
+        // Hide System Bars (Immersive Mode)
         val window = activity?.window
         if (window != null) {
             WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -80,7 +80,8 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         builtInZoomControls = false
                         displayZoomControls = false
                         mediaPlaybackRequiresUserGesture = false
-                        cacheMode = WebSettings.LOAD_NO_CACHE
+                        // Set User Agent to avoid some mobile restrictions
+                        userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
                     }
                     
                     setBackgroundColor(0x00000000) // Transparent
@@ -92,17 +93,14 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             isLoading = false
                         }
-                        // Simple Ad-block / Popup prevention logic
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                            val nextUrl = request?.url.toString()
-                            // Only allow the original domain or video hosts, block standard ad popups
-                            // This logic can be refined based on specific needs
+                            // Keeps navigation inside WebView
                             return false 
                         }
                     }
 
                     webChromeClient = object : WebChromeClient() {
-                        // Handle fullscreen video request from HTML5 player
+                        // Better full screen handling for HTML5 video
                         override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
                             super.onShowCustomView(view, callback)
                             (context as? Activity)?.window?.decorView?.let { decor ->
@@ -120,7 +118,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             modifier = Modifier.fillMaxSize()
         )
 
-        // Loading Indicator (Netflix Style)
         if (isLoading) {
             Box(
                 modifier = Modifier
@@ -132,7 +129,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
         
-        // Back Handler
         BackHandler {
             navController.popBackStack()
         }

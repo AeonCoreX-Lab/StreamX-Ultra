@@ -1,7 +1,7 @@
 package com.aeoncorex.streamx.ui.movie
 
 import android.util.Log
-import com.aeoncorex.streamx.BuildConfig // BuildConfig ইমপোর্ট করা জরুরি
+import com.aeoncorex.streamx.BuildConfig 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import retrofit2.Retrofit
@@ -28,14 +28,13 @@ interface TmdbApi {
 }
 
 object MovieRepository {
-    // --- SECURE KEY USAGE ---
-    // BuildConfig থেকে কী নেওয়া হচ্ছে। হার্ডকোডেড নয়।
+    // build.gradle থেকে জেনারেট হওয়া BuildConfig.TMDB_API_KEY ব্যবহার হচ্ছে
     private val API_KEY = BuildConfig.TMDB_API_KEY 
     
     private const val IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
     private const val BACKDROP_BASE_URL = "https://image.tmdb.org/t/p/original"
 
-    // Free Unlimited Streaming Source (Embed Pattern)
+    // Streaming Sources
     private const val STREAM_BASE_URL = "https://vidsrc.xyz/embed/movie/" 
     private const val TV_STREAM_BASE_URL = "https://vidsrc.xyz/embed/tv/"
 
@@ -45,10 +44,9 @@ object MovieRepository {
         .build()
         .create(TmdbApi::class.java)
 
-    // --- Helper to execute calls safely ---
     private suspend fun safeApiCall(call: suspend () -> TmdbResponse): List<Movie> = withContext(Dispatchers.IO) {
-        if (API_KEY.isEmpty()) {
-            Log.e("MovieRepo", "TMDB_API_KEY is missing! Check local.properties or GitHub Secrets.")
+        if (API_KEY.isEmpty() || API_KEY == "null") {
+            Log.e("MovieRepo", "API KEY MISSING! Check build.gradle or Environment Variables.")
             return@withContext emptyList()
         }
         try {
@@ -65,7 +63,7 @@ object MovieRepository {
                 )
             }
         } catch (e: Exception) {
-            Log.e("MovieRepo", "Error: ${e.message}")
+            Log.e("MovieRepo", "API Error: ${e.localizedMessage}")
             emptyList()
         }
     }
@@ -76,12 +74,12 @@ object MovieRepository {
     suspend fun getActionMovies(): List<Movie> = safeApiCall { api.getActionMovies(API_KEY) }
     suspend fun getSciFiMovies(): List<Movie> = safeApiCall { api.getSciFiMovies(API_KEY) }
 
-    // --- Stream Link Generator ---
     fun getStreamUrl(movieId: Int, type: MovieType): String {
         return if (type == MovieType.MOVIE) {
             "$STREAM_BASE_URL$movieId"
         } else {
-            // Defaulting to S1E1 for demo logic
+            // Note: Currently defaulting to Season 1 Episode 1. 
+            // Future update: Add logic to select season/episode.
             "${TV_STREAM_BASE_URL}$movieId/1/1"
         }
     }
