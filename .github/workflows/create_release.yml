@@ -45,7 +45,7 @@ jobs:
       # ধাপ ৫: সাইন করা রিলিজ APK তৈরি করা
       - name: Build Signed Release APK
         env:
-          # এনভায়রনমেন্ট ভেরিয়েবল হিসেবে তথ্য সেট করা
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
           RELEASE_KEYSTORE_FILE: ${{ github.workspace }}/release.keystore
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}

@@ -17,8 +17,11 @@ import com.aeoncorex.streamx.ui.privacy.PrivacyPolicyScreen
 import com.aeoncorex.streamx.ui.about.AboutScreen
 import com.aeoncorex.streamx.ui.music.MusicScreen
 import com.aeoncorex.streamx.ui.music.MusicPlayerScreen
-import com.aeoncorex.streamx.ui.player.PlayerScreen // ইমপোর্ট করা হলো
-import com.aeoncorex.streamx.ui.copyright.CopyrightScreen // নিশ্চিত করুন এই ফাইলটি আছে
+import com.aeoncorex.streamx.ui.player.PlayerScreen 
+import com.aeoncorex.streamx.ui.copyright.CopyrightScreen 
+// --- NEW IMPORTS ---
+import com.aeoncorex.streamx.ui.movie.MovieScreen
+import com.aeoncorex.streamx.ui.movie.MoviePlayerScreen
 
 @Composable
 fun AppNavigation(themeViewModel: ThemeViewModel) {
@@ -29,7 +32,7 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         composable("auth") { AuthScreen(navController) }
         composable("home") { MainScreen(navController) }
         
-        // ভিডিও প্লেয়ার রুট
+        // Live TV Player Route
         composable(
             route = "player/{encodedUrl}",
             arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
@@ -38,13 +41,21 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             PlayerScreen(navController = navController, encodedUrl = encodedUrl)
         }
         
+        // --- MOVIE SECTION ROUTES (NEW) ---
+        composable("movie") {
+            MovieScreen(navController)
+        }
+        composable(
+            route = "movie_player/{url}",
+            arguments = listOf(navArgument("url") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val url = backStackEntry.arguments?.getString("url") ?: ""
+            MoviePlayerScreen(navController, url)
+        }
+        
         // --- MUSIC SECTION ROUTES ---
-        composable("music") { 
-            MusicScreen(navController) 
-        }
-        composable("music_player") { 
-            MusicPlayerScreen(navController) 
-        }
+        composable("music") { MusicScreen(navController) }
+        composable("music_player") { MusicPlayerScreen(navController) }
         
         // --- OTHER ROUTES ---
         composable("settings") { SettingsScreen(navController) }

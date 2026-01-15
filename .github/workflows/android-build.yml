@@ -36,6 +36,8 @@ jobs:
 
       # ধাপ ৪: Gradle ব্যবহার করে ডিবাগ APK বিল্ড করা
       - name: Build Debug APK
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: ./gradlew assembleDebug
 
       # ধাপ ৫: কী (SHA-1, SHA-256) প্রিন্ট করা

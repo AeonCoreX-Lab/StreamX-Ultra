@@ -4,6 +4,13 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+// local.properties ফাইল লোড করার লজিক
+val localProperties = java.util.Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(java.io.FileInputStream(localPropertiesFile))
+}
+
 android {
     namespace = "com.aeoncorex.streamx"
     compileSdk = 34
@@ -12,12 +19,20 @@ android {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.2.1"
+        versionCode = 5 // Version bumped
+        versionName = "1.3.0" 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // --- SECURE API KEY INJECTION ---
+        // এটি প্রথমে local.properties চেক করবে, না পেলে System Environment (GitHub Secrets) চেক করবে
+        val tmdbApiKey = localProperties.getProperty("TMDB_API_KEY") 
+            ?: System.getenv("TMDB_API_KEY") 
+            ?: "\"\"" // ডিফল্ট খালি স্ট্রিং যাতে এরর না খায়
+
+        buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
     }
 
     signingConfigs {
@@ -51,7 +66,6 @@ android {
 
     kotlinOptions {
         jvmTarget = "1.8"
-        // এটি গ্লোবালি অপ্ট-ইন সেট করে যাতে কোডে বারবার এরর না আসে
         freeCompilerArgs += listOf(
             "-opt-in=androidx.media3.common.util.UnstableApi",
             "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"
@@ -60,6 +74,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true // এটি অত্যন্ত গুরুত্বপূর্ণ BuildConfig ক্লাস জেনারেট করার জন্য
     }
 
     composeOptions {
@@ -82,13 +97,13 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    
+    // Retrofit & Gson
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
 
-    // Foundation Pager
+    // Foundation & Navigation
     implementation("androidx.compose.foundation:foundation:1.6.7")
-
-    // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
     // Firebase
@@ -96,26 +111,22 @@ dependencies {
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.android.gms:play-services-auth:21.0.0")
-
-    // Facebook Login
     implementation("com.facebook.android:facebook-login:16.3.0")
 
-    // MEDIA3 (EXOPLAYER)
+    // Media3 (ExoPlayer)
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-common:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
 
-    // Coil for Image Loading
+    // Coil (Image Loading)
     implementation("io.coil-kt:coil-compose:2.6.0")
 
-    // DataStore Preferences
+    // DataStore & Lifecycle
     implementation("androidx.datastore:datastore-preferences:1.0.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
 
-    // Shimmer Effect
+    // Shimmer & Icons
     implementation("com.valentinilk.shimmer:compose-shimmer:1.2.0")
-
-    // Icons
     implementation("androidx.compose.material:material-icons-extended:1.6.7")
 }

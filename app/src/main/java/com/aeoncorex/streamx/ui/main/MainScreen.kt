@@ -10,11 +10,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.rounded.Movie // Movie Icon
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,6 +34,7 @@ import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.aeoncorex.streamx.ui.account.AccountScreen
 import com.aeoncorex.streamx.ui.home.LiveTVScreen
+import com.aeoncorex.streamx.ui.movie.MovieScreen // New Import
 import com.aeoncorex.streamx.ui.music.MusicManager
 import com.aeoncorex.streamx.ui.music.MusicScreen
 
@@ -50,9 +51,9 @@ fun MainScreen(navController: NavController) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.Transparent) // ব্যাকগ্রাউন্ড কন্টেন্ট দেখানোর জন্য
+                    .background(Color.Transparent)
             ) {
-                // --- MINI PLAYER (Floating Style) ---
+                // --- MINI PLAYER (Existing Logic) ---
                 AnimatedVisibility(
                     visible = currentSong != null,
                     enter = slideInVertically { it } + fadeIn(),
@@ -84,10 +85,7 @@ fun MainScreen(navController: NavController) {
                                         modifier = Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)),
                                         contentScale = ContentScale.Crop
                                     )
-                                    
-                                    // Animated Spectrum Graphic Placeholder (Optional)
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = song.title,
@@ -104,7 +102,6 @@ fun MainScreen(navController: NavController) {
                                             maxLines = 1
                                         )
                                     }
-                                    
                                     IconButton(onClick = { MusicManager.togglePlayPause() }) {
                                         Icon(
                                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -113,21 +110,12 @@ fun MainScreen(navController: NavController) {
                                         )
                                     }
                                 }
-                                // Progress Bar at bottom
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomStart) {
-                                    LinearProgressIndicator(
-                                        progress = { 0.5f }, // Connect to real progress
-                                        modifier = Modifier.fillMaxWidth().height(2.dp),
-                                        color = primaryColor,
-                                        trackColor = Color.Transparent,
-                                    )
-                                }
                             }
                         }
                     }
                 }
 
-                // --- HIGH-LEVEL FUTURISTIC NAVIGATION BAR ---
+                // --- NAVIGATION BAR (Updated with Movies) ---
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -139,11 +127,7 @@ fun MainScreen(navController: NavController) {
                         .border(
                             width = 1.dp,
                             brush = Brush.horizontalGradient(
-                                listOf(
-                                    primaryColor.copy(0.1f),
-                                    primaryColor.copy(0.5f),
-                                    primaryColor.copy(0.1f)
-                                )
+                                listOf(primaryColor.copy(0.1f), primaryColor.copy(0.5f), primaryColor.copy(0.1f))
                             ),
                             shape = RoundedCornerShape(35.dp)
                         ),
@@ -154,26 +138,14 @@ fun MainScreen(navController: NavController) {
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        FuturisticNavItem(
-                            icon = Icons.Rounded.Tv,
-                            label = "LIVE TV",
-                            isSelected = selectedTab == 0,
-                            primaryColor = primaryColor
-                        ) { selectedTab = 0 }
-
-                        FuturisticNavItem(
-                            icon = Icons.Default.MusicNote,
-                            label = "MUSIC",
-                            isSelected = selectedTab == 1,
-                            primaryColor = primaryColor
-                        ) { selectedTab = 1 }
-
-                        FuturisticNavItem(
-                            icon = Icons.Default.Person,
-                            label = "PROFILE",
-                            isSelected = selectedTab == 2,
-                            primaryColor = primaryColor
-                        ) { selectedTab = 2 }
+                        FuturisticNavItem(Icons.Rounded.Tv, "LIVE TV", selectedTab == 0, primaryColor) { selectedTab = 0 }
+                        
+                        // NEW MOVIE TAB
+                        FuturisticNavItem(Icons.Rounded.Movie, "MOVIES", selectedTab == 1, primaryColor) { selectedTab = 1 }
+                        
+                        FuturisticNavItem(Icons.Default.MusicNote, "MUSIC", selectedTab == 2, primaryColor) { selectedTab = 2 }
+                        
+                        FuturisticNavItem(Icons.Default.Person, "PROFILE", selectedTab == 3, primaryColor) { selectedTab = 3 }
                     }
                 }
             }
@@ -182,7 +154,7 @@ fun MainScreen(navController: NavController) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = paddingValues.calculateBottomPadding()) // প্যাডিং হ্যান্ডেল করা হচ্ছে
+                .padding(bottom = paddingValues.calculateBottomPadding())
         ) {
             AnimatedContent(
                 targetState = selectedTab,
@@ -190,8 +162,9 @@ fun MainScreen(navController: NavController) {
             ) { targetIndex ->
                 when (targetIndex) {
                     0 -> LiveTVScreen(navController)
-                    1 -> MusicScreen(navController)
-                    2 -> AccountScreen(navController) // Profile Screen added here
+                    1 -> MovieScreen(navController) // New Screen
+                    2 -> MusicScreen(navController)
+                    3 -> AccountScreen(navController)
                 }
             }
         }
@@ -216,12 +189,11 @@ fun FuturisticNavItem(
             .clip(CircleShape)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
-                indication = null // Ripple বন্ধ করা হয়েছে ক্লিন লুকের জন্য
+                indication = null
             ) { onClick() }
             .padding(8.dp)
     ) {
         Box(contentAlignment = Alignment.Center) {
-            // Glow Effect behind Icon
             Box(
                 modifier = Modifier
                     .size(40.dp)
@@ -232,7 +204,6 @@ fun FuturisticNavItem(
                         shape = CircleShape
                     )
             )
-            
             Icon(
                 imageVector = icon,
                 contentDescription = label,
@@ -240,10 +211,7 @@ fun FuturisticNavItem(
                 modifier = Modifier.size(26.dp * scale)
             )
         }
-        
         Spacer(modifier = Modifier.height(4.dp))
-        
-        // Animated Dot instead of Text (More minimal/futuristic) or Small Text
         if (isSelected) {
             Box(
                 modifier = Modifier
