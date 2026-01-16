@@ -7,9 +7,9 @@ import kotlinx.coroutines.withContext
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
+import retrofit2.http.Path
 import retrofit2.http.Query
 
-// --- API Interface ---
 interface TmdbApi {
     @GET("3/trending/all/day")
     suspend fun getTrending(@Query("api_key") apiKey: String): TmdbResponse
@@ -25,18 +25,27 @@ interface TmdbApi {
 
     @GET("3/discover/movie")
     suspend fun getSciFiMovies(@Query("api_key") apiKey: String, @Query("with_genres") genre: String = "878"): TmdbResponse
+
+    @GET("3/search/multi")
+    suspend fun searchMulti(@Query("api_key") apiKey: String, @Query("query") query: String): TmdbResponse
+
+    // NEW: Full Details API
+    @GET("3/{type}/{id}")
+    suspend fun getDetails(
+        @Path("type") type: String, // "movie" or "tv"
+        @Path("id") id: Int,
+        @Query("api_key") apiKey: String,
+        @Query("append_to_response") append: String = "credits,videos,recommendations"
+    ): MovieDetailResponse
 }
 
 object MovieRepository {
-    // build.gradle থেকে জেনারেট হওয়া BuildConfig.TMDB_API_KEY ব্যবহার হচ্ছে
     private val API_KEY = BuildConfig.TMDB_API_KEY 
-    
     private const val IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
     private const val BACKDROP_BASE_URL = "https://image.tmdb.org/t/p/original"
-
-    // Streaming Sources
-    private const val STREAM_BASE_URL = "https://vidsrc.xyz/embed/movie/" 
-    private const val TV_STREAM_BASE_URL = "https://vidsrc.xyz/embed/tv/"
+    
+    // Direct Stream Sources (Embedding these usually requires a parser, currently pointing to generic endpoint)
+    private const val VIDSRC_BASE = "https://vidsrc.xyz/embed/"
 
     private val api = Retrofit.Builder()
         .baseUrl("https://api.themoviedb.org/")
@@ -44,43 +53,82 @@ object MovieRepository {
         .build()
         .create(TmdbApi::class.java)
 
+    // Helper to map DTO to Domain Model
+    private fun mapToMovie(dto: MovieDto): Movie {
+        return Movie(
+            id = dto.id,
+            title = dto.title ?: dto.name ?: "Unknown",
+            description = dto.overview ?: "No description available.",
+            posterUrl = if (dto.posterPath != null) IMAGE_BASE_URL + dto.posterPath else "",
+            backdropUrl = if (dto.backdropPath != null) BACKDROP_BASE_URL + dto.backdropPath else "",
+            rating = String.format("%.1f", dto.rating ?: 0.0),
+            year = (dto.releaseDate ?: dto.firstAirDate ?: "").take(4),
+            type = if (dto.name != null) MovieType.SERIES else MovieType.MOVIE
+        )
+    }
+
     private suspend fun safeApiCall(call: suspend () -> TmdbResponse): List<Movie> = withContext(Dispatchers.IO) {
-        if (API_KEY.isEmpty() || API_KEY == "null") {
-            Log.e("MovieRepo", "API KEY MISSING! Check build.gradle or Environment Variables.")
-            return@withContext emptyList()
-        }
+        if (API_KEY.isEmpty()) return@withContext emptyList()
         try {
-            call().results.map { dto ->
-                Movie(
-                    id = dto.id,
-                    title = dto.title ?: dto.name ?: "Unknown",
-                    description = dto.overview ?: "No description available.",
-                    posterUrl = if (dto.posterPath != null) IMAGE_BASE_URL + dto.posterPath else "",
-                    backdropUrl = if (dto.backdropPath != null) BACKDROP_BASE_URL + dto.backdropPath else "",
-                    rating = String.format("%.1f", dto.rating ?: 0.0),
-                    year = (dto.releaseDate ?: dto.firstAirDate ?: "").take(4),
-                    type = if (dto.name != null) MovieType.SERIES else MovieType.MOVIE
-                )
-            }
+            call().results.filter { it.posterPath != null }.map { mapToMovie(it) }
         } catch (e: Exception) {
             Log.e("MovieRepo", "API Error: ${e.localizedMessage}")
             emptyList()
         }
     }
 
-    suspend fun getTrending(): List<Movie> = safeApiCall { api.getTrending(API_KEY) }
-    suspend fun getPopularMovies(): List<Movie> = safeApiCall { api.getPopularMovies(API_KEY) }
-    suspend fun getTopSeries(): List<Movie> = safeApiCall { api.getTopRatedSeries(API_KEY) }
-    suspend fun getActionMovies(): List<Movie> = safeApiCall { api.getActionMovies(API_KEY) }
-    suspend fun getSciFiMovies(): List<Movie> = safeApiCall { api.getSciFiMovies(API_KEY) }
+    suspend fun getTrending() = safeApiCall { api.getTrending(API_KEY) }
+    suspend fun getPopularMovies() = safeApiCall { api.getPopularMovies(API_KEY) }
+    suspend fun getTopSeries() = safeApiCall { api.getTopRatedSeries(API_KEY) }
+    suspend fun getActionMovies() = safeApiCall { api.getActionMovies(API_KEY) }
+    suspend fun getSciFiMovies() = safeApiCall { api.getSciFiMovies(API_KEY) }
+    suspend fun searchMovies(query: String) = safeApiCall { api.searchMulti(API_KEY, query) }
+
+    // NEW: Fetch Full Details
+    suspend fun getFullDetails(movieId: Int, type: MovieType): FullMovieDetails? = withContext(Dispatchers.IO) {
+        try {
+            val typeStr = if (type == MovieType.MOVIE) "movie" else "tv"
+            val res = api.getDetails(typeStr, movieId, API_KEY)
+            
+            val basic = Movie(
+                id = res.id,
+                title = res.title ?: res.name ?: "",
+                description = res.overview ?: "",
+                posterUrl = IMAGE_BASE_URL + res.posterPath,
+                backdropUrl = BACKDROP_BASE_URL + res.backdropPath,
+                rating = String.format("%.1f", res.rating ?: 0.0),
+                year = (res.releaseDate ?: res.firstAirDate ?: "").take(4),
+                type = type
+            )
+
+            val castList = res.credits?.cast?.take(10)?.map { 
+                CastMember(it.name, it.character ?: "", IMAGE_BASE_URL + it.profilePath) 
+            } ?: emptyList()
+
+            val director = res.credits?.crew?.find { it.job == "Director" }?.name ?: "Unknown"
+            val trailer = res.videos?.results?.find { it.site == "YouTube" && it.type == "Trailer" }?.key
+            val recs = res.recommendations?.results?.take(10)?.map { mapToMovie(it) } ?: emptyList()
+
+            FullMovieDetails(
+                basic = basic,
+                runtime = if (res.runtime != null) "${res.runtime} min" else "N/A",
+                genres = res.genres?.map { it.name } ?: emptyList(),
+                cast = castList,
+                director = director,
+                trailerKey = trailer,
+                recommendations = recs
+            )
+        } catch (e: Exception) {
+            Log.e("MovieRepo", "Detail Error: ${e.localizedMessage}")
+            null
+        }
+    }
 
     fun getStreamUrl(movieId: Int, type: MovieType): String {
-        return if (type == MovieType.MOVIE) {
-            "$STREAM_BASE_URL$movieId"
-        } else {
-            // Note: Currently defaulting to Season 1 Episode 1. 
-            // Future update: Add logic to select season/episode.
-            "${TV_STREAM_BASE_URL}$movieId/1/1"
-        }
+        val t = if (type == MovieType.MOVIE) "movie" else "tv"
+        // This returns the embed link. For ExoPlayer, you ideally need a direct .m3u8 link.
+        // Since extracting that is complex, we will pass this to the WebView fallback 
+        // OR if you have a premium source, replace this with the direct link.
+        return "$VIDSRC_BASE$t/$movieId"
     }
 }

@@ -22,6 +22,7 @@ import com.aeoncorex.streamx.ui.copyright.CopyrightScreen
 // --- NEW IMPORTS ---
 import com.aeoncorex.streamx.ui.movie.MovieScreen
 import com.aeoncorex.streamx.ui.movie.MoviePlayerScreen
+import com.aeoncorex.streamx.ui.movie.MovieDetailsScreen // Make sure this file exists
 
 @Composable
 fun AppNavigation(themeViewModel: ThemeViewModel) {
@@ -41,16 +42,32 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             PlayerScreen(navController = navController, encodedUrl = encodedUrl)
         }
         
-        // --- MOVIE SECTION ROUTES (NEW) ---
+        // --- MOVIE SECTION ROUTES ---
         composable("movie") {
             MovieScreen(navController)
         }
+        
+        // NEW: MOVIE DETAIL ROUTE
+        composable(
+            route = "movie_detail/{movieId}/{type}",
+            arguments = listOf(
+                navArgument("movieId") { type = NavType.IntType },
+                navArgument("type") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val movieId = backStackEntry.arguments?.getInt("movieId") ?: 0
+            val type = backStackEntry.arguments?.getString("type") ?: "MOVIE"
+            MovieDetailsScreen(navController, movieId, type)
+        }
+
+        // MOVIE PLAYER
         composable(
             route = "movie_player/{url}",
             arguments = listOf(navArgument("url") { type = NavType.StringType })
         ) { backStackEntry ->
             val url = backStackEntry.arguments?.getString("url") ?: ""
-            MoviePlayerScreen(navController, url)
+            // Use UltimatePlayerScreen if you want the custom player, otherwise MoviePlayerScreen
+            MoviePlayerScreen(navController, url) 
         }
         
         // --- MUSIC SECTION ROUTES ---

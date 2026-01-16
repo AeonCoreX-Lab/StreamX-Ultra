@@ -1,14 +1,20 @@
 package com.aeoncorex.streamx.ui.movie
 
-import androidx.compose.animation.core.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -16,7 +22,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
@@ -29,9 +34,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
-import java.net.URLEncoder
 
-// Color Definition from LiveTVScreen
+// Color Definition
 val GlassWhite = Color(0x1AFFFFFF)
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -46,7 +50,7 @@ fun MovieScreen(
     val primaryColor = MaterialTheme.colorScheme.primary
     val secondaryColor = MaterialTheme.colorScheme.secondary
 
-    // Collecting Data from ViewModel
+    // Collecting Data
     val trendingList by viewModel.trending.collectAsState()
     val popularList by viewModel.popular.collectAsState()
     val seriesList by viewModel.series.collectAsState()
@@ -54,28 +58,31 @@ fun MovieScreen(
     val sciFiList by viewModel.sciFi.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
 
+    // Search Data
+    val isSearchActive by viewModel.isSearchActive.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val searchResults by viewModel.searchResults.collectAsState()
+
     val featuredMovie = trendingList.firstOrNull()
 
-    // Reuse App Drawer (Ensure AppDrawer composable is available in your project, likely in LiveTVScreen or a shared file)
-    // If AppDrawer is in LiveTVScreen.kt, you might need to move it to a shared file or copy it here.
-    // For now, assuming you handle the Drawer content similarly to LiveTV.
+    // Helper function for Navigation
+    fun openDetails(movie: Movie) {
+        val typeStr = if (movie.type == MovieType.MOVIE) "MOVIE" else "SERIES"
+        navController.navigate("movie_detail/${movie.id}/$typeStr")
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            // Note: If AppDrawer is not shared, you might need to copy the AppDrawer code from LiveTVScreen here
-            // or better, move AppDrawer to a common file like 'DrawerComponents.kt'.
-            // For this code to work immediately, I am assuming AppDrawer is accessible or you will implement it.
-            // If it shows red, copy the AppDrawer function from LiveTVScreen.kt to the bottom of this file.
              com.aeoncorex.streamx.ui.home.AppDrawer(navController) { scope.launch { drawerState.close() } }
         }
     ) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             
-            // 1. ULTRA BACKGROUND (Same as LiveTV)
+            // 1. BACKGROUND
             CyberMeshBackground()
 
-            // 2. Main Content
+            // 2. MAIN CONTENT
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = primaryColor)
@@ -84,68 +91,126 @@ fun MovieScreen(
                 LazyColumn(
                     state = scrollState,
                     modifier = Modifier.fillMaxSize(),
-                    // Top padding added so content doesn't hide behind the floating header
                     contentPadding = PaddingValues(top = 80.dp, bottom = 100.dp) 
                 ) {
-                    // --- HERO SECTION ---
                     featuredMovie?.let { movie ->
-                        item {
-                            HeroSection(movie = movie, navController = navController)
-                        }
+                        item { HeroSection(movie = movie, onPlayClick = { openDetails(movie) }) }
                     }
-
-                    // --- CATEGORY LISTS ---
-                    item { MovieSection("Trending Now", trendingList, navController) }
-                    item { MovieSection("Popular Movies", popularList, navController) }
-                    item { MovieSection("Top Rated Series", seriesList, navController, isPortrait = false) }
-                    item { MovieSection("Action Blockbusters", actionList, navController) }
-                    item { MovieSection("Sci-Fi & Cyberpunk", sciFiList, navController) }
+                    item { MovieSection("Trending Now", trendingList, ::openDetails) }
+                    item { MovieSection("Popular Movies", popularList, ::openDetails) }
+                    item { MovieSection("Top Rated Series", seriesList, ::openDetails, isPortrait = false) }
+                    item { MovieSection("Action Blockbusters", actionList, ::openDetails) }
+                    item { MovieSection("Sci-Fi & Cyberpunk", sciFiList, ::openDetails) }
                 }
             }
 
-            // 3. HEADER (Fixed at Top - Same style as LiveTV)
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(GlassWhite)
-                    .border(1.dp, Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f))), RoundedCornerShape(24.dp))
-                    .zIndex(1f)
-            ) {
-                CenterAlignedTopAppBar(
-                    title = {
-                        Text(
-                            "STREAMX", // Same App Name
-                            style = TextStyle(
-                                fontFamily = MaterialTheme.typography.displayMedium.fontFamily,
-                                fontWeight = FontWeight.Black,
-                                fontSize = 22.sp,
-                                letterSpacing = 2.sp,
-                                brush = Brush.horizontalGradient(listOf(primaryColor, secondaryColor))
+            // 3. HEADER (Floating with Search Trigger)
+            if (!isSearchActive) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(GlassWhite)
+                        .border(1.dp, Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f))), RoundedCornerShape(24.dp))
+                        .zIndex(1f)
+                ) {
+                    CenterAlignedTopAppBar(
+                        title = {
+                            Text(
+                                "STREAMX", 
+                                style = TextStyle(
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 22.sp,
+                                    letterSpacing = 2.sp,
+                                    brush = Brush.horizontalGradient(listOf(primaryColor, secondaryColor))
+                                )
                             )
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, "Menu", tint = Color.White)
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Default.Menu, "Menu", tint = Color.White)
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = { viewModel.onSearchActiveChange(true) }) {
+                                Icon(Icons.Default.Search, "Search", tint = Color.White)
+                            }
+                        },
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                    )
+                }
+            }
+
+            // 4. SEARCH OVERLAY (Functional)
+            AnimatedVisibility(
+                visible = isSearchActive,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.zIndex(2f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.95f))
+                ) {
+                    Column(Modifier.fillMaxSize()) {
+                        SearchBar(
+                            query = searchQuery,
+                            onQueryChange = viewModel::onSearchQueryChange,
+                            onSearch = { /* Close Keyboard handled by system */ },
+                            active = true,
+                            onActiveChange = viewModel::onSearchActiveChange,
+                            placeholder = { Text("Search Movies & Series...", color = Color.Gray) },
+                            leadingIcon = { Icon(Icons.Default.Search, null, tint = primaryColor) },
+                            trailingIcon = { 
+                                IconButton(onClick = { viewModel.onSearchActiveChange(false) }) { 
+                                    Icon(Icons.Default.Close, null, tint = Color.White) 
+                                } 
+                            },
+                            colors = SearchBarDefaults.colors(
+                                containerColor = Color(0xFF121212),
+                                dividerColor = primaryColor,
+                                inputFieldColors = TextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    cursorColor = primaryColor
+                                )
+                            ),
+                            modifier = Modifier.fillMaxWidth() // SearchBar takes full width in active mode
+                        ) {
+                            // Search Results
+                            if (searchResults.isEmpty() && searchQuery.isNotEmpty()) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("Searching...", color = Color.Gray)
+                                }
+                            } else {
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(3),
+                                    contentPadding = PaddingValues(16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    items(searchResults) { movie ->
+                                        MovieCard(movie = movie, isPortrait = true, onClick = { 
+                                            openDetails(movie)
+                                            viewModel.onSearchActiveChange(false) // Close search on click
+                                        })
+                                    }
+                                }
+                            }
                         }
-                    },
-                    actions = {
-                        IconButton(onClick = { /* Implement Search if needed */ }) {
-                            Icon(Icons.Default.Search, "Search", tint = Color.White)
-                        }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
-                )
+                    }
+                }
             }
         }
     }
 }
 
+// --- SUB COMPONENTS ---
+
 @Composable
-fun HeroSection(movie: Movie, navController: NavController) {
+fun HeroSection(movie: Movie, onPlayClick: () -> Unit) {
     Box(modifier = Modifier.fillMaxWidth().height(550.dp)) {
         AsyncImage(
             model = movie.backdropUrl,
@@ -153,15 +218,11 @@ fun HeroSection(movie: Movie, navController: NavController) {
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
         )
-        // Gradient Overlay
         Box(
             modifier = Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    colors = listOf(Color.Transparent, Color.Black.copy(0.2f), Color.Black)
-                )
+                Brush.verticalGradient(colors = listOf(Color.Transparent, Color.Black.copy(0.2f), Color.Black))
             )
         )
-        // Content
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -186,14 +247,8 @@ fun HeroSection(movie: Movie, navController: NavController) {
                 }
             }
             Spacer(Modifier.height(24.dp))
-            
-            // Play Button
             Button(
-                onClick = {
-                    val streamUrl = MovieRepository.getStreamUrl(movie.id, movie.type)
-                    val encodedUrl = URLEncoder.encode(streamUrl, "UTF-8")
-                    navController.navigate("movie_player/$encodedUrl")
-                },
+                onClick = onPlayClick,
                 colors = ButtonDefaults.buttonColors(containerColor = Color.White),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth().height(50.dp)
@@ -207,7 +262,7 @@ fun HeroSection(movie: Movie, navController: NavController) {
 }
 
 @Composable
-fun MovieSection(title: String, movies: List<Movie>, navController: NavController, isPortrait: Boolean = true) {
+fun MovieSection(title: String, movies: List<Movie>, onMovieClick: (Movie) -> Unit, isPortrait: Boolean = true) {
     if (movies.isEmpty()) return
     Column(modifier = Modifier.padding(bottom = 24.dp)) {
         Text(
@@ -222,11 +277,7 @@ fun MovieSection(title: String, movies: List<Movie>, navController: NavControlle
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(movies) { movie ->
-                MovieCard(movie, isPortrait) {
-                    val streamUrl = MovieRepository.getStreamUrl(movie.id, movie.type)
-                    val encodedUrl = URLEncoder.encode(streamUrl, "UTF-8")
-                    navController.navigate("movie_player/$encodedUrl")
-                }
+                MovieCard(movie, isPortrait) { onMovieClick(movie) }
             }
         }
     }
@@ -249,7 +300,6 @@ fun MovieCard(movie: Movie, isPortrait: Boolean, onClick: () -> Unit) {
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
-                // Rating badge
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
@@ -268,8 +318,7 @@ fun MovieCard(movie: Movie, isPortrait: Boolean, onClick: () -> Unit) {
     }
 }
 
-// --- SHARED UI COMPONENTS (Copied from LiveTVScreen to ensure consistency) ---
-
+// Background Component
 @Composable
 fun CyberMeshBackground() {
     val infiniteTransition = rememberInfiniteTransition(label = "bg")
