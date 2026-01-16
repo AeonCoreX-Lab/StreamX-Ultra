@@ -180,7 +180,16 @@ fun MovieDetailsScreen(
                     // 4. RECOMMENDATIONS
                     item {
                         if (movie.recommendations.isNotEmpty()) {
-                            MovieSection("More Like This", movie.recommendations, navController, isPortrait = true)
+                            // FIXED: Passed a lambda block for navigation instead of navController
+                            MovieSection(
+                                title = "More Like This",
+                                movies = movie.recommendations,
+                                onMovieClick = { recMovie ->
+                                    val typeStr = if (recMovie.type == MovieType.MOVIE) "MOVIE" else "SERIES"
+                                    navController.navigate("movie_detail/${recMovie.id}/$typeStr")
+                                },
+                                isPortrait = true
+                            )
                         }
                     }
                 }

@@ -1,6 +1,7 @@
 package com.aeoncorex.streamx.ui.movie
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.* // FIXED: Added for animation specs
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.*
@@ -22,6 +23,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset // FIXED: Added for Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
