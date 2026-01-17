@@ -14,8 +14,8 @@ android {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 24
         targetSdk = 34
-        versionCode = 5 
-        versionName = "1.3.0" 
+        versionCode = 4 
+        versionName = "1.2.1" 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
@@ -23,13 +23,10 @@ android {
 
         // --- SECURE API KEY INJECTION ---
         // CHANGED: Now strictly relies on System Environment Variables (GitHub Secrets)
-        // --- API KEYS ---
-        val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\""
-        // Read OMDb key from Env 
-        val omdbApiKey = System.getenv("OMDB_API_KEY") ?: "\"\""
+        // localProperties.getProperty(...) অংশটি বাদ দেওয়া হয়েছে
+        val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\"" 
 
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
-        buildConfigField("String", "OMDB_API_KEY", "\"$omdbApiKey\"") 
     }
 
     signingConfigs {

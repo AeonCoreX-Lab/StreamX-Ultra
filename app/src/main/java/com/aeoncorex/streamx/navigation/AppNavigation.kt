@@ -24,7 +24,8 @@ import com.aeoncorex.streamx.ui.copyright.CopyrightScreen
 import com.aeoncorex.streamx.ui.movie.MovieScreen
 import com.aeoncorex.streamx.ui.movie.MoviePlayerScreen
 import com.aeoncorex.streamx.ui.movie.MovieDetailsScreen
-import com.aeoncorex.streamx.ui.movie.MovieSettingsScreen // Ensure this file is created from previous steps
+import com.aeoncorex.streamx.ui.movie.MovieSettingsScreen
+import com.aeoncorex.streamx.ui.movie.MovieServerSelectionScreen // Ensure this is imported
 
 @Composable
 fun AppNavigation(themeViewModel: ThemeViewModel) {
@@ -49,7 +50,6 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             MovieScreen(navController)
         }
         
-        // NEW: MOVIE SETTINGS ROUTE
         composable("movie_settings") {
             MovieSettingsScreen(navController)
         }
@@ -67,7 +67,27 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             MovieDetailsScreen(navController, movieId, type)
         }
 
-        // MOVIE PLAYER
+        // NEW: SERVER SELECTION ROUTE (Netflix Style)
+        composable(
+            route = "server_selection/{movieId}/{title}/{type}/{season}/{episode}",
+            arguments = listOf(
+                navArgument("movieId") { type = NavType.IntType },
+                navArgument("title") { type = NavType.StringType },
+                navArgument("type") { type = NavType.StringType }, // "MOVIE" or "SERIES"
+                navArgument("season") { type = NavType.IntType },
+                navArgument("episode") { type = NavType.IntType }
+            )
+        ) { backStackEntry ->
+            val movieId = backStackEntry.arguments?.getInt("movieId") ?: 0
+            val title = backStackEntry.arguments?.getString("title") ?: ""
+            val type = backStackEntry.arguments?.getString("type") ?: "MOVIE"
+            val season = backStackEntry.arguments?.getInt("season") ?: 0
+            val episode = backStackEntry.arguments?.getInt("episode") ?: 0
+            
+            MovieServerSelectionScreen(navController, movieId, title, type, season, episode)
+        }
+
+        // MOVIE PLAYER (Internal)
         composable(
             route = "movie_player/{url}",
             arguments = listOf(navArgument("url") { type = NavType.StringType })

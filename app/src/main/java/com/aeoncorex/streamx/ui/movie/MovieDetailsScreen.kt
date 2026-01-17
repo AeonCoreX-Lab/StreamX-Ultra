@@ -1,8 +1,7 @@
 package com.aeoncorex.streamx.ui.movie
 
-import android.annotation.SuppressLint
-import android.webkit.WebChromeClient
-import android.webkit.WebView
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,10 +12,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,197 +22,360 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MovieDetailsScreen(
     navController: NavController,
     movieId: Int,
-    type: String
+    movieType: String // "MOVIE" or "SERIES"
 ) {
-    val movieDetails by produceState<FullMovieDetails?>(initialValue = null, key1 = movieId) {
-        value = MovieRepository.getFullDetails(movieId, type)
+    // 1. Determine Type
+    val type = if (movieType.equals("MOVIE", ignoreCase = true)) MovieType.MOVIE else MovieType.SERIES
+    
+    // 2. State Holders
+    var details by remember { mutableStateOf<FullMovieDetails?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    
+    // Series Specific State
+    var selectedSeason by remember { mutableIntStateOf(1) }
+    var episodes by remember { mutableStateOf<List<EpisodeDto>>(emptyList()) }
+    var isEpisodesLoading by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    
+    // 3. Fetch Full Details
+    LaunchedEffect(movieId) {
+        details = MovieRepository.getFullDetails(movieId, type)
+        isLoading = false
     }
 
-    var showServerDialog by remember { mutableStateOf(false) }
-    var showTrailerDialog by remember { mutableStateOf(false) }
+    // 4. Fetch Episodes when Season Changes (Only for Series)
+    LaunchedEffect(selectedSeason, details) {
+        if (type == MovieType.SERIES && details != null) {
+            isEpisodesLoading = true
+            // Fetch episodes using the new Repository function
+            episodes = MovieRepository.getEpisodes(movieId, selectedSeason)
+            isEpisodesLoading = false
+        }
+    }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0F0F15))) {
-        if (movieDetails == null) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Cyan)
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        if (isLoading) {
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Red)
         } else {
-            val movie = movieDetails!!
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                // 1. HERO SECTION
-                item {
-                    Box(modifier = Modifier.height(450.dp).fillMaxWidth()) {
-                        AsyncImage(
-                            model = movie.basic.posterUrl,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        Box(modifier = Modifier.fillMaxSize().background(
-                            Brush.verticalGradient(listOf(Color.Transparent, Color(0xFF0F0F15)))
-                        ))
-                        
-                        // Header Bar with Back & Settings
-                        Row(
-                            Modifier.fillMaxWidth().padding(top = 40.dp, start = 16.dp, end = 16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            IconButton(onClick = { navController.popBackStack() }) {
-                                Icon(Icons.Default.ArrowBack, null, tint = Color.White)
-                            }
-                            // UPDATED: Navigates to the new Movie Settings Screen
-                            IconButton(onClick = { navController.navigate("movie_settings") }) {
-                                Icon(Icons.Default.Settings, null, tint = Color.White)
-                            }
-                        }
-
-                        // Play Button
-                        IconButton(
-                            onClick = { showServerDialog = true },
-                            modifier = Modifier.align(Alignment.Center)
-                                .size(70.dp)
-                                .background(Color.Red.copy(0.9f), CircleShape)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(40.dp))
-                        }
-                    }
-                }
-
-                // 2. INFO SECTION (Merged TMDB + OMDb)
-                item {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(movie.basic.title, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(8.dp))
-                        
-                        // Ratings Row
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Star, null, tint = Color(0xFFFFD700), modifier = Modifier.size(18.dp))
-                            Text(" ${movie.basic.rating}", color = Color.White, fontSize = 12.sp)
-                            Spacer(Modifier.width(16.dp))
-                            Text("IMDb: ${movie.imdbRating}", color = Color(0xFFF5C518), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            Spacer(Modifier.width(16.dp))
-                            Box(modifier = Modifier.border(1.dp, Color.Cyan, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp)) {
-                                Text(movie.ageRating, color = Color.Cyan, fontSize = 10.sp)
-                            }
-                        }
-
-                        // Trailer Button
-                        if (movie.trailerKey != null) {
-                            Spacer(Modifier.height(16.dp))
-                            Button(
-                                onClick = { showTrailerDialog = true },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Watch Trailer", color = Color.White)
-                            }
-                        }
-
-                        Spacer(Modifier.height(16.dp))
-                        Text(movie.basic.description, color = Color.Gray, fontSize = 14.sp, lineHeight = 20.sp)
-                        
-                        if(movie.awards != "No Awards" && movie.awards != "N/A") {
-                            Spacer(Modifier.height(16.dp))
-                            Text("🏆 ${movie.awards}", color = Color.Cyan, fontSize = 12.sp)
-                        }
-                    }
-                }
-
-                // 3. CAST SECTION
-                item {
-                     Text("  Cast", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(16.dp))
-                     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp)) {
-                         items(movie.cast) { cast ->
-                             Column(
-                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                 modifier = Modifier.width(100.dp).padding(end = 8.dp)
-                             ) {
-                                 AsyncImage(
-                                     model = cast.imageUrl, contentDescription = null,
-                                     contentScale = ContentScale.Crop,
-                                     modifier = Modifier.size(80.dp).clip(CircleShape)
-                                 )
-                                 Text(cast.name, color = Color.LightGray, fontSize = 11.sp, maxLines = 1)
-                             }
-                         }
-                     }
-                }
-                
-                // 4. RECOMMENDATIONS
-                item {
-                    Spacer(Modifier.height(24.dp))
-                    Text("  You may also like", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(16.dp))
-                    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp)) {
-                        items(movie.recommendations) { rec ->
+            details?.let { movie ->
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    
+                    // --- HEADER SECTION (Backdrop + Buttons) ---
+                    item {
+                        Box(modifier = Modifier.fillMaxWidth().height(500.dp)) {
+                            // Backdrop Image
                             AsyncImage(
-                                model = rec.posterUrl, contentDescription = null,
-                                modifier = Modifier.width(120.dp).height(180.dp).clip(RoundedCornerShape(8.dp))
-                                    .clickable { navController.navigate("movie_detail/${rec.id}/${if(rec.type==MovieType.MOVIE) "MOVIE" else "SERIES"}") }
-                                    .padding(end = 8.dp),
-                                contentScale = ContentScale.Crop
+                                model = movie.basic.backdropUrl,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
                             )
-                        }
-                    }
-                    Spacer(Modifier.height(50.dp))
-                }
-            }
-
-            // --- SERVER SELECTION DIALOG ---
-            if (showServerDialog) {
-                AlertDialog(
-                    onDismissRequest = { showServerDialog = false },
-                    containerColor = Color(0xFF1E1E2C),
-                    title = { Text("Select Server", color = Color.White) },
-                    text = {
-                        Column {
-                            movie.servers.forEach { server ->
-                                Card(
-                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2B38)),
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
-                                        showServerDialog = false
-                                        val encodedUrl = URLEncoder.encode(server.url, StandardCharsets.UTF_8.toString())
-                                        navController.navigate("movie_player/$encodedUrl")
-                                    }
+                            
+                            // Gradient Overlay (Netflix Style)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(Color.Transparent, Color.Black.copy(0.6f), Color.Black)
+                                        )
+                                    )
+                            )
+                            
+                            // TOP BAR: Back Button & Settings Button
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 40.dp, start = 16.dp, end = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                // Back Button
+                                IconButton(
+                                    onClick = { navController.popBackStack() },
+                                    modifier = Modifier.background(Color.Black.copy(0.5f), CircleShape)
                                 ) {
-                                    Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text(server.name, color = Color.White)
-                                        Text(server.quality, color = Color.Cyan, fontSize = 10.sp)
+                                    Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+                                }
+                                
+                                // Settings Button
+                                IconButton(
+                                    onClick = { navController.navigate("movie_settings") },
+                                    modifier = Modifier.background(Color.Black.copy(0.5f), CircleShape)
+                                ) {
+                                    Icon(Icons.Outlined.Settings, "Settings", tint = Color.White)
+                                }
+                            }
+
+                            // Movie Info Overlay
+                            Column(
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(16.dp)
+                            ) {
+                                Text(
+                                    text = movie.basic.title.uppercase(),
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.White
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                
+                                // Metadata Row
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("${movie.basic.rating} Match", color = Color(0xFF46D369), fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(movie.basic.year, color = Color.White)
+                                    Spacer(Modifier.width(12.dp))
+                                    Box(Modifier.background(Color.DarkGray, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp)) {
+                                        Text(if(type == MovieType.MOVIE) "HD" else "TV-MA", color = Color.White, fontSize = 12.sp)
+                                    }
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(movie.runtime, color = Color.Gray)
+                                }
+                                Spacer(Modifier.height(16.dp))
+                                
+                                // BUTTONS ROW
+                                Row(modifier = Modifier.fillMaxWidth()) {
+                                    // PLAY BUTTON
+                                    Button(
+                                        onClick = {
+                                            if (type == MovieType.MOVIE) {
+                                                navController.navigate("server_selection/${movie.basic.id}/${movie.basic.title}/MOVIE/0/0")
+                                            } else {
+                                                // Default to S1E1 if playing from main button
+                                                navController.navigate("server_selection/${movie.basic.id}/${movie.basic.title}/SERIES/1/1")
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                        shape = RoundedCornerShape(4.dp),
+                                        modifier = Modifier.weight(1f).height(45.dp)
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, null, tint = Color.Black)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Play", color = Color.Black, fontWeight = FontWeight.Bold)
+                                    }
+                                    
+                                    Spacer(Modifier.width(12.dp))
+                                    
+                                    // TRAILER BUTTON
+                                    if (movie.trailerKey != null) {
+                                        Button(
+                                            onClick = {
+                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:${movie.trailerKey}"))
+                                                context.startActivity(intent)
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(0.2f)),
+                                            shape = RoundedCornerShape(4.dp),
+                                            modifier = Modifier.weight(1f).height(45.dp)
+                                        ) {
+                                            Text("Trailer", color = Color.White, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
                             }
                         }
-                    },
-                    confirmButton = { TextButton(onClick = { showServerDialog = false }) { Text("Cancel", color = Color.Red) } }
-                )
-            }
+                    }
 
-            // --- IN-APP TRAILER DIALOG ---
-            if (showTrailerDialog && movie.trailerKey != null) {
-                Dialog(onDismissRequest = { showTrailerDialog = false }) {
-                    Box(modifier = Modifier.fillMaxWidth().height(250.dp).background(Color.Black)) {
-                        AndroidView(factory = { ctx ->
-                            WebView(ctx).apply {
-                                settings.javaScriptEnabled = true
-                                webChromeClient = WebChromeClient()
-                                loadUrl("https://www.youtube.com/embed/${movie.trailerKey}?autoplay=1")
+                    // --- SYNOPSIS ---
+                    item {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(movie.basic.description, color = Color.White, lineHeight = 20.sp)
+                            Spacer(Modifier.height(12.dp))
+                            Text("Genres: ${movie.genres.joinToString(", ")}", color = Color.Gray, fontSize = 12.sp)
+                            Text("Director: ${movie.director}", color = Color.Gray, fontSize = 12.sp)
+                        }
+                    }
+
+                    // --- SERIES EPISODE SELECTOR ---
+                    if (type == MovieType.SERIES && movie.seasons.isNotEmpty()) {
+                        item {
+                            Column(Modifier.padding(horizontal = 16.dp)) {
+                                Divider(color = Color.Gray.copy(0.3f), thickness = 1.dp)
+                                Spacer(Modifier.height(16.dp))
+                                
+                                // Season Selector (Chips)
+                                Text("Episodes", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                LazyRow(Modifier.padding(vertical = 12.dp)) {
+                                    items(movie.seasons) { season ->
+                                        FilterChip(
+                                            selected = season.seasonNumber == selectedSeason,
+                                            onClick = { selectedSeason = season.seasonNumber },
+                                            label = { Text("Season ${season.seasonNumber}") },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = Color.Red,
+                                                selectedLabelColor = Color.White,
+                                                containerColor = Color.DarkGray,
+                                                labelColor = Color.LightGray
+                                            ),
+                                            border = FilterChipDefaults.filterChipBorder(borderColor = Color.Transparent),
+                                            modifier = Modifier.padding(end = 8.dp)
+                                        )
+                                    }
+                                }
+                                
+                                // Episode List
+                                if (isEpisodesLoading) {
+                                    Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(color = Color.Red)
+                                    }
+                                } else {
+                                    if (episodes.isNotEmpty()) {
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            episodes.forEach { episode ->
+                                                EpisodeRow(
+                                                    episodeNumber = episode.episodeNumber,
+                                                    title = episode.name ?: "Episode ${episode.episodeNumber}",
+                                                    duration = if (episode.runtime != null) "${episode.runtime}m" else "",
+                                                    overview = episode.overview ?: "No description available.",
+                                                    stillPath = episode.stillPath,
+                                                    onClick = {
+                                                        navController.navigate("server_selection/${movie.basic.id}/${movie.basic.title}/SERIES/$selectedSeason/${episode.episodeNumber}")
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        Text("No episodes found for this season.", color = Color.Gray, fontSize = 14.sp)
+                                    }
+                                }
+                                Spacer(Modifier.height(24.dp))
                             }
-                        }, modifier = Modifier.fillMaxSize())
+                        }
+                    }
+
+                    // --- CAST SECTION ---
+                    item {
+                        Text("Cast", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, bottom = 8.dp))
+                        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items(movie.cast) { actor ->
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(80.dp)) {
+                                    AsyncImage(
+                                        model = actor.imageUrl,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.size(70.dp).clip(CircleShape).border(1.dp, Color.Gray, CircleShape)
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(actor.name, color = Color.LightGray, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(actor.role, color = Color.DarkGray, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(24.dp))
+                    }
+
+                    // --- RECOMMENDATIONS ---
+                    item {
+                        if (movie.recommendations.isNotEmpty()) {
+                            MovieSection(
+                                title = "More Like This",
+                                movies = movie.recommendations,
+                                onMovieClick = { recMovie ->
+                                    val typeStr = if (recMovie.type == MovieType.MOVIE) "MOVIE" else "SERIES"
+                                    navController.navigate("movie_detail/${recMovie.id}/$typeStr")
+                                },
+                                isPortrait = true
+                            )
+                        }
+                        Spacer(Modifier.height(50.dp))
                     }
                 }
             }
+        }
+    }
+}
+
+// --- UPDATED HELPER COMPONENT FOR EPISODES ---
+@Composable
+fun EpisodeRow(
+    episodeNumber: Int,
+    title: String,
+    duration: String,
+    overview: String,
+    stillPath: String?,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Thumbnail / Play Preview
+        Box(
+            modifier = Modifier
+                .width(130.dp)
+                .height(74.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.DarkGray), // Background while loading
+            contentAlignment = Alignment.Center
+        ) {
+            // Using Repo's logic (manually) to construct image URL
+            val imageUrl = if (!stillPath.isNullOrEmpty()) "https://image.tmdb.org/t/p/w500$stillPath" else null
+            
+            if (imageUrl != null) {
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                // Play Icon Overlay
+                Box(
+                    modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.3f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.PlayArrow, null, tint = Color.White)
+                }
+            } else {
+                // Placeholder if no image
+                Icon(Icons.Default.PlayArrow, null, tint = Color.White)
+            }
+        }
+        
+        Spacer(Modifier.width(12.dp))
+        
+        // Info
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "$episodeNumber. $title", 
+                    color = Color.White, 
+                    fontWeight = FontWeight.Bold, 
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (duration.isNotEmpty()) {
+                    Spacer(Modifier.width(4.dp))
+                    Text(duration, color = Color.Gray, fontSize = 11.sp)
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = overview, 
+                color = Color.LightGray.copy(0.7f), 
+                fontSize = 12.sp, 
+                maxLines = 3, 
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = 16.sp
+            )
         }
     }
 }

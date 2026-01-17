@@ -2,7 +2,24 @@ package com.aeoncorex.streamx.ui.movie
 
 import com.google.gson.annotations.SerializedName
 
-// --- EXISTING BASIC MODELS ---
+// --- SERVERS ---
+data class StreamServer(
+    val id: String,
+    val name: String,
+    val quality: String,
+    val urlTemplate: String,
+    val isMultiLang: Boolean = false
+)
+
+val availableServers = listOf(
+    StreamServer("1", "VidSrc Pro (Multi-Audio)", "4K/1080p", "https://vidsrc.xyz/embed/", true),
+    StreamServer("2", "SuperEmbed (Fast)", "HD", "https://multiembed.mov/directstream.php?video_id=", false),
+    StreamServer("3", "VidSrc Me (Backup)", "1080p", "https://vidsrc.me/embed/", true),
+    StreamServer("4", "Embed.su (Asian/Anime)", "HD", "https://embed.su/embed/", false),
+    StreamServer("5", "2Embed (Clean)", "720p", "https://www.2embed.cc/embed/", false)
+)
+
+// --- TMDB MODELS ---
 data class TmdbResponse(val results: List<MovieDto>)
 
 data class MovieDto(
@@ -30,37 +47,7 @@ data class Movie(
 
 enum class MovieType { MOVIE, SERIES }
 
-// --- UPDATED DETAILS MODELS (TMDB + OMDB + SERVERS) ---
-
-data class FullMovieDetails(
-    val basic: Movie,
-    val runtime: String,
-    val genres: List<String>,
-    val cast: List<CastMember>,
-    val director: String,
-    val trailerKey: String?,
-    val recommendations: List<Movie>,
-    // OMDb Specifics
-    val imdbRating: String,
-    val metascore: String,
-    val awards: String,
-    val ageRating: String, // Rated (PG-13, R etc.)
-    val boxOffice: String,
-    // Streaming Sources
-    val servers: List<StreamServer>
-)
-
-data class StreamServer(
-    val name: String,
-    val url: String, // The embed URL
-    val quality: String = "HD",
-    val type: String = "EMBED" // "EMBED" or "DIRECT"
-)
-
-data class CastMember(val name: String, val role: String, val imageUrl: String)
-
-// --- API RESPONSE MODELS ---
-
+// --- DETAILS & SERIES MODELS ---
 data class MovieDetailResponse(
     val id: Int,
     val title: String?,
@@ -76,23 +63,46 @@ data class MovieDetailResponse(
     val credits: Credits?,
     val videos: Videos?,
     val recommendations: TmdbResponse?,
-    @SerializedName("external_ids") val externalIds: ExternalIds?
+    val seasons: List<SeasonDto>?
 )
 
-data class ExternalIds(@SerializedName("imdb_id") val imdbId: String?)
+// NEW: Season Detail Response for fetching episodes
+data class SeasonDetailResponse(
+    val id: Int,
+    val episodes: List<EpisodeDto>?
+)
 
-// OMDb API Structure
-data class OmdbResponse(
-    @SerializedName("imdbRating") val imdbRating: String?,
-    @SerializedName("Metascore") val metaScore: String?,
-    @SerializedName("Awards") val awards: String?,
-    @SerializedName("BoxOffice") val boxOffice: String?,
-    @SerializedName("Rated") val rated: String?
+data class EpisodeDto(
+    val id: Int,
+    val name: String?,
+    val overview: String?,
+    @SerializedName("episode_number") val episodeNumber: Int,
+    @SerializedName("still_path") val stillPath: String?,
+    val runtime: Int?
 )
 
 data class Genre(val id: Int, val name: String)
 data class Credits(val cast: List<CastDto>, val crew: List<CrewDto>)
 data class Videos(val results: List<VideoDto>)
+data class SeasonDto(
+    @SerializedName("season_number") val seasonNumber: Int,
+    @SerializedName("episode_count") val episodeCount: Int,
+    val name: String
+)
+
 data class CastDto(val id: Int, val name: String, val character: String?, @SerializedName("profile_path") val profilePath: String?)
 data class CrewDto(val id: Int, val name: String, val job: String?)
 data class VideoDto(val key: String, val site: String, val type: String)
+
+data class FullMovieDetails(
+    val basic: Movie,
+    val runtime: String,
+    val genres: List<String>,
+    val cast: List<CastMember>,
+    val director: String,
+    val trailerKey: String?,
+    val recommendations: List<Movie>,
+    val seasons: List<SeasonDto> = emptyList()
+)
+
+data class CastMember(val name: String, val role: String, val imageUrl: String)
