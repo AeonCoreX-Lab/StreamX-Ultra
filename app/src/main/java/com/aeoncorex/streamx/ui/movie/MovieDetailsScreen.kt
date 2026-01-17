@@ -216,12 +216,19 @@ fun MovieDetailsScreen(
                                             onClick = { selectedSeason = season.seasonNumber },
                                             label = { Text("Season ${season.seasonNumber}") },
                                             colors = FilterChipDefaults.filterChipColors(
+                                                containerColor = Color.DarkGray,
+                                                labelColor = Color.LightGray,
                                                 selectedContainerColor = Color.Red,
                                                 selectedLabelColor = Color.White,
-                                                containerColor = Color.DarkGray,
-                                                labelColor = Color.LightGray
+                                                disabledContainerColor = Color.DarkGray,
+                                                disabledLabelColor = Color.Gray
                                             ),
-                                            border = FilterChipDefaults.filterChipBorder(borderColor = Color.Transparent),
+                                            border = FilterChipDefaults.filterChipBorder(
+                                                borderColor = Color.Transparent,
+                                                selectedBorderColor = Color.Transparent,
+                                                disabledBorderColor = Color.Transparent,
+                                                disabledSelectedBorderColor = Color.Transparent
+                                            ),
                                             modifier = Modifier.padding(end = 8.dp)
                                         )
                                     }
