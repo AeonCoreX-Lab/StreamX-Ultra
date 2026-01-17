@@ -211,8 +211,9 @@ fun MovieDetailsScreen(
                                 Text("Episodes", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                                 LazyRow(Modifier.padding(vertical = 12.dp)) {
                                     items(movie.seasons) { season ->
+                                        val isSelected = season.seasonNumber == selectedSeason
                                         FilterChip(
-                                            selected = season.seasonNumber == selectedSeason,
+                                            selected = isSelected,
                                             onClick = { selectedSeason = season.seasonNumber },
                                             label = { Text("Season ${season.seasonNumber}") },
                                             colors = FilterChipDefaults.filterChipColors(
@@ -223,7 +224,10 @@ fun MovieDetailsScreen(
                                                 disabledContainerColor = Color.DarkGray,
                                                 disabledLabelColor = Color.Gray
                                             ),
+                                            // FIX: Explicitly passing enabled and selected to satisfy strict compiler checks
                                             border = FilterChipDefaults.filterChipBorder(
+                                                enabled = true,
+                                                selected = isSelected,
                                                 borderColor = Color.Transparent,
                                                 selectedBorderColor = Color.Transparent,
                                                 disabledBorderColor = Color.Transparent,
