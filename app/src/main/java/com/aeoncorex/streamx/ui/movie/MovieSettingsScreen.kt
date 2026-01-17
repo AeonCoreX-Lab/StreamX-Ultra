@@ -1,6 +1,7 @@
 package com.aeoncorex.streamx.ui.movie
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable // FIX: Added missing import
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -124,7 +125,7 @@ fun ValueSettingItem(title: String, value: String, onClick: () -> Unit) {
             .fillMaxWidth()
             .padding(vertical = 8.dp)
             .background(Color(0xFF15151A), RoundedCornerShape(12.dp))
-            .clickable { onClick() }
+            .clickable { onClick() } // This caused the error previously due to missing import
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween

@@ -27,6 +27,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip // FIX: Added missing import
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -305,7 +306,8 @@ fun UltimateExoPlayer(navController: NavController, videoUrl: String) {
                 onSelect = { index ->
                     val params = exoPlayer.trackSelectionParameters.buildUpon()
                     if (index == 0) {
-                        params.clearPreferredAudioLanguages()
+                        // FIX: Replaced clearPreferredAudioLanguages with setPreferredAudioLanguage(null)
+                        params.setPreferredAudioLanguage(null)
                     } else {
                         val langCode = when(index) {
                             1 -> "en"; 2 -> "es"; 3 -> "fr"; 4 -> "ja"; else -> "en"
