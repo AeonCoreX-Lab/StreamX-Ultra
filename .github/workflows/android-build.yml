@@ -23,27 +23,25 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      # ধাপ ৩: google-services.json তৈরি করা
+      # --- নতুন ধাপ: google-services.json তৈরি করা ---
       - name: Create google-services.json
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           echo $GOOGLE_SERVICES_JSON | base64 -d > app/google-services.json
 
-      # ধাপ ৪: Gradle Wrapper-কে এক্সিকিউট করার অনুমতি দেওয়া
+      # ধাপ ৩: Gradle Wrapper-কে এক্সিকিউট করার অনুমতি দেওয়া
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # ধাপ ৫: Gradle ব্যবহার করে ডিবাগ APK বিল্ড করা
+      # ধাপ ৪: Gradle ব্যবহার করে ডিবাগ APK বিল্ড করা
       - name: Build Debug APK
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
-          EMAIL_WORKER_URL: ${{ secrets.EMAIL_WORKER_URL }}
-          EMAIL_AUTH_KEY: ${{ secrets.EMAIL_AUTH_KEY }}
-          # --- NEW: Inject Worker URL (Fixed Comment) ---
+          OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
         run: ./gradlew assembleDebug
 
-      # ধাপ ৬: কী (SHA-1, SHA-256) প্রিন্ট করা
+      # ধাপ ৫: কী (SHA-1, SHA-256) প্রিন্ট করা
       - name: Generate and Print Signing Keys
         run: |
           echo "===================================================================="
@@ -52,7 +50,7 @@ jobs:
           ./gradlew signingReport
           echo "===================================================================="
 
-      # ধাপ ৭: APK ফাইল আপলোড করা
+      # ধাপ ৬: APK ফাইল আপলোড করা
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:

@@ -1,7 +1,8 @@
 package com.aeoncorex.streamx.ui.movie
 
-import android.content.Intent
-import android.net.Uri
+import android.annotation.SuppressLint
+import android.webkit.WebChromeClient
+import android.webkit.WebView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,8 +15,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,173 +25,194 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 @Composable
 fun MovieDetailsScreen(
     navController: NavController,
     movieId: Int,
-    movieType: String // "MOVIE" or "SERIES"
+    type: String
 ) {
-    val type = if (movieType == "MOVIE") MovieType.MOVIE else MovieType.SERIES
-    var details by remember { mutableStateOf<FullMovieDetails?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
-    val context = LocalContext.current
-
-    LaunchedEffect(movieId) {
-        details = MovieRepository.getFullDetails(movieId, type)
-        isLoading = false
+    val movieDetails by produceState<FullMovieDetails?>(initialValue = null, key1 = movieId) {
+        value = MovieRepository.getFullDetails(movieId, type)
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        if (isLoading) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Red)
+    var showServerDialog by remember { mutableStateOf(false) }
+    var showTrailerDialog by remember { mutableStateOf(false) }
+
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0F0F15))) {
+        if (movieDetails == null) {
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Cyan)
         } else {
-            details?.let { movie ->
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    // 1. HEADER (Backdrop + Buttons)
-                    item {
-                        Box(modifier = Modifier.fillMaxWidth().height(450.dp)) {
+            val movie = movieDetails!!
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                // 1. HERO SECTION
+                item {
+                    Box(modifier = Modifier.height(450.dp).fillMaxWidth()) {
+                        AsyncImage(
+                            model = movie.basic.posterUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        Box(modifier = Modifier.fillMaxSize().background(
+                            Brush.verticalGradient(listOf(Color.Transparent, Color(0xFF0F0F15)))
+                        ))
+                        
+                        // Header Bar with Back & Settings
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 40.dp, start = 16.dp, end = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            IconButton(onClick = { navController.popBackStack() }) {
+                                Icon(Icons.Default.ArrowBack, null, tint = Color.White)
+                            }
+                            // UPDATED: Navigates to the new Movie Settings Screen
+                            IconButton(onClick = { navController.navigate("movie_settings") }) {
+                                Icon(Icons.Default.Settings, null, tint = Color.White)
+                            }
+                        }
+
+                        // Play Button
+                        IconButton(
+                            onClick = { showServerDialog = true },
+                            modifier = Modifier.align(Alignment.Center)
+                                .size(70.dp)
+                                .background(Color.Red.copy(0.9f), CircleShape)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(40.dp))
+                        }
+                    }
+                }
+
+                // 2. INFO SECTION (Merged TMDB + OMDb)
+                item {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(movie.basic.title, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        
+                        // Ratings Row
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Star, null, tint = Color(0xFFFFD700), modifier = Modifier.size(18.dp))
+                            Text(" ${movie.basic.rating}", color = Color.White, fontSize = 12.sp)
+                            Spacer(Modifier.width(16.dp))
+                            Text("IMDb: ${movie.imdbRating}", color = Color(0xFFF5C518), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Spacer(Modifier.width(16.dp))
+                            Box(modifier = Modifier.border(1.dp, Color.Cyan, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp)) {
+                                Text(movie.ageRating, color = Color.Cyan, fontSize = 10.sp)
+                            }
+                        }
+
+                        // Trailer Button
+                        if (movie.trailerKey != null) {
+                            Spacer(Modifier.height(16.dp))
+                            Button(
+                                onClick = { showTrailerDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Watch Trailer", color = Color.White)
+                            }
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+                        Text(movie.basic.description, color = Color.Gray, fontSize = 14.sp, lineHeight = 20.sp)
+                        
+                        if(movie.awards != "No Awards" && movie.awards != "N/A") {
+                            Spacer(Modifier.height(16.dp))
+                            Text("🏆 ${movie.awards}", color = Color.Cyan, fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                // 3. CAST SECTION
+                item {
+                     Text("  Cast", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(16.dp))
+                     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp)) {
+                         items(movie.cast) { cast ->
+                             Column(
+                                 horizontalAlignment = Alignment.CenterHorizontally,
+                                 modifier = Modifier.width(100.dp).padding(end = 8.dp)
+                             ) {
+                                 AsyncImage(
+                                     model = cast.imageUrl, contentDescription = null,
+                                     contentScale = ContentScale.Crop,
+                                     modifier = Modifier.size(80.dp).clip(CircleShape)
+                                 )
+                                 Text(cast.name, color = Color.LightGray, fontSize = 11.sp, maxLines = 1)
+                             }
+                         }
+                     }
+                }
+                
+                // 4. RECOMMENDATIONS
+                item {
+                    Spacer(Modifier.height(24.dp))
+                    Text("  You may also like", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(16.dp))
+                    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp)) {
+                        items(movie.recommendations) { rec ->
                             AsyncImage(
-                                model = movie.basic.backdropUrl,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
+                                model = rec.posterUrl, contentDescription = null,
+                                modifier = Modifier.width(120.dp).height(180.dp).clip(RoundedCornerShape(8.dp))
+                                    .clickable { navController.navigate("movie_detail/${rec.id}/${if(rec.type==MovieType.MOVIE) "MOVIE" else "SERIES"}") }
+                                    .padding(end = 8.dp),
+                                contentScale = ContentScale.Crop
                             )
-                            // Gradient Overlay
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        Brush.verticalGradient(
-                                            colors = listOf(Color.Transparent, Color.Black.copy(0.6f), Color.Black)
-                                        )
-                                    )
-                            )
-                            
-                            // Top Bar
-                            IconButton(
-                                onClick = { navController.popBackStack() },
-                                modifier = Modifier.padding(top = 40.dp, start = 16.dp)
-                            ) {
-                                Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
-                            }
+                        }
+                    }
+                    Spacer(Modifier.height(50.dp))
+                }
+            }
 
-                            // Info Overlay
-                            Column(
-                                modifier = Modifier
-                                    .align(Alignment.BottomStart)
-                                    .padding(16.dp)
-                            ) {
-                                Text(
-                                    text = movie.basic.title.uppercase(),
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = FontWeight.Black,
-                                    color = Color.White
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("${movie.basic.rating} Match", color = Color(0xFF46D369), fontWeight = FontWeight.Bold)
-                                    Spacer(Modifier.width(12.dp))
-                                    Text(movie.basic.year, color = Color.White)
-                                    Spacer(Modifier.width(12.dp))
-                                    Box(Modifier.background(Color.DarkGray, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp)) {
-                                        Text(if(type == MovieType.MOVIE) "HD" else "TV-MA", color = Color.White, fontSize = 12.sp)
+            // --- SERVER SELECTION DIALOG ---
+            if (showServerDialog) {
+                AlertDialog(
+                    onDismissRequest = { showServerDialog = false },
+                    containerColor = Color(0xFF1E1E2C),
+                    title = { Text("Select Server", color = Color.White) },
+                    text = {
+                        Column {
+                            movie.servers.forEach { server ->
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2B38)),
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                                        showServerDialog = false
+                                        val encodedUrl = URLEncoder.encode(server.url, StandardCharsets.UTF_8.toString())
+                                        navController.navigate("movie_player/$encodedUrl")
                                     }
-                                    Spacer(Modifier.width(12.dp))
-                                    Text(movie.runtime, color = Color.Gray)
-                                }
-                                Spacer(Modifier.height(16.dp))
-                                
-                                // Action Buttons
-                                Row(modifier = Modifier.fillMaxWidth()) {
-                                    Button(
-                                        onClick = {
-                                            // Play Logic: Use Ultimate Player
-                                            val streamUrl = MovieRepository.getStreamUrl(movie.basic.id, movie.basic.type)
-                                            val encodedUrl = URLEncoder.encode(streamUrl, "UTF-8")
-                                            navController.navigate("movie_player/$encodedUrl")
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
-                                        shape = RoundedCornerShape(4.dp),
-                                        modifier = Modifier.weight(1f).height(45.dp)
-                                    ) {
-                                        Icon(Icons.Default.PlayArrow, null, tint = Color.Black)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Play", color = Color.Black, fontWeight = FontWeight.Bold)
-                                    }
-                                    Spacer(Modifier.width(12.dp))
-                                    // Trailer Button
-                                    if (movie.trailerKey != null) {
-                                        Button(
-                                            onClick = {
-                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:${movie.trailerKey}"))
-                                                context.startActivity(intent)
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(0.2f)),
-                                            shape = RoundedCornerShape(4.dp),
-                                            modifier = Modifier.weight(1f).height(45.dp)
-                                        ) {
-                                            Text("Trailer", color = Color.White, fontWeight = FontWeight.Bold)
-                                        }
+                                ) {
+                                    Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text(server.name, color = Color.White)
+                                        Text(server.quality, color = Color.Cyan, fontSize = 10.sp)
                                     }
                                 }
                             }
                         }
-                    }
+                    },
+                    confirmButton = { TextButton(onClick = { showServerDialog = false }) { Text("Cancel", color = Color.Red) } }
+                )
+            }
 
-                    // 2. SYNOPSIS
-                    item {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(movie.basic.description, color = Color.White, lineHeight = 20.sp)
-                            Spacer(Modifier.height(12.dp))
-                            Text("Genres: ${movie.genres.joinToString(", ")}", color = Color.Gray, fontSize = 12.sp)
-                            Text("Director: ${movie.director}", color = Color.Gray, fontSize = 12.sp)
-                        }
-                    }
-
-                    // 3. CAST
-                    item {
-                        Text("Cast", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, bottom = 8.dp))
-                        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            items(movie.cast) { actor ->
-                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(80.dp)) {
-                                    AsyncImage(
-                                        model = actor.imageUrl,
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.size(70.dp).clip(CircleShape).border(1.dp, Color.Gray, CircleShape)
-                                    )
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(actor.name, color = Color.LightGray, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(actor.role, color = Color.DarkGray, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
+            // --- IN-APP TRAILER DIALOG ---
+            if (showTrailerDialog && movie.trailerKey != null) {
+                Dialog(onDismissRequest = { showTrailerDialog = false }) {
+                    Box(modifier = Modifier.fillMaxWidth().height(250.dp).background(Color.Black)) {
+                        AndroidView(factory = { ctx ->
+                            WebView(ctx).apply {
+                                settings.javaScriptEnabled = true
+                                webChromeClient = WebChromeClient()
+                                loadUrl("https://www.youtube.com/embed/${movie.trailerKey}?autoplay=1")
                             }
-                        }
-                        Spacer(Modifier.height(24.dp))
-                    }
-
-                    // 4. RECOMMENDATIONS
-                    item {
-                        if (movie.recommendations.isNotEmpty()) {
-                            // FIXED: Passed a lambda block for navigation instead of navController
-                            MovieSection(
-                                title = "More Like This",
-                                movies = movie.recommendations,
-                                onMovieClick = { recMovie ->
-                                    val typeStr = if (recMovie.type == MovieType.MOVIE) "MOVIE" else "SERIES"
-                                    navController.navigate("movie_detail/${recMovie.id}/$typeStr")
-                                },
-                                isPortrait = true
-                            )
-                        }
+                        }, modifier = Modifier.fillMaxSize())
                     }
                 }
             }

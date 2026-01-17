@@ -4,6 +4,8 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+// REMOVED: java.util.Properties loading logic (local.properties removed)
+
 android {
     namespace = "com.aeoncorex.streamx"
     compileSdk = 34
@@ -12,31 +14,27 @@ android {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.2.1"
+        versionCode = 5 
+        versionName = "1.3.0" 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
         vectorDrawables {
             useSupportLibrary = true
         }
 
-        // --- SECURE API KEY INJECTION (GitHub Secrets) ---
-        
-        // 1. TMDB API Key
+        // --- SECURE API KEY INJECTION ---
+        // CHANGED: Now strictly relies on System Environment Variables (GitHub Secrets)
+        // --- API KEYS ---
         val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\""
+        // Read OMDb key from Env 
+        val omdbApiKey = System.getenv("OMDB_API_KEY") ?: "\"\""
+
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
-
-        // 2. Email Worker URL
-        val emailWorkerUrl = System.getenv("EMAIL_WORKER_URL") ?: "\"\""
-        buildConfigField("String", "EMAIL_WORKER_URL", "\"$emailWorkerUrl\"")
-
-        // 3. Email Auth Key (Security Token)
-        val emailAuthKey = System.getenv("EMAIL_AUTH_KEY") ?: "\"\""
-        buildConfigField("String", "EMAIL_AUTH_KEY", "\"$emailAuthKey\"")
+        buildConfigField("String", "OMDB_API_KEY", "\"$omdbApiKey\"") 
     }
 
     signingConfigs {
         create("release") {
+            // Signing keys will be fetched from Environment Variables (CI/CD) or gradle.properties
             val storeFileValue = System.getenv("RELEASE_KEYSTORE_FILE") ?: project.findProperty("RELEASE_KEYSTORE_FILE") as? String
             val storePasswordValue = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: project.findProperty("RELEASE_KEYSTORE_PASSWORD") as? String
             val keyAliasValue = System.getenv("RELEASE_KEY_ALIAS") ?: project.findProperty("RELEASE_KEY_ALIAS") as? String
@@ -74,7 +72,7 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = true
+        buildConfig = true 
     }
 
     composeOptions {
