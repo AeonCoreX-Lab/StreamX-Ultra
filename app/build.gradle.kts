@@ -85,7 +85,7 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.activity:activity-compose:1.8.2")
     implementation(platform("androidx.compose:compose-bom:2024.02.02"))
     implementation("androidx.compose.ui:ui")
@@ -94,9 +94,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
 
     // Retrofit & Gson & XML
-    implementation("com.squareup.retrofit2:retrofit:2.9.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("com.squareup.retrofit2:converter-scalars:2.9.0") // ADDED FOR NYAA RSS (XML)
+    implementation("com.squareup.retrofit2:retrofit:3.0.0")
+    implementation("com.squareup.retrofit2:converter-gson:3.0.0")
+    implementation("com.squareup.retrofit2:converter-scalars:3.0.0") // ADDED FOR NYAA RSS (XML)
 
     // Jsoup for parsing HTML/XML
     implementation("org.jsoup:jsoup:1.17.2") // ADDED FOR NYAA PARSING
@@ -127,11 +127,11 @@ dependencies {
     implementation("com.frostwire:jlibtorrent-android-x86_64:$jlibtorrentVersion")
 
     // Coil (Image Loading)
-    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     // DataStore & Lifecycle
     implementation("androidx.datastore:datastore-preferences:1.0.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
 
     // Shimmer & Icons
     implementation("com.valentinilk.shimmer:compose-shimmer:1.2.0")
