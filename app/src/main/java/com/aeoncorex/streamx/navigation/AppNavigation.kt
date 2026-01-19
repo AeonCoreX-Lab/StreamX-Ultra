@@ -17,15 +17,15 @@ import com.aeoncorex.streamx.ui.privacy.PrivacyPolicyScreen
 import com.aeoncorex.streamx.ui.about.AboutScreen
 import com.aeoncorex.streamx.ui.music.MusicScreen
 import com.aeoncorex.streamx.ui.music.MusicPlayerScreen
-import com.aeoncorex.streamx.ui.player.PlayerScreen 
+import com.aeoncorex.streamx.ui.player.PlayerScreen // Live TV Player
 import com.aeoncorex.streamx.ui.copyright.CopyrightScreen 
 
 // --- MOVIE IMPORTS ---
 import com.aeoncorex.streamx.ui.movie.MovieScreen
-import com.aeoncorex.streamx.ui.movie.MoviePlayerScreen
+import com.aeoncorex.streamx.ui.movie.MoviePlayerScreen // Movie/Torrent Player
 import com.aeoncorex.streamx.ui.movie.MovieDetailsScreen
 import com.aeoncorex.streamx.ui.movie.MovieSettingsScreen
-import com.aeoncorex.streamx.ui.movie.MovieServerSelectionScreen // Ensure this is imported
+// REMOVED: MovieServerSelectionScreen import
 
 @Composable
 fun AppNavigation(themeViewModel: ThemeViewModel) {
@@ -36,7 +36,8 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         composable("auth") { AuthScreen(navController) }
         composable("home") { MainScreen(navController) }
         
-        // Live TV Player Route
+        // --- LIVE TV PLAYER ROUTE (Existing) ---
+        // এটি আগের মতোই PlayerScreen ব্যবহার করবে
         composable(
             route = "player/{encodedUrl}",
             arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
@@ -67,33 +68,16 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             MovieDetailsScreen(navController, movieId, type)
         }
 
-        // NEW: SERVER SELECTION ROUTE (Netflix Style)
-        composable(
-            route = "server_selection/{movieId}/{title}/{type}/{season}/{episode}",
-            arguments = listOf(
-                navArgument("movieId") { type = NavType.IntType },
-                navArgument("title") { type = NavType.StringType },
-                navArgument("type") { type = NavType.StringType }, // "MOVIE" or "SERIES"
-                navArgument("season") { type = NavType.IntType },
-                navArgument("episode") { type = NavType.IntType }
-            )
-        ) { backStackEntry ->
-            val movieId = backStackEntry.arguments?.getInt("movieId") ?: 0
-            val title = backStackEntry.arguments?.getString("title") ?: ""
-            val type = backStackEntry.arguments?.getString("type") ?: "MOVIE"
-            val season = backStackEntry.arguments?.getInt("season") ?: 0
-            val episode = backStackEntry.arguments?.getInt("episode") ?: 0
-            
-            MovieServerSelectionScreen(navController, movieId, title, type, season, episode)
-        }
+        // REMOVED: SERVER SELECTION ROUTE
 
-        // MOVIE PLAYER (Internal)
+        // --- MOVIE PLAYER ROUTE (For Torrents/Movies) ---
+        // এটি MoviePlayerScreen ব্যবহার করবে
         composable(
-            route = "movie_player/{url}",
-            arguments = listOf(navArgument("url") { type = NavType.StringType })
+            route = "movie_player/{encodedUrl}",
+            arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
         ) { backStackEntry ->
-            val url = backStackEntry.arguments?.getString("url") ?: ""
-            MoviePlayerScreen(navController, url) 
+            val encodedUrl = backStackEntry.arguments?.getString("encodedUrl") ?: ""
+            MoviePlayerScreen(navController, encodedUrl) 
         }
         
         // --- MUSIC SECTION ROUTES ---

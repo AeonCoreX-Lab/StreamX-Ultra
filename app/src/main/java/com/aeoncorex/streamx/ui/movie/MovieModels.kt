@@ -2,23 +2,6 @@ package com.aeoncorex.streamx.ui.movie
 
 import com.google.gson.annotations.SerializedName
 
-// --- SERVERS ---
-data class StreamServer(
-    val id: String,
-    val name: String,
-    val quality: String,
-    val urlTemplate: String,
-    val isMultiLang: Boolean = false
-)
-
-val availableServers = listOf(
-    StreamServer("1", "VidSrc Pro (Multi-Audio)", "4K/1080p", "https://vidsrc.xyz/embed/", true),
-    StreamServer("2", "SuperEmbed (Fast)", "HD", "https://multiembed.mov/directstream.php?video_id=", false),
-    StreamServer("3", "VidSrc Me (Backup)", "1080p", "https://vidsrc.me/embed/", true),
-    StreamServer("4", "Embed.su (Asian/Anime)", "HD", "https://embed.su/embed/", false),
-    StreamServer("5", "2Embed (Clean)", "720p", "https://www.2embed.cc/embed/", false)
-)
-
 // --- TMDB MODELS ---
 data class TmdbResponse(val results: List<MovieDto>)
 
@@ -47,7 +30,7 @@ data class Movie(
 
 enum class MovieType { MOVIE, SERIES }
 
-// --- DETAILS & SERIES MODELS ---
+// --- DETAILS ---
 data class MovieDetailResponse(
     val id: Int,
     val title: String?,
@@ -63,10 +46,14 @@ data class MovieDetailResponse(
     val credits: Credits?,
     val videos: Videos?,
     val recommendations: TmdbResponse?,
-    val seasons: List<SeasonDto>?
+    val seasons: List<SeasonDto>?,
+    val external_ids: ExternalIds? // NEW: Crucial for Torrent Lookup
 )
 
-// NEW: Season Detail Response for fetching episodes
+data class ExternalIds(
+    @SerializedName("imdb_id") val imdbId: String?
+)
+
 data class SeasonDetailResponse(
     val id: Int,
     val episodes: List<EpisodeDto>?
@@ -102,7 +89,8 @@ data class FullMovieDetails(
     val director: String,
     val trailerKey: String?,
     val recommendations: List<Movie>,
-    val seasons: List<SeasonDto> = emptyList()
+    val seasons: List<SeasonDto> = emptyList(),
+    val imdbId: String? // Store IMDB ID here
 )
 
 data class CastMember(val name: String, val role: String, val imageUrl: String)

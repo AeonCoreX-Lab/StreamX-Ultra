@@ -34,10 +34,9 @@ interface TmdbApi {
         @Path("type") type: String,
         @Path("id") id: Int,
         @Query("api_key") apiKey: String,
-        @Query("append_to_response") append: String = "credits,videos,recommendations"
+        @Query("append_to_response") append: String = "credits,videos,recommendations,external_ids,seasons"
     ): MovieDetailResponse
 
-    // NEW: Get episodes for a specific season
     @GET("3/tv/{id}/season/{season_number}")
     suspend fun getSeasonDetails(
         @Path("id") seriesId: Int,
@@ -75,7 +74,6 @@ object MovieRepository {
         try {
             call().results.filter { it.posterPath != null }.map { mapToMovie(it) }
         } catch (e: Exception) {
-            Log.e("MovieRepo", "API Error: ${e.localizedMessage}")
             emptyList()
         }
     }
@@ -115,7 +113,8 @@ object MovieRepository {
                 director = res.credits?.crew?.find { it.job == "Director" }?.name ?: "Unknown",
                 trailerKey = res.videos?.results?.find { it.site == "YouTube" && it.type == "Trailer" }?.key,
                 recommendations = res.recommendations?.results?.take(10)?.map { mapToMovie(it) } ?: emptyList(),
-                seasons = res.seasons ?: emptyList()
+                seasons = res.seasons ?: emptyList(),
+                imdbId = res.external_ids?.imdbId // Capture IMDB ID
             )
         } catch (e: Exception) {
             Log.e("MovieRepo", "Detail Error: ${e.localizedMessage}")
@@ -123,18 +122,12 @@ object MovieRepository {
         }
     }
 
-    // NEW: Function to fetch detailed episodes for UI
     suspend fun getEpisodes(seriesId: Int, seasonNumber: Int): List<EpisodeDto> = withContext(Dispatchers.IO) {
         try {
             val res = api.getSeasonDetails(seriesId, seasonNumber, API_KEY)
             res.episodes ?: emptyList()
         } catch (e: Exception) {
-            Log.e("MovieRepo", "Episodes Error: ${e.localizedMessage}")
             emptyList()
         }
-    }
-
-    fun getImageUrl(path: String?): String {
-        return if (path.isNullOrEmpty()) "" else IMAGE_BASE_URL + path
     }
 }

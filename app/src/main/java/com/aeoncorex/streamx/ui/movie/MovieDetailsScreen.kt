@@ -2,6 +2,7 @@ package com.aeoncorex.streamx.ui.movie
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,6 +30,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
+import kotlinx.coroutines.launch
+import java.net.URLEncoder
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,12 +47,16 @@ fun MovieDetailsScreen(
     var details by remember { mutableStateOf<FullMovieDetails?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     
+    // Playback Loading State (When fetching magnet link)
+    var isLinkLoading by remember { mutableStateOf(false) }
+    
     // Series Specific State
     var selectedSeason by remember { mutableIntStateOf(1) }
     var episodes by remember { mutableStateOf<List<EpisodeDto>>(emptyList()) }
     var isEpisodesLoading by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     
     // 3. Fetch Full Details
     LaunchedEffect(movieId) {
@@ -61,9 +68,40 @@ fun MovieDetailsScreen(
     LaunchedEffect(selectedSeason, details) {
         if (type == MovieType.SERIES && details != null) {
             isEpisodesLoading = true
-            // Fetch episodes using the new Repository function
             episodes = MovieRepository.getEpisodes(movieId, selectedSeason)
             isEpisodesLoading = false
+        }
+    }
+
+    // --- HELPER FUNCTION: AUTO PLAY ---
+    // This function finds the best link and plays it automatically
+    fun autoPlayContent(season: Int, episode: Int) {
+        if (details == null) return
+        
+        scope.launch {
+            isLinkLoading = true
+            val isAnime = details?.genres?.any { it.contains("Animation", true) } == true && 
+                          (details?.basic?.description?.contains("Japan", true) ?: false) // Simple Anime check logic
+            
+            val results = UnifiedTorrentRepository.getStreamLinks(
+                type = type,
+                title = details!!.basic.title,
+                imdbId = details!!.imdbId,
+                season = season,
+                episode = episode,
+                isAnime = isAnime
+            )
+
+            isLinkLoading = false
+
+            if (results.isNotEmpty()) {
+                // Get the best result (already sorted by seeds in Repo)
+                val bestLink = results.first() 
+                val encodedUrl = URLEncoder.encode(bestLink.magnet, "UTF-8")
+                navController.navigate("player/$encodedUrl")
+            } else {
+                Toast.makeText(context, "No stream links found!", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -96,22 +134,19 @@ fun MovieDetailsScreen(
                                     )
                             )
                             
-                            // TOP BAR: Back Button & Settings Button
+                            // TOP BAR: Back Button & Settings
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(top = 40.dp, start = 16.dp, end = 16.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                // Back Button
                                 IconButton(
                                     onClick = { navController.popBackStack() },
                                     modifier = Modifier.background(Color.Black.copy(0.5f), CircleShape)
                                 ) {
                                     Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
                                 }
-                                
-                                // Settings Button
                                 IconButton(
                                     onClick = { navController.navigate("movie_settings") },
                                     modifier = Modifier.background(Color.Black.copy(0.5f), CircleShape)
@@ -150,23 +185,33 @@ fun MovieDetailsScreen(
                                 
                                 // BUTTONS ROW
                                 Row(modifier = Modifier.fillMaxWidth()) {
-                                    // PLAY BUTTON
+                                    // PLAY BUTTON (Auto Selects Best Stream)
                                     Button(
                                         onClick = {
-                                            if (type == MovieType.MOVIE) {
-                                                navController.navigate("server_selection/${movie.basic.id}/${movie.basic.title}/MOVIE/0/0")
-                                            } else {
-                                                // Default to S1E1 if playing from main button
-                                                navController.navigate("server_selection/${movie.basic.id}/${movie.basic.title}/SERIES/1/1")
+                                            if (!isLinkLoading) {
+                                                if (type == MovieType.MOVIE) {
+                                                    autoPlayContent(0, 0)
+                                                } else {
+                                                    // Default to Season 1 Episode 1
+                                                    autoPlayContent(1, 1)
+                                                }
                                             }
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = Color.White),
                                         shape = RoundedCornerShape(4.dp),
                                         modifier = Modifier.weight(1f).height(45.dp)
                                     ) {
-                                        Icon(Icons.Default.PlayArrow, null, tint = Color.Black)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Play", color = Color.Black, fontWeight = FontWeight.Bold)
+                                        if (isLinkLoading) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(24.dp),
+                                                color = Color.Black,
+                                                strokeWidth = 2.dp
+                                            )
+                                        } else {
+                                            Icon(Icons.Default.PlayArrow, null, tint = Color.Black)
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("Play", color = Color.Black, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                     
                                     Spacer(Modifier.width(12.dp))
@@ -207,7 +252,7 @@ fun MovieDetailsScreen(
                                 Divider(color = Color.Gray.copy(0.3f), thickness = 1.dp)
                                 Spacer(Modifier.height(16.dp))
                                 
-                                // Season Selector (Chips)
+                                // Season Selector
                                 Text("Episodes", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                                 LazyRow(Modifier.padding(vertical = 12.dp)) {
                                     items(movie.seasons) { season ->
@@ -220,18 +265,13 @@ fun MovieDetailsScreen(
                                                 containerColor = Color.DarkGray,
                                                 labelColor = Color.LightGray,
                                                 selectedContainerColor = Color.Red,
-                                                selectedLabelColor = Color.White,
-                                                disabledContainerColor = Color.DarkGray,
-                                                disabledLabelColor = Color.Gray
+                                                selectedLabelColor = Color.White
                                             ),
-                                            // FIX: Explicitly passing enabled and selected to satisfy strict compiler checks
                                             border = FilterChipDefaults.filterChipBorder(
                                                 enabled = true,
                                                 selected = isSelected,
                                                 borderColor = Color.Transparent,
-                                                selectedBorderColor = Color.Transparent,
-                                                disabledBorderColor = Color.Transparent,
-                                                disabledSelectedBorderColor = Color.Transparent
+                                                selectedBorderColor = Color.Transparent
                                             ),
                                             modifier = Modifier.padding(end = 8.dp)
                                         )
@@ -254,7 +294,8 @@ fun MovieDetailsScreen(
                                                     overview = episode.overview ?: "No description available.",
                                                     stillPath = episode.stillPath,
                                                     onClick = {
-                                                        navController.navigate("server_selection/${movie.basic.id}/${movie.basic.title}/SERIES/$selectedSeason/${episode.episodeNumber}")
+                                                        // Auto Play this specific episode
+                                                        autoPlayContent(selectedSeason, episode.episodeNumber)
                                                     }
                                                 )
                                             }
@@ -307,10 +348,28 @@ fun MovieDetailsScreen(
                 }
             }
         }
+        
+        // Full Screen Loading Overlay (Optional: If you want to block UI while finding link)
+        if (isLinkLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(0.7f))
+                    .clickable(enabled = false) {}, // Block clicks
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = Color.Cyan)
+                    Spacer(Modifier.height(16.dp))
+                    Text("Finding best server...", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }
 
-// --- UPDATED HELPER COMPONENT FOR EPISODES ---
+// --- HELPER COMPONENTS ---
+
 @Composable
 fun EpisodeRow(
     episodeNumber: Int,
@@ -327,16 +386,15 @@ fun EpisodeRow(
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Thumbnail / Play Preview
+        // Thumbnail
         Box(
             modifier = Modifier
                 .width(130.dp)
                 .height(74.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color.DarkGray), // Background while loading
+                .background(Color.DarkGray),
             contentAlignment = Alignment.Center
         ) {
-            // Using Repo's logic (manually) to construct image URL
             val imageUrl = if (!stillPath.isNullOrEmpty()) "https://image.tmdb.org/t/p/w500$stillPath" else null
             
             if (imageUrl != null) {
@@ -346,15 +404,10 @@ fun EpisodeRow(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
-                // Play Icon Overlay
-                Box(
-                    modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.3f)),
-                    contentAlignment = Alignment.Center
-                ) {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.3f)), contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.PlayArrow, null, tint = Color.White)
                 }
             } else {
-                // Placeholder if no image
                 Icon(Icons.Default.PlayArrow, null, tint = Color.White)
             }
         }

@@ -1,15 +1,11 @@
 package com.aeoncorex.streamx.ui.movie
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.net.Uri
-import android.provider.Settings
-import android.view.ViewGroup
 import android.view.WindowManager
-import android.webkit.*
 import androidx.annotation.OptIn
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
@@ -17,8 +13,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -27,7 +21,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip // FIX: Added missing import
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -36,69 +30,112 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
 import androidx.navigation.NavController
 import kotlinx.coroutines.delay
+import java.io.File
 import java.net.URLDecoder
 
 @OptIn(UnstableApi::class)
 @Composable
-fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
-    val url = remember { URLDecoder.decode(encodedUrl, "UTF-8") }
-    // Logic: If url contains common video extensions, it's direct. Otherwise embed.
-    val isDirectStream = url.contains(".m3u8") || url.contains(".mp4") || url.contains(".mkv")
+fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) {
+    val decodedInput = remember { URLDecoder.decode(encodedMagnetOrUrl, "UTF-8") }
+    val context = LocalContext.current
+    val activity = activityContext(context)
 
-    if (isDirectStream) {
-        UltimateExoPlayer(navController, url)
-    } else {
-        UltimateEmbedPlayer(navController, url)
+    // States
+    var streamUrl by remember { mutableStateOf<String?>(null) }
+    var statusMessage by remember { mutableStateOf("Initializing Engine...") }
+    var isError by remember { mutableStateOf(false) }
+    
+    // Initialize Torrent Engine if it's a magnet link
+    LaunchedEffect(decodedInput) {
+        if (decodedInput.startsWith("magnet:?")) {
+            TorrentEngine.init(context)
+            TorrentEngine.startStreaming(decodedInput).collect { state ->
+                when(state) {
+                    is StreamState.Preparing -> statusMessage = state.message
+                    is StreamState.Buffering -> statusMessage = "Buffering ${state.progress}% (P2P)"
+                    is StreamState.Ready -> {
+                        streamUrl = state.filePath // File path for ExoPlayer
+                        statusMessage = ""
+                    }
+                    is StreamState.Error -> {
+                        statusMessage = "Error: ${state.message}"
+                        isError = true
+                    }
+                }
+            }
+        } else {
+            // Direct URL (e.g. from other sources)
+            streamUrl = decodedInput
+        }
+    }
+
+    // Cleanup on exit
+    DisposableEffect(Unit) {
+        onDispose {
+            TorrentEngine.stop()
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        if (streamUrl != null) {
+            NativeExoPlayer(navController, streamUrl!!)
+        } else {
+            // Loading Screen
+            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(color = Color.Cyan)
+                Spacer(Modifier.height(16.dp))
+                Text(statusMessage, color = Color.White, fontWeight = FontWeight.Bold)
+                if (isError) {
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick = { navController.popBackStack() }) {
+                        Text("Go Back")
+                    }
+                }
+            }
+        }
     }
 }
 
-// -----------------------------------------------------------
-// 1. ULTIMATE EXO PLAYER (4K, AUDIO TRACKS, GESTURES)
-// -----------------------------------------------------------
+// --- THE POWERFUL NATIVE PLAYER ---
 @OptIn(UnstableApi::class)
 @Composable
-fun UltimateExoPlayer(navController: NavController, videoUrl: String) {
+fun NativeExoPlayer(navController: NavController, videoSource: String) {
     val context = LocalContext.current
-    val activity = context as? Activity
+    val activity = activityContext(context)
 
-    // --- PLAYER STATE ---
-    val trackSelector = remember { DefaultTrackSelector(context) }
+    // Player Initialization
     val exoPlayer = remember {
-        ExoPlayer.Builder(context)
-            .setTrackSelector(trackSelector)
-            .build()
-            .apply {
-                setMediaItem(MediaItem.fromUri(Uri.parse(videoUrl)))
-                prepare()
-                playWhenReady = true
+        ExoPlayer.Builder(context).build().apply {
+            // Handle local file or network URL
+            val mediaItem = if (videoSource.startsWith("/")) {
+                MediaItem.fromUri(Uri.fromFile(File(videoSource)))
+            } else {
+                MediaItem.fromUri(Uri.parse(videoSource))
             }
+            setMediaItem(mediaItem)
+            prepare()
+            playWhenReady = true
+        }
     }
 
-    // --- UI STATE ---
+    // UI States
     var isControlsVisible by remember { mutableStateOf(false) }
-    var isLocked by remember { mutableStateOf(false) }
     var volume by remember { mutableFloatStateOf(0.5f) }
     var brightness by remember { mutableFloatStateOf(0.5f) }
     var gestureIcon by remember { mutableStateOf<ImageVector?>(null) }
-    var showQualityDialog by remember { mutableStateOf(false) }
-    var showAudioDialog by remember { mutableStateOf(false) }
-    var currentOrientation by remember { mutableIntStateOf(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE) }
+    var isLocked by remember { mutableStateOf(false) }
 
-    // --- FULLSCREEN & CLEANUP ---
+    // Immersive Mode
     DisposableEffect(Unit) {
         val window = activity?.window
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -106,7 +143,6 @@ fun UltimateExoPlayer(navController: NavController, videoUrl: String) {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-        // Force Landscape initially
         activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 
         onDispose {
@@ -125,12 +161,13 @@ fun UltimateExoPlayer(navController: NavController, videoUrl: String) {
                 detectTapGestures(
                     onDoubleTap = { offset ->
                         if (!isLocked) {
-                            if (offset.x > size.width / 2) {
-                                exoPlayer.seekForward()
-                                gestureIcon = Icons.Default.FastForward
-                            } else {
+                            val screenWidth = size.width
+                            if (offset.x < screenWidth / 2) {
                                 exoPlayer.seekBack()
-                                gestureIcon = Icons.Default.FastRewind
+                                gestureIcon = Icons.Rounded.Replay10
+                            } else {
+                                exoPlayer.seekForward()
+                                gestureIcon = Icons.Rounded.Forward10
                             }
                         }
                     },
@@ -139,24 +176,25 @@ fun UltimateExoPlayer(navController: NavController, videoUrl: String) {
             }
             .pointerInput(Unit) {
                 detectVerticalDragGestures(
-                    onDragStart = { },
+                    onDragStart = {},
                     onDragEnd = { gestureIcon = null }
                 ) { change, dragAmount ->
                     if (!isLocked) {
                         val isRight = change.position.x > size.width / 2
                         if (isRight) {
-                            // Volume
+                            // Volume Control
                             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                             val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                             val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                            val newVol = (currentVol - (dragAmount / 50)).coerceIn(0f, maxVol.toFloat())
+                            val newVol = (currentVol - (dragAmount / 30)).coerceIn(0f, maxVol.toFloat())
                             audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol.toInt(), 0)
                             volume = newVol / maxVol
                             gestureIcon = if (volume == 0f) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp
                         } else {
-                            // Brightness
-                            brightness = (brightness - dragAmount / 500f).coerceIn(0f, 1f)
+                            // Brightness Control
                             val lp = activity?.window?.attributes
+                            val currentBright = lp?.screenBrightness ?: 0.5f
+                            brightness = (currentBright - dragAmount / 500f).coerceIn(0.01f, 1f)
                             lp?.screenBrightness = brightness
                             activity?.window?.attributes = lp
                             gestureIcon = Icons.Rounded.Brightness6
@@ -170,15 +208,14 @@ fun UltimateExoPlayer(navController: NavController, videoUrl: String) {
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     player = exoPlayer
-                    useController = false
+                    useController = false // We use custom UI
                     resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 }
             },
             modifier = Modifier.fillMaxSize()
         )
 
-        // 2. CENTER GESTURE FEEDBACK
+        // 2. GESTURE FEEDBACK ICON
         AnimatedVisibility(
             visible = gestureIcon != null,
             enter = fadeIn(),
@@ -190,45 +227,25 @@ fun UltimateExoPlayer(navController: NavController, videoUrl: String) {
             }
         }
 
-        // 3. OVERLAY CONTROLS
+        // 3. CONTROLS OVERLAY
         AnimatedVisibility(
             visible = isControlsVisible,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(0.4f))) {
-                
-                // TOP BAR
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(0.5f))) {
+                // Top Bar
                 Row(
                     Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.Default.ArrowBack, null, tint = Color.White)
                     }
-                    Text("NOW PLAYING", color = Color.White, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-                    Row {
-                         // Rotate Button
-                        IconButton(onClick = {
-                            currentOrientation = if (currentOrientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE) 
-                                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                            activity?.requestedOrientation = currentOrientation
-                        }) {
-                            Icon(Icons.Rounded.ScreenRotation, null, tint = Color.White)
-                        }
-                        // Audio Track Button
-                        IconButton(onClick = { showAudioDialog = true }) {
-                            Icon(Icons.Rounded.Audiotrack, null, tint = Color.White)
-                        }
-                         // Quality Button
-                        IconButton(onClick = { showQualityDialog = true }) {
-                            Icon(Icons.Rounded.HighQuality, null, tint = Color.White)
-                        }
-                    }
+                    Text("STREAMX PLAYER", color = Color.White, fontWeight = FontWeight.Bold)
                 }
 
-                // CENTER CONTROLS
+                // Center Controls
                 if (!isLocked) {
                     Row(
                         Modifier.align(Alignment.Center),
@@ -238,12 +255,24 @@ fun UltimateExoPlayer(navController: NavController, videoUrl: String) {
                         IconButton(onClick = { exoPlayer.seekBack() }) {
                             Icon(Icons.Rounded.Replay10, null, tint = Color.White, modifier = Modifier.size(48.dp))
                         }
+                        
+                        val isPlaying = remember { mutableStateOf(true) }
+                        DisposableEffect(Unit) {
+                            val listener = object : Player.Listener {
+                                override fun onIsPlayingChanged(playing: Boolean) {
+                                    isPlaying.value = playing
+                                }
+                            }
+                            exoPlayer.addListener(listener)
+                            onDispose { exoPlayer.removeListener(listener) }
+                        }
+
                         IconButton(
                             onClick = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() },
                             modifier = Modifier.size(72.dp).background(Color.White.copy(0.2f), RoundedCornerShape(50))
                         ) {
                             Icon(
-                                if (exoPlayer.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                if (isPlaying.value) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                 null, tint = Color.White, modifier = Modifier.size(48.dp)
                             )
                         }
@@ -253,7 +282,7 @@ fun UltimateExoPlayer(navController: NavController, videoUrl: String) {
                     }
                 }
 
-                // BOTTOM BAR (Seekbar + Lock)
+                // Bottom Bar (Lock & Seek)
                 Column(Modifier.align(Alignment.BottomCenter).padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { isLocked = !isLocked }) {
@@ -262,157 +291,27 @@ fun UltimateExoPlayer(navController: NavController, videoUrl: String) {
                                 null, tint = if (isLocked) Color.Red else Color.White
                             )
                         }
-                        // Add Seekbar logic here (simplified for brevity)
+                        Spacer(Modifier.width(8.dp))
+                        // Progress Bar (Simplified)
                         LinearProgressIndicator(
-                            progress = { 0.5f }, // Connect to real progress
+                            progress = 0.5f, // You would bind this to exoPlayer.currentPosition
                             modifier = Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(2.dp)),
                             color = Color.Red,
-                            trackColor = Color.Gray.copy(0.5f),
+                            trackColor = Color.Gray
                         )
                     }
                 }
             }
         }
-
-        // --- DIALOGS ---
-        if (showQualityDialog) {
-            TrackSelectionDialog(
-                title = "VIDEO QUALITY",
-                options = listOf("Auto (Best)", "UHD (1440p/4K)", "HD (1080p)", "SD (720p)", "Data Saver (480p)"),
-                onDismiss = { showQualityDialog = false },
-                onSelect = { index ->
-                    val params = exoPlayer.trackSelectionParameters.buildUpon()
-                    when(index) {
-                        0 -> params.setMaxVideoSizeSd().clearVideoSizeConstraints()
-                        1 -> params.setMaxVideoSize(3840, 2160) // 4K
-                        2 -> params.setMaxVideoSize(1920, 1080)
-                        3 -> params.setMaxVideoSize(1280, 720)
-                        4 -> params.setMaxVideoSize(854, 480)
-                    }
-                    exoPlayer.trackSelectionParameters = params.build()
-                    showQualityDialog = false
-                }
-            )
-        }
-
-        if (showAudioDialog) {
-            // Retrieve simplified audio languages
-            // Note: Real implementation would iterate track groups
-            val audioOptions = listOf("Auto (Default)", "English", "Spanish", "French", "Japanese")
-            TrackSelectionDialog(
-                title = "AUDIO TRACK",
-                options = audioOptions,
-                onDismiss = { showAudioDialog = false },
-                onSelect = { index ->
-                    val params = exoPlayer.trackSelectionParameters.buildUpon()
-                    if (index == 0) {
-                        // FIX: Replaced clearPreferredAudioLanguages with setPreferredAudioLanguage(null)
-                        params.setPreferredAudioLanguage(null)
-                    } else {
-                        val langCode = when(index) {
-                            1 -> "en"; 2 -> "es"; 3 -> "fr"; 4 -> "ja"; else -> "en"
-                        }
-                        params.setPreferredAudioLanguage(langCode)
-                    }
-                    exoPlayer.trackSelectionParameters = params.build()
-                    showAudioDialog = false
-                }
-            )
-        }
     }
 }
 
-// -----------------------------------------------------------
-// 2. ULTIMATE EMBED PLAYER (AD-BLOCK ++)
-// -----------------------------------------------------------
-@SuppressLint("SetJavaScriptEnabled")
-@Composable
-fun UltimateEmbedPlayer(navController: NavController, url: String) {
-    val context = LocalContext.current
-    var isLoading by remember { mutableStateOf(true) }
-
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        AndroidView(
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        mediaPlaybackRequiresUserGesture = false
-                        userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
-                    }
-                    
-                    webViewClient = object : WebViewClient() {
-                        override fun onPageFinished(view: WebView?, url: String?) {
-                            isLoading = false
-                            // ULTIMATE AD-REMOVAL SCRIPT
-                            val js = """
-                                javascript:(function() {
-                                    var selectors = ['.ad', '.ads', 'iframe[src*="doubleclick"]', 'div[id*="pop"]', 'a[target="_blank"]'];
-                                    selectors.forEach(s => {
-                                        document.querySelectorAll(s).forEach(el => el.remove());
-                                    });
-                                    // Remove onclick events that trigger popups
-                                    document.body.onclick = null;
-                                    var videos = document.getElementsByTagName('video');
-                                    if(videos.length > 0) { videos[0].play(); }
-                                })()
-                            """
-                            view?.evaluateJavascript(js, null)
-                        }
-
-                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                            val next = request?.url.toString()
-                            // Strict Whitelist
-                            val allowed = listOf("vidsrc", "2embed", "youtube", "googleapis", "gstatic")
-                            if (allowed.any { next.contains(it) }) return false
-                            return true // Block Redirects
-                        }
-                    }
-                    loadUrl(url)
-                }
-            }
-        )
-        
-        IconButton(
-            onClick = { navController.popBackStack() },
-            modifier = Modifier.padding(16.dp).align(Alignment.TopStart).background(Color.Black.copy(0.5f), androidx.compose.foundation.shape.CircleShape)
-        ) {
-            Icon(Icons.Default.ArrowBack, null, tint = Color.White)
-        }
-        
-        if (isLoading) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.Red)
+// Helper to get Activity from Context
+fun activityContext(context: Context): Activity? {
+    var c = context
+    while (c is androidx.compose.ui.platform.AndroidComposeViewAccessibilityDelegateCompat || c is android.content.ContextWrapper) {
+        if (c is Activity) return c
+        c = (c as android.content.ContextWrapper).baseContext
     }
-}
-
-@Composable
-fun TrackSelectionDialog(title: String, options: List<String>, onDismiss: () -> Unit, onSelect: (Int) -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2C))
-        ) {
-            Column(Modifier.padding(20.dp)) {
-                Text(title, color = Color.Cyan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Spacer(Modifier.height(16.dp))
-                LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
-                    items(options.size) { index ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable { onSelect(index) }
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Rounded.CheckCircleOutline, null, tint = Color.Gray, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(16.dp))
-                            Text(options[index], color = Color.White, fontSize = 14.sp)
-                        }
-                        HorizontalDivider(color = Color.White.copy(0.1f))
-                    }
-                }
-            }
-        }
-    }
+    return null
 }
