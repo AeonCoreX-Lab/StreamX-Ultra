@@ -101,7 +101,7 @@ jobs:
 
       # --- ধাপ ৯: GitHub রিলিজ তৈরি করা ---
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: app/build/outputs/apk/release/*.apk
           name: "StreamX Ultra ${{ github.ref_name }}"
