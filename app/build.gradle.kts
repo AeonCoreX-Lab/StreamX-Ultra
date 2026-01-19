@@ -99,7 +99,7 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-scalars:3.0.0") // ADDED FOR NYAA RSS (XML)
 
     // Jsoup for parsing HTML/XML
-    implementation("org.jsoup:jsoup:1.17.2") // ADDED FOR NYAA PARSING
+    implementation("org.jsoup:jsoup:1.22.1") // ADDED FOR NYAA PARSING
 
     // Foundation & Navigation
     implementation("androidx.compose.foundation:foundation:1.6.7")
