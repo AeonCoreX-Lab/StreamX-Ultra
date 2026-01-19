@@ -113,9 +113,17 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
     
-    // --- UPDATED TORRENT ENGINE (Official LibTorrent Wrapper) ---
-    // This replaces the broken 'TorrentStream' library
-    implementation("com.frostwire:jlibtorrent-android:2.6.0.0")
+       // --- JLIBTORRENT ENGINE (LATEST 2.0.12.7) ---
+    val jlibtorrentVersion = "2.0.12.7"
+    
+    // Core library
+    implementation("com.frostwire:jlibtorrent:$jlibtorrentVersion")
+    
+    // Multi-architecture support for Android
+    implementation("com.frostwire:jlibtorrent-android-arm:$jlibtorrentVersion")
+    implementation("com.frostwire:jlibtorrent-android-arm64:$jlibtorrentVersion")
+    implementation("com.frostwire:jlibtorrent-android-x86:$jlibtorrentVersion")
+    implementation("com.frostwire:jlibtorrent-android-x86_64:$jlibtorrentVersion")
 
     // Coil (Image Loading)
     implementation("io.coil-kt:coil-compose:2.6.0")

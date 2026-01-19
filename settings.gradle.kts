@@ -10,8 +10,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // TorrentStream লাইব্রেরি এবং অন্যান্য GitHub লাইব্রেরির জন্য এটি জরুরি
-        maven { url = uri("https://jitpack.io") } 
+        // FrostWire এর নিজস্ব রিপোজিটরি (এটি ছাড়া বিল্ড হবে না)
+        maven { url = uri("https://dl.frostwire.com/maven") } 
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
