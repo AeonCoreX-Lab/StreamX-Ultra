@@ -4,8 +4,6 @@ plugins {
     id("com.google.gms.google-services")
 }
 
-// REMOVED: java.util.Properties loading logic (local.properties removed)
-
 android {
     namespace = "com.aeoncorex.streamx"
     compileSdk = 34
@@ -17,21 +15,18 @@ android {
         versionCode = 4 
         versionName = "1.2.1" 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+ 
         vectorDrawables {
             useSupportLibrary = true
         }
 
         // --- SECURE API KEY INJECTION ---
-        // CHANGED: Now strictly relies on System Environment Variables (GitHub Secrets)
-        // localProperties.getProperty(...) অংশটি বাদ দেওয়া হয়েছে
         val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\"" 
-
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
     }
 
     signingConfigs {
         create("release") {
-            // Signing keys will be fetched from Environment Variables (CI/CD) or gradle.properties
             val storeFileValue = System.getenv("RELEASE_KEYSTORE_FILE") ?: project.findProperty("RELEASE_KEYSTORE_FILE") as? String
             val storePasswordValue = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: project.findProperty("RELEASE_KEYSTORE_PASSWORD") as? String
             val keyAliasValue = System.getenv("RELEASE_KEY_ALIAS") ?: project.findProperty("RELEASE_KEY_ALIAS") as? String
@@ -80,6 +75,10 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        // jlibtorrent uses native libraries (.so), ensures they are packaged correctly
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 }
 
@@ -114,10 +113,9 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
     
-       // --- TORRENT STREAMING ENGINE ---
-    // GitHub: https://github.com/proninyaroslav/libretorrent (Example Wrapper)
-    // For this code we assume a standard TorrentStream implementation
-    implementation("com.github.se_bastiaan:TorrentStream:2.5.0") 
+    // --- UPDATED TORRENT ENGINE (Official LibTorrent Wrapper) ---
+    // This replaces the broken 'TorrentStream' library
+    implementation("com.frostwire:jlibtorrent-android:2.6.0.0")
 
     // Coil (Image Loading)
     implementation("io.coil-kt:coil-compose:2.6.0")
