@@ -127,7 +127,7 @@ dependencies {
     implementation("com.frostwire:jlibtorrent-android-x86_64:$jlibtorrentVersion")
 
     // Coil (Image Loading)
-    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     // DataStore & Lifecycle
     implementation("androidx.datastore:datastore-preferences:1.0.0")
