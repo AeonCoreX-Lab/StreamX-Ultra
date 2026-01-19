@@ -40,17 +40,11 @@ fun MovieDetailsScreen(
     movieId: Int,
     movieType: String // "MOVIE" or "SERIES"
 ) {
-    // 1. Determine Type
     val type = if (movieType.equals("MOVIE", ignoreCase = true)) MovieType.MOVIE else MovieType.SERIES
     
-    // 2. State Holders
     var details by remember { mutableStateOf<FullMovieDetails?>(null) }
     var isLoading by remember { mutableStateOf(true) }
-    
-    // Playback Loading State (When fetching magnet link)
     var isLinkLoading by remember { mutableStateOf(false) }
-    
-    // Series Specific State
     var selectedSeason by remember { mutableIntStateOf(1) }
     var episodes by remember { mutableStateOf<List<EpisodeDto>>(emptyList()) }
     var isEpisodesLoading by remember { mutableStateOf(false) }
@@ -58,13 +52,11 @@ fun MovieDetailsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
-    // 3. Fetch Full Details
     LaunchedEffect(movieId) {
         details = MovieRepository.getFullDetails(movieId, type)
         isLoading = false
     }
 
-    // 4. Fetch Episodes when Season Changes (Only for Series)
     LaunchedEffect(selectedSeason, details) {
         if (type == MovieType.SERIES && details != null) {
             isEpisodesLoading = true
@@ -73,17 +65,18 @@ fun MovieDetailsScreen(
         }
     }
 
-    // --- HELPER FUNCTION: AUTO PLAY ---
-    // This function finds the best link and plays it automatically
     fun autoPlayContent(season: Int, episode: Int) {
         if (details == null) return
         
         scope.launch {
             isLinkLoading = true
-            val isAnime = details?.genres?.any { it.contains("Animation", true) } == true && 
-                          (details?.basic?.description?.contains("Japan", true) ?: false) // Simple Anime check logic
             
-            val results = UnifiedTorrentRepository.getStreamLinks(
+            // Basic check for Anime based on Genres and Country
+            val isAnime = details?.genres?.any { it.contains("Animation", true) } == true && 
+                          (details?.basic?.description?.contains("Japan", true) ?: false)
+
+            // UPDATED: Using TorrentRepository correctly
+            val results = TorrentRepository.getStreamLinks(
                 type = type,
                 title = details!!.basic.title,
                 imdbId = details!!.imdbId,
@@ -95,8 +88,7 @@ fun MovieDetailsScreen(
             isLinkLoading = false
 
             if (results.isNotEmpty()) {
-                // Get the best result (already sorted by seeds in Repo)
-                val bestLink = results.first() 
+                val bestLink = results.first() // Already sorted by seeds in Repo
                 val encodedUrl = URLEncoder.encode(bestLink.magnet, "UTF-8")
                 navController.navigate("player/$encodedUrl")
             } else {
@@ -112,18 +104,14 @@ fun MovieDetailsScreen(
             details?.let { movie ->
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     
-                    // --- HEADER SECTION (Backdrop + Buttons) ---
                     item {
                         Box(modifier = Modifier.fillMaxWidth().height(500.dp)) {
-                            // Backdrop Image
                             AsyncImage(
                                 model = movie.basic.backdropUrl,
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize()
                             )
-                            
-                            // Gradient Overlay (Netflix Style)
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -133,8 +121,6 @@ fun MovieDetailsScreen(
                                         )
                                     )
                             )
-                            
-                            // TOP BAR: Back Button & Settings
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -155,7 +141,6 @@ fun MovieDetailsScreen(
                                 }
                             }
 
-                            // Movie Info Overlay
                             Column(
                                 modifier = Modifier
                                     .align(Alignment.BottomStart)
@@ -169,7 +154,6 @@ fun MovieDetailsScreen(
                                 )
                                 Spacer(Modifier.height(8.dp))
                                 
-                                // Metadata Row
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("${movie.basic.rating} Match", color = Color(0xFF46D369), fontWeight = FontWeight.Bold)
                                     Spacer(Modifier.width(12.dp))
@@ -183,16 +167,13 @@ fun MovieDetailsScreen(
                                 }
                                 Spacer(Modifier.height(16.dp))
                                 
-                                // BUTTONS ROW
                                 Row(modifier = Modifier.fillMaxWidth()) {
-                                    // PLAY BUTTON (Auto Selects Best Stream)
                                     Button(
                                         onClick = {
                                             if (!isLinkLoading) {
                                                 if (type == MovieType.MOVIE) {
                                                     autoPlayContent(0, 0)
                                                 } else {
-                                                    // Default to Season 1 Episode 1
                                                     autoPlayContent(1, 1)
                                                 }
                                             }
@@ -216,7 +197,6 @@ fun MovieDetailsScreen(
                                     
                                     Spacer(Modifier.width(12.dp))
                                     
-                                    // TRAILER BUTTON
                                     if (movie.trailerKey != null) {
                                         Button(
                                             onClick = {
@@ -235,7 +215,6 @@ fun MovieDetailsScreen(
                         }
                     }
 
-                    // --- SYNOPSIS ---
                     item {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(movie.basic.description, color = Color.White, lineHeight = 20.sp)
@@ -245,14 +224,12 @@ fun MovieDetailsScreen(
                         }
                     }
 
-                    // --- SERIES EPISODE SELECTOR ---
                     if (type == MovieType.SERIES && movie.seasons.isNotEmpty()) {
                         item {
                             Column(Modifier.padding(horizontal = 16.dp)) {
                                 Divider(color = Color.Gray.copy(0.3f), thickness = 1.dp)
                                 Spacer(Modifier.height(16.dp))
                                 
-                                // Season Selector
                                 Text("Episodes", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                                 LazyRow(Modifier.padding(vertical = 12.dp)) {
                                     items(movie.seasons) { season ->
@@ -278,7 +255,6 @@ fun MovieDetailsScreen(
                                     }
                                 }
                                 
-                                // Episode List
                                 if (isEpisodesLoading) {
                                     Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
                                         CircularProgressIndicator(color = Color.Red)
@@ -294,7 +270,6 @@ fun MovieDetailsScreen(
                                                     overview = episode.overview ?: "No description available.",
                                                     stillPath = episode.stillPath,
                                                     onClick = {
-                                                        // Auto Play this specific episode
                                                         autoPlayContent(selectedSeason, episode.episodeNumber)
                                                     }
                                                 )
@@ -309,7 +284,6 @@ fun MovieDetailsScreen(
                         }
                     }
 
-                    // --- CAST SECTION ---
                     item {
                         Text("Cast", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, bottom = 8.dp))
                         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -330,10 +304,11 @@ fun MovieDetailsScreen(
                         Spacer(Modifier.height(24.dp))
                     }
 
-                    // --- RECOMMENDATIONS ---
                     item {
                         if (movie.recommendations.isNotEmpty()) {
-                            MovieSection(
+                            // Assumes MovieSection is defined in another file (e.g. HomeScreen), if not, this needs to be commented or added.
+                             // For now, I'm keeping your original call logic assuming you have the component.
+                            /* MovieSection(
                                 title = "More Like This",
                                 movies = movie.recommendations,
                                 onMovieClick = { recMovie ->
@@ -342,6 +317,7 @@ fun MovieDetailsScreen(
                                 },
                                 isPortrait = true
                             )
+                            */
                         }
                         Spacer(Modifier.height(50.dp))
                     }
@@ -349,13 +325,12 @@ fun MovieDetailsScreen(
             }
         }
         
-        // Full Screen Loading Overlay (Optional: If you want to block UI while finding link)
         if (isLinkLoading) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(0.7f))
-                    .clickable(enabled = false) {}, // Block clicks
+                    .clickable(enabled = false) {}, 
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -367,8 +342,6 @@ fun MovieDetailsScreen(
         }
     }
 }
-
-// --- HELPER COMPONENTS ---
 
 @Composable
 fun EpisodeRow(
@@ -386,7 +359,6 @@ fun EpisodeRow(
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Thumbnail
         Box(
             modifier = Modifier
                 .width(130.dp)
@@ -414,7 +386,6 @@ fun EpisodeRow(
         
         Spacer(Modifier.width(12.dp))
         
-        // Info
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(

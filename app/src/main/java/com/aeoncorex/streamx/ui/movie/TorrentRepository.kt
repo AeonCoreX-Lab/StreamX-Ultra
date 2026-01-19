@@ -47,7 +47,6 @@ object TorrentRepository {
         .build()
         .create(YtsApi::class.java)
 
-    // সেরা কানেক্টিভিটির জন্য আপডেটেড ট্র্যাকার লিস্ট
     private val TRACKERS = listOf(
         "udp://open.demonii.com:1337/announce",
         "udp://tracker.openbittorrent.com:80",
@@ -55,56 +54,52 @@ object TorrentRepository {
         "udp://glotorrents.pw:6969/announce",
         "udp://tracker.opentrackr.org:1337/announce",
         "udp://p4p.arenabg.com:1337",
-        "udp://tracker.leechers-paradise.org:6969",
-        "udp://eddie4.nl:6969/announce",
-        "udp://shadowshq.yi.org:6969/announce",
-        "udp://tracker.opentrackr.org:1337/announce"
+        "udp://tracker.leechers-paradise.org:6969"
     )
 
     /**
-     * এটি মুভি বা সিরিজের জন্য সবথেকে ভালো ম্যাগনেট লিংকটি খুঁজে বের করবে।
-     * MovieDetailsScreen থেকে এটি সরাসরি কল হবে।
+     * Unified function to get stream links for Movie, Series, or Anime
      */
-    suspend fun getBestMagnetLink(
+    suspend fun getStreamLinks(
+        type: MovieType,
         title: String,
         imdbId: String?,
-        type: MovieType,
         season: Int = 0,
-        episode: Int = 0
-    ): String? = withContext(Dispatchers.IO) {
-        try {
-            val allLinks = mutableListOf<StreamLink>()
+        episode: Int = 0,
+        isAnime: Boolean = false
+    ): List<StreamLink> = withContext(Dispatchers.IO) {
+        val allLinks = mutableListOf<StreamLink>()
 
-            // ১. যদি মুভি হয়, তবে YTS থেকে সার্চ করবে (YTS মুভির জন্য সেরা)
-            if (type == MovieType.MOVIE && imdbId != null) {
+        try {
+            // 1. Anime Handling (Nyaa)
+            if (isAnime) {
+                // Query e.g., "One Piece 1070"
+                val animeResults = TorrentProviders.fetchAnime(title, episode)
+                allLinks.addAll(animeResults.map {
+                    StreamLink(it.title, it.magnet, "HD", it.seeds, "NYAA")
+                })
+            }
+            // 2. Movies (YTS)
+            else if (type == MovieType.MOVIE && imdbId != null) {
                 val ytsResults = fetchYtsLinks(imdbId, title)
                 allLinks.addAll(ytsResults)
             }
-
-            // ২. এখানে ভবিষ্যতে আপনি আরও সোর্স (যেমন: PirateBay বা অন্য API) যোগ করতে পারবেন
-            // fetchOtherSources(title, season, episode)...
-
-            if (allLinks.isNotEmpty()) {
-                // সর্টিং লজিক: 
-                // প্রথমে 1080p কে প্রাধান্য দেবে, তারপর 720p। 
-                // একই কোয়ালিটির মধ্যে যার Seeds বেশি সেটি আগে আসবে।
-                val bestStream = allLinks.sortedWith(
-                    compareByDescending<StreamLink> { it.quality == "1080p" }
-                        .thenByDescending { it.quality == "720p" }
-                        .thenByDescending { it.seeds }
-                ).first()
-
-                Log.d("TorrentRepo", "Best Link Found: ${bestStream.quality} with ${bestStream.seeds} seeds")
-                return@withContext bestStream.magnet
+            // 3. Series (EZTV)
+            else if (type == MovieType.SERIES && imdbId != null) {
+                val eztvResults = TorrentProviders.fetchSeries(imdbId, season, episode)
+                allLinks.addAll(eztvResults.map {
+                    StreamLink(it.title, it.magnet, "HD", it.seeds, "EZTV")
+                })
             }
 
         } catch (e: Exception) {
-            Log.e("TorrentRepo", "Error fetching torrents: ${e.message}")
+            Log.e("TorrentRepo", "Error fetching streams: ${e.message}")
         }
-        return@withContext null
+
+        // Sort by Seeds (Highest first) to ensure best playback
+        return@withContext allLinks.sortedByDescending { it.seeds }
     }
 
-    // YTS থেকে ডাটা নিয়ে আসার প্রাইভেট ফাংশন
     private suspend fun fetchYtsLinks(imdbId: String, title: String): List<StreamLink> {
         return try {
             val response = api.listMovies(imdbId)
@@ -123,7 +118,6 @@ object TorrentRepository {
         }
     }
 
-    // ম্যাগনেট লিংক তৈরির ফাংশন
     private fun constructMagnet(hash: String, title: String): String {
         val encodedTitle = URLEncoder.encode(title, "UTF-8")
         val trackerString = TRACKERS.joinToString("") { "&tr=${URLEncoder.encode(it, "UTF-8")}" }
