@@ -64,9 +64,9 @@ object TorrentEngine {
             trySend(StreamState.Preparing("Fetching Metadata..."))
             
             // fetchMagnet is blocking, so we run it on the IO dispatcher
-            // 30 seconds timeout
+            // FIXED: Added 'saveDir' as the 3rd parameter required by the library
             val metadataBytes = withContext(Dispatchers.IO) {
-                session?.fetchMagnet(magnet, 30)
+                session?.fetchMagnet(magnet, 30, saveDir)
             }
 
             if (metadataBytes == null) {
