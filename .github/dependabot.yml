@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # 1. Gradle ডিপেন্ডেন্সি আপডেট (Retrofit, jlibtorrent, etc.)
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "daily" # প্রতিদিন লেটেস্ট আপডেট চেক করবে
+    open-pull-requests-limit: 10 # একসাথে ১০টির বেশি PR খুলবে না (যাতে স্প্যাম না হয়)
+    labels:
+      - "dependencies"
+      - "version-update"
+
+  # 2. GitHub Actions আপডেট (যদি আপনি CI/CD ব্যবহার করেন)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"

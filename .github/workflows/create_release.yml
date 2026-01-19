@@ -1,7 +1,6 @@
 name: Create New Release
 
 on:
-  # v1.0, v1.1, v1.2 এই ধরনের ট্যাগ পুশ করলেই এই Workflow চলবে
   push:
     tags:
       - 'v*.*'
@@ -9,40 +8,42 @@ on:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
-
-    # রিলিজ তৈরি করার জন্য প্রয়োজনীয় 'write' পারমিশন
     permissions:
       contents: write
+      pull-requests: read
+      issues: read
 
     steps:
-      # ধাপ ১: রিপোজিটরির কোড আনা
+      # --- ধাপ ১: রিপোজিটরির কোড আনা ---
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # ইতিহাস চেক করার জন্য সম্পূর্ণ হিস্ট্রি আনা প্রয়োজন
 
-      # ধাপ ২: JDK 17 সেটআপ করা
+      # --- ধাপ ২: JDK 17 সেটআপ করা ---
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      # ধাপ ৩: GitHub Secrets থেকে Keystore ডিকোড করা
+      # --- ধাপ ৩: GitHub Secrets থেকে Keystore ডিকোড করা ---
       - name: Decode Keystore
         run: |
           echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > ${{ github.workspace }}/release.keystore
-          
-        # --- নতুন ধাপ: google-services.json তৈরি করা ---
+
+      # --- ধাপ ৪: google-services.json তৈরি করা ---
       - name: Create google-services.json
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           echo $GOOGLE_SERVICES_JSON | base64 -d > app/google-services.json
 
-      # ধাপ ৪: gradlew ফাইলকে এক্সিকিউট করার অনুমতি দেওয়া
+      # --- ধাপ ৫: gradlew পারমিশন ---
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # ধাপ ৫: সাইন করা রিলিজ APK তৈরি করা
+      # --- ধাপ ৬: সাইন করা রিলিজ APK তৈরি করা ---
       - name: Build Signed Release APK
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
@@ -51,81 +52,61 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          # প্রজেক্ট প্রপার্টি হিসেবেও তথ্য পাস করা হচ্ছে (বুলেটপ্রুফ সমাধান)
           ./gradlew assembleRelease \
             -PRELEASE_KEYSTORE_FILE=${{ env.RELEASE_KEYSTORE_FILE }} \
             -PRELEASE_KEYSTORE_PASSWORD=${{ env.RELEASE_KEYSTORE_PASSWORD }} \
             -PRELEASE_KEY_ALIAS=${{ env.RELEASE_KEY_ALIAS }} \
             -PRELEASE_KEY_PASSWORD=${{ env.RELEASE_KEY_PASSWORD }}
 
-      # ধাপ ৬ (ডিবাগিং): APK ফাইলটি কোথায় তৈরি হয়েছে তা প্রিন্ট করা
-      - name: List Release Directory Files for Debugging
-        run: ls -R app/build/outputs/apk/release
-
-      # ধাপ ৭: রিলিজ APK ফাইলটিকে Artifact হিসেবে আপলোড করা
+      # --- ধাপ ৭: APK Artifact আপলোড ---
       - name: Upload Release APK as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: StreamX-Ultra-Release-APK
           path: app/build/outputs/apk/release/*.apk
 
-      # ধাপ ৮: রিলিজ নোট তৈরি এবং সংস্করণ তথ্য সংগ্রহ করা (Updated for v1.2)
-      - name: Create Release Notes and Get Version Info
-        id: create_notes
-        run: |
-          VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | sed -n 's/.*versionName = "\(.*\)".*/\1/p')
-          
-          # নতুন রিলিজ নোট তৈরি করা হচ্ছে (v1.2)
-          echo "🚀 StreamX Ultra v1.2 – Visual Intelligence & Player Mastery" > RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
+      # --- ধাপ ৮: StreamX Bot - অটোমেটিক রিলিজ নোট জেনারেট করা ---
+      - name: "StreamX Bot: Generate Release Notes"
+        id: build_changelog
+        uses: mikepenz/release-changelog-builder-action@v4
+        with:
+          toTag: ${{ github.ref_name }}
+          # Bot কনফিগারেশন: কমিট মেসেজ অনুযায়ী ক্যাটাগরি তৈরি হবে
+          configurationJson: |
+            {
+              "template": "# 🚀 StreamX Ultra ${{ github.ref_name }}\n\n## 📋 Change Log\n#{{changelog}}\n\n---\n\n### 📦 Download Info\n- **Version**: ${{ github.ref_name }}\n- **Status**: Stable Release\n\n🤖 *Generated by StreamX Bot* | © AeonCoreX™",
+              "categories": [
+                {
+                    "title": "## ✨ New Features",
+                    "labels": ["feat", "feature", "new", "add"]
+                },
+                {
+                    "title": "## 🐛 Bug Fixes",
+                    "labels": ["fix", "bug", "hotfix", "patch"]
+                },
+                {
+                    "title": "## 🎨 UI/UX Improvements",
+                    "labels": ["ui", "design", "style", "ux"]
+                },
+                {
+                    "title": "## ⚡ Performance & Refactoring",
+                    "labels": ["perf", "refactor", "chore", "clean"]
+                }
+              ],
+              "ignore_labels": ["release", "ignore", "ci"],
+              "sort": "label"
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }} # আপনার সেট করা টোকেন ব্যবহার করা হচ্ছে
 
-          echo "The most significant UI/UX update yet. Redefined Home Screen & Cinema-Grade Player Experience." >> RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-
-          echo "🎨 Aesthetic & Functional Home UI" >> RELEASE_NOTES.md
-          echo "---------------------------------" >> RELEASE_NOTES.md
-          echo "🔹 **Futuristic Glassmorphism Design:** All channel cards now feature a modern glass-effect with dynamic shadows." >> RELEASE_NOTES.md
-          echo "🔹 **Auto-Sliding Featured Banner:** Top banner now slides automatically and supports direct one-tap play." >> RELEASE_NOTES.md
-          echo "🔹 **Pull-to-Refresh:** Swipe down on the home screen to instantly reload channel lists." >> RELEASE_NOTES.md
-          echo "🔹 **Smart Connectivity Handling:** New 'No Internet' popup with retry mechanism for seamless error handling." >> RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-
-          echo "🎥 Next-Gen Player Controls" >> RELEASE_NOTES.md
-          echo "---------------------------------" >> RELEASE_NOTES.md
-          echo "✨ **Pinch-to-Zoom (YouTube Style):** Pinch out to fill the screen, pinch in to fit original aspect ratio." >> RELEASE_NOTES.md
-          echo "✨ **Advanced Aspect Ratio Control:** Manual toggle button for Fit, Fill, and Zoom modes." >> RELEASE_NOTES.md
-          echo "✨ **Smart Live Stream UI:** Replaces seekbar with a 'LIVE' badge for real-time broadcasts." >> RELEASE_NOTES.md
-          echo "✨ **Enhanced Gestures:** Smoother Volume & Brightness controls with visual feedback." >> RELEASE_NOTES.md
-          echo "✨ **Precision Seeking:** Double-tap to skip 10s with new animated indicators." >> RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-
-          echo "🔍 Search & Performance" >> RELEASE_NOTES.md
-          echo "---------------------------------" >> RELEASE_NOTES.md
-          echo "🔸 **Instant Play from Search:** Click any channel in search results to play immediately." >> RELEASE_NOTES.md
-          echo "🔸 **Optimized Search Bar:** Improved responsiveness and close functionality." >> RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-
-          echo "📦 Version Information" >> RELEASE_NOTES.md
-          echo "- Version Name: v1.2" >> RELEASE_NOTES.md
-          echo "- Release Type: Major Feature Update" >> RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-
-          echo "📲 Download APK" >> RELEASE_NOTES.md
-          echo "https://github.com/cybernahid-dev/StreamX-Ultra/releases/download/v1.2/app-release.apk" >> RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-
-          echo "© AeonCoreX™ – All Rights Reserved" >> RELEASE_NOTES.md
-          
-          # আউটপুট সেট করা যাতে পরের ধাপে ব্যবহার করা যায়
-          echo "version_name=${VERSION_NAME}" >> $GITHUB_OUTPUT
-          echo "notes_path=RELEASE_NOTES.md" >> $GITHUB_OUTPUT
-
-      # ধাপ ৯: GitHub রিলিজ তৈরি এবং APK আপলোড করা
+      # --- ধাপ ৯: GitHub রিলিজ তৈরি করা ---
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          # ওয়াইল্ডকার্ড ব্যবহার করে APK ফাইল খুঁজে বের করা হচ্ছে
           files: app/build/outputs/apk/release/*.apk
-          name: "Version ${{ steps.create_notes.outputs.version_name }}"
+          name: "StreamX Ultra ${{ github.ref_name }}"
           tag_name: ${{ github.ref_name }}
-          body_path: ${{ steps.create_notes.outputs.notes_path }}
+          # Bot এর তৈরি করা নোট এখানে সেট করা হলো
+          body: ${{ steps.build_changelog.outputs.changelog }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}

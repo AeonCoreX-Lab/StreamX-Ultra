@@ -34,19 +34,23 @@ data class StreamLink(
 interface YtsApi {
     @GET("api/v2/list_movies.json")
     suspend fun listMovies(
-        @Query("query_term") imdbId: String,
-        @Query("limit") limit: Int = 1
+        @Query("query_term") query: String, // Changed param name to generic 'query'
+        @Query("limit") limit: Int = 5      // Increased limit
     ): YtsResponse
 }
 
 // --- REPOSITORY ---
 object TorrentRepository {
+    // YTS মিরর ডোমেইন ব্যবহার করা হয়েছে যাতে ব্লক থাকলেও কাজ করে
+    private const val YTS_BASE_URL = "https://yts.mx/" 
+    
     private val api = Retrofit.Builder()
-        .baseUrl("https://yts.mx/")
+        .baseUrl(YTS_BASE_URL)
         .addConverterFactory(GsonConverterFactory.create())
         .build()
         .create(YtsApi::class.java)
 
+    // আরো শক্তিশালী ট্র্যাকার লিস্ট (ফাস্ট ডাউনলোডের জন্য)
     private val TRACKERS = listOf(
         "udp://open.demonii.com:1337/announce",
         "udp://tracker.openbittorrent.com:80",
@@ -54,7 +58,11 @@ object TorrentRepository {
         "udp://glotorrents.pw:6969/announce",
         "udp://tracker.opentrackr.org:1337/announce",
         "udp://p4p.arenabg.com:1337",
-        "udp://tracker.leechers-paradise.org:6969"
+        "udp://tracker.leechers-paradise.org:6969",
+        "udp://tracker.internetwarriors.net:1337",
+        "udp://9.rarbg.to:2710",
+        "udp://9.rarbg.me:2710",
+        "udp://exodus.desync.com:6969"
     )
 
     /**
@@ -70,26 +78,38 @@ object TorrentRepository {
     ): List<StreamLink> = withContext(Dispatchers.IO) {
         val allLinks = mutableListOf<StreamLink>()
 
+        Log.d("StreamX_Search", "Searching for: $title | Type: $type | IMDB: $imdbId")
+
         try {
             // 1. Anime Handling (Nyaa)
             if (isAnime) {
-                // Query e.g., "One Piece 1070"
                 val animeResults = TorrentProviders.fetchAnime(title, episode)
                 allLinks.addAll(animeResults.map {
                     StreamLink(it.title, it.magnet, "HD", it.seeds, "NYAA")
                 })
             }
             // 2. Movies (YTS)
-            else if (type == MovieType.MOVIE && imdbId != null) {
+            else if (type == MovieType.MOVIE) {
+                // লজিক আপডেট: প্রথমে IMDB ID দিয়ে, না পেলে টাইটেল দিয়ে
                 val ytsResults = fetchYtsLinks(imdbId, title)
-                allLinks.addAll(ytsResults)
+                if (ytsResults.isNotEmpty()) {
+                    allLinks.addAll(ytsResults)
+                } else {
+                    Log.d("StreamX_Search", "No YTS links found for $title")
+                }
             }
             // 3. Series (EZTV)
-            else if (type == MovieType.SERIES && imdbId != null) {
-                val eztvResults = TorrentProviders.fetchSeries(imdbId, season, episode)
-                allLinks.addAll(eztvResults.map {
-                    StreamLink(it.title, it.magnet, "HD", it.seeds, "EZTV")
-                })
+            else if (type == MovieType.SERIES) {
+                // Series এর জন্য IMDB ID বাধ্যতামূলক EZTV তে
+                if (imdbId != null) {
+                    val eztvResults = TorrentProviders.fetchSeries(imdbId, season, episode)
+                    allLinks.addAll(eztvResults.map {
+                        StreamLink(it.title, it.magnet, "HD", it.seeds, "EZTV")
+                    })
+                } else {
+                    // যদি IMDB ID না থাকে, টাইটেল দিয়ে Nyaa/Other সোর্স চেক করা যেতে পারে (ভবিষ্যতে)
+                    Log.e("StreamX_Search", "Series Error: IMDB ID is null")
+                }
             }
 
         } catch (e: Exception) {
@@ -100,20 +120,40 @@ object TorrentRepository {
         return@withContext allLinks.sortedByDescending { it.seeds }
     }
 
-    private suspend fun fetchYtsLinks(imdbId: String, title: String): List<StreamLink> {
+    private suspend fun fetchYtsLinks(imdbId: String?, title: String): List<StreamLink> {
         return try {
-            val response = api.listMovies(imdbId)
-            val movie = response.data?.movies?.firstOrNull()
-            movie?.torrents?.map {
-                StreamLink(
-                    title = title,
-                    magnet = constructMagnet(it.hash, title),
-                    quality = it.quality,
-                    seeds = it.seeds,
-                    source = "YTS"
-                )
+            var movies: List<YtsMovie>? = null
+
+            // ধাপ ১: IMDB ID দিয়ে খোঁজা (সবচেয়ে সঠিক পদ্ধতি)
+            if (!imdbId.isNullOrEmpty()) {
+                val response = api.listMovies(imdbId)
+                movies = response.data?.movies
+            }
+
+            // ধাপ ২: যদি ID দিয়ে না পাওয়া যায়, টাইটেল দিয়ে খোঁজা (Fallback)
+            if (movies.isNullOrEmpty()) {
+                Log.d("StreamX_Search", "IMDB Search failed, trying Title: $title")
+                // টাইটেলের স্পেশাল ক্যারেক্টার মুছে ফেলা (যেমন: Deadpool & Wolverine -> Deadpool Wolverine)
+                val cleanTitle = title.replace(Regex("[^a-zA-Z0-9 ]"), "")
+                val response = api.listMovies(cleanTitle)
+                movies = response.data?.movies
+            }
+
+            // রেজাল্ট প্রসেস করা
+            movies?.flatMap { movie ->
+                movie.torrents?.map { torrent ->
+                    StreamLink(
+                        title = movie.title,
+                        magnet = constructMagnet(torrent.hash, movie.title),
+                        quality = torrent.quality,
+                        seeds = torrent.seeds,
+                        source = "YTS"
+                    )
+                } ?: emptyList()
             } ?: emptyList()
+
         } catch (e: Exception) {
+            Log.e("TorrentRepo", "YTS API Error: ${e.message}")
             emptyList()
         }
     }

@@ -16,7 +16,7 @@ interface TorrentApi {
     @GET("api/get-torrents")
     suspend fun getSeriesTorrents(
         @Query("imdb_id") imdbId: String, // ID without 'tt'
-        @Query("limit") limit: Int = 30
+        @Query("limit") limit: Int = 50   // Limit বাড়ানো হলো যাতে সিজন/এপিসোড মিস না হয়
     ): EztvResponse
 
     // Nyaa via RSS for Anime (Returns XML String)
@@ -24,7 +24,7 @@ interface TorrentApi {
     suspend fun getAnimeTorrents(
         @Query("page") page: String = "rss",
         @Query("q") query: String,
-        @Query("c") category: String = "1_2", // English Translated Anime
+        @Query("c") category: String = "1_2",
         @Query("s") sort: String = "seeders",
         @Query("o") order: String = "desc"
     ): String
@@ -32,26 +32,32 @@ interface TorrentApi {
 
 object TorrentProviders {
     private val eztvApi = Retrofit.Builder()
-        .baseUrl("https://eztv.re/") // Or https://eztv.wf/
+        .baseUrl("https://eztv.re/") 
         .addConverterFactory(GsonConverterFactory.create())
         .build()
         .create(TorrentApi::class.java)
 
     private val nyaaApi = Retrofit.Builder()
         .baseUrl("https://nyaa.si/")
-        .addConverterFactory(ScalarsConverterFactory.create()) // For XML
+        .addConverterFactory(ScalarsConverterFactory.create()) 
         .build()
         .create(TorrentApi::class.java)
 
     // --- 1. SERIES PROVIDER (EZTV) ---
     suspend fun fetchSeries(imdbId: String, season: Int, episode: Int): List<TorrentResult> {
         return try {
+            // 'tt' বাদ দেওয়া (EZTV শুধু নম্বর চায়)
             val cleanId = imdbId.replace("tt", "")
+            
+            Log.d("StreamX_EZTV", "Fetching Series: $cleanId S${season}E${episode}")
+
             val response = eztvApi.getSeriesTorrents(cleanId)
             
             response.torrents?.filter { 
-                // Filter specifically for the requested Season/Episode
-                it.season.toIntOrNull() == season && it.episode.toIntOrNull() == episode 
+                // String থেকে Int কনভার্শন সেফটি
+                val tSeason = it.season.toIntOrNull() ?: 0
+                val tEpisode = it.episode.toIntOrNull() ?: 0
+                tSeason == season && tEpisode == episode 
             }?.map { 
                 TorrentResult(
                     title = it.title,
@@ -68,27 +74,27 @@ object TorrentProviders {
         }
     }
 
-    // --- 2. ANIME PROVIDER (NYAA via RSS & Jsoup) ---
+    // --- 2. ANIME PROVIDER (NYAA) ---
     suspend fun fetchAnime(queryName: String, episode: Int): List<TorrentResult> {
         return withContext(Dispatchers.IO) {
             try {
-                // Formatting Query: "One Piece 1071" or "Naruto S01E05"
+                // Anime সার্চ লজিক: "Naruto 01" অথবা "Naruto 1"
+                // অনেক সময় "S01E01" ফরম্যাটে এনিমে থাকে না, শুধু এপিসোড নম্বর থাকে
                 val searchQuery = "$queryName $episode"
                 val xmlString = nyaaApi.getAnimeTorrents(query = searchQuery)
                 
-                // Parse XML using Jsoup
                 val doc = Jsoup.parse(xmlString, "", org.jsoup.parser.Parser.xmlParser())
                 val items = doc.select("item")
                 
                 items.mapNotNull { item ->
                     val title = item.select("title").text()
-                    val magnet = item.select("link").text() // Nyaa RSS puts magnet in link
+                    val magnet = item.select("link").text() 
                     
                     if (magnet.startsWith("magnet:?")) {
                          TorrentResult(
                             title = title,
                             magnet = magnet,
-                            seeds = 100, // RSS doesn't guarantee seed count, assuming high
+                            seeds = 50, // Default value as RSS doesn't give seeders inside item always
                             peers = 0,
                             size = "Unknown",
                             source = "NYAA"
