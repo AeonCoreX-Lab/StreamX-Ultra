@@ -130,7 +130,7 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
 
     // DataStore & Lifecycle
-    implementation("androidx.datastore:datastore-preferences:1.0.0")
+    implementation("androidx.datastore:datastore-preferences:1.2.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
 
     // Shimmer & Icons
