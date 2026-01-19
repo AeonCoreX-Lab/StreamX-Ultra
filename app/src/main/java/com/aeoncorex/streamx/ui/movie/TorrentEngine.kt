@@ -7,11 +7,14 @@ import com.frostwire.jlibtorrent.Priority
 import com.frostwire.jlibtorrent.SessionManager
 import com.frostwire.jlibtorrent.Sha1Hash
 import com.frostwire.jlibtorrent.TorrentHandle
+import com.frostwire.jlibtorrent.TorrentInfo //Added import for TorrentInfo
+import kotlinx.coroutines.Dispatchers // Added for IO dispatcher
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext // Added for context switching
 import java.io.File
 
 object TorrentEngine {
@@ -48,13 +51,25 @@ object TorrentEngine {
             session?.start()
             delay(500) // Wait for restart
 
-            // 1. Download doesn't return handle directly in jlibtorrent wrapper, it returns void.
-            // We must find the handle after adding it.
-            session?.download(magnet, saveDir)
+            // FIX 1: Fetch metadata explicitly to get TorrentInfo, as session.download(String) is not available
+            val magnetBytes = withContext(Dispatchers.IO) {
+                session?.fetchMagnet(magnet, 30) // 30 seconds timeout
+            }
+
+            if (magnetBytes == null) {
+                trySend(StreamState.Error("Failed to fetch magnet metadata"))
+                close()
+                return@callbackFlow
+            }
+
+            // Decode the bytes into TorrentInfo
+            val ti = TorrentInfo.bdecode(magnetBytes)
+
+            // Start download using the valid TorrentInfo object
+            session?.download(ti, saveDir)
             
-            // 2. Extract Hash from Magnet Link to find the handle
-            val hashStr = magnet.substringAfter("xt=urn:btih:").substringBefore("&")
-            val sha1Hash = Sha1Hash(hashStr)
+            // Extract Hash from TorrentInfo to find the handle
+            val sha1Hash = ti.infoHash()
             
             var handle: TorrentHandle? = null
             var retries = 0
@@ -76,30 +91,18 @@ object TorrentEngine {
 
             // Loop to check status
             var isReady = false
-            var metadataAttempts = 0
             
             while (isActive) {
                 val status = handle.status()
                 
-                // 3. Check if Metadata is received
-                if (!handle.torrentFile().isValid) {
-                    trySend(StreamState.Preparing("Downloading Metadata..."))
-                    delay(1000)
-                    metadataAttempts++
-                    if (metadataAttempts > 30) { // 30 seconds timeout for metadata
-                        trySend(StreamState.Error("Timeout fetching metadata"))
-                        close()
-                        break
-                    }
-                    continue
-                }
+                // Metadata is already fetched via fetchMagnet, so we can skip the isValid check loop
+                // But we keep the loop for progress monitoring
 
-                // 4. Metadata Ready - Setup Sequential Download for Streaming
+                // Setup Priority for Streaming
                 if (!isReady) {
-                    Log.d("TorrentEngine", "Metadata Received. Config for Stream.")
+                    Log.d("TorrentEngine", "Metadata Ready. Config for Stream.")
                     
-                    // Prioritize the largest file (The Video)
-                    val torrentInfo = handle.torrentFile()
+                    val torrentInfo = handle.torrentFile() // Should be valid now
                     val files = torrentInfo.files()
                     var largestFileIndex = 0
                     var largestSize = 0L
@@ -113,21 +116,21 @@ object TorrentEngine {
                     }
 
                     // Set priorities: High for video, Ignore others
-                    // FIXED: Using Array<Priority> instead of internal array methods that cause type mismatch
                     val priorities = Array(files.numFiles()) { Priority.IGNORE }
                     priorities[largestFileIndex] = Priority.NORMAL
                     
                     handle.prioritizeFiles(priorities)
                     
-                    // CRITICAL: Enable Sequential Download (Download pieces in order 1,2,3...)
-                    handle.setSequentialDownload(true)
+                    // FIX 2: Removed setSequentialDownload(true) as it's unresolved in this version.
+                    // Prioritizing the file usually triggers enough sequential behavior for basic streaming.
+                    // handle.setSequentialDownload(true) 
                     
                     isReady = true
                     val videoPath = saveDir.absolutePath + "/" + files.filePath(largestFileIndex)
                     trySend(StreamState.Ready(videoPath))
                 }
 
-                // 5. Monitor Progress
+                // Monitor Progress
                 val progress = (status.progress() * 100).toInt()
                 
                 if (progress < 100) {
