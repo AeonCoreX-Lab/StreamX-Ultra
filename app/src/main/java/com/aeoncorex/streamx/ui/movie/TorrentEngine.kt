@@ -7,14 +7,11 @@ import com.frostwire.jlibtorrent.Priority
 import com.frostwire.jlibtorrent.SessionManager
 import com.frostwire.jlibtorrent.Sha1Hash
 import com.frostwire.jlibtorrent.TorrentHandle
-import com.frostwire.jlibtorrent.TorrentInfo //Added import for TorrentInfo
-import kotlinx.coroutines.Dispatchers // Added for IO dispatcher
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.withContext // Added for context switching
 import java.io.File
 
 object TorrentEngine {
@@ -44,41 +41,34 @@ object TorrentEngine {
         if (!saveDir.exists()) saveDir.mkdirs()
 
         try {
-            trySend(StreamState.Preparing("Fetching Metadata..."))
+            trySend(StreamState.Preparing("Initializing Session..."))
             
-            // Clean previous downloads to avoid conflict logic for this demo
-            session?.stop() 
-            session?.start()
-            delay(500) // Wait for restart
+            // Restart session to clear previous handles (Optional, helps with single-stream focus)
+            session?.pause()
+            session?.resume()
 
-            // FIX 1: Fetch metadata explicitly to get TorrentInfo, as session.download(String) is not available
-            val magnetBytes = withContext(Dispatchers.IO) {
-                session?.fetchMagnet(magnet, 30) // 30 seconds timeout
-            }
-
-            if (magnetBytes == null) {
-                trySend(StreamState.Error("Failed to fetch magnet metadata"))
+            // 1. Extract Hash from Magnet Link to track it
+            val hashStr = parseMagnetHash(magnet)
+            if (hashStr == null) {
+                trySend(StreamState.Error("Invalid Magnet Link Format"))
                 close()
                 return@callbackFlow
             }
 
-            // Decode the bytes into TorrentInfo
-            val ti = TorrentInfo.bdecode(magnetBytes)
+            val sha1Hash = Sha1Hash(hashStr)
 
-            // Start download using the valid TorrentInfo object
-            session?.download(ti, saveDir)
-            
-            // Extract Hash from TorrentInfo to find the handle
-            val sha1Hash = ti.infoHash()
-            
+            // 2. Start Download (Async)
+            // This adds the magnet to the session and starts fetching metadata automatically
+            session?.download(magnet, saveDir)
+
             var handle: TorrentHandle? = null
             var retries = 0
             
-            // Wait for handle to appear in session
-            while (isActive && handle == null && retries < 20) {
+            // 3. Find the TorrentHandle in the session
+            while (isActive && handle == null && retries < 50) {
                 handle = session?.find(sha1Hash)
                 if (handle == null) {
-                    delay(500)
+                    delay(200)
                     retries++
                 }
             }
@@ -89,20 +79,25 @@ object TorrentEngine {
                 return@callbackFlow
             }
 
-            // Loop to check status
+            // 4. Wait for Metadata
+            trySend(StreamState.Preparing("Fetching Metadata..."))
+            
+            while (isActive && !handle.status().hasMetadata()) {
+                val progress = (handle.status().progress() * 100).toInt()
+                // Metadata fetching usually doesn't show normal progress, but we wait
+                delay(500)
+            }
+
+            // 5. Metadata Ready - Configure Priorities
             var isReady = false
             
             while (isActive) {
                 val status = handle.status()
                 
-                // Metadata is already fetched via fetchMagnet, so we can skip the isValid check loop
-                // But we keep the loop for progress monitoring
-
-                // Setup Priority for Streaming
-                if (!isReady) {
+                if (!isReady && status.hasMetadata()) {
                     Log.d("TorrentEngine", "Metadata Ready. Config for Stream.")
                     
-                    val torrentInfo = handle.torrentFile() // Should be valid now
+                    val torrentInfo = handle.torrentFile()
                     val files = torrentInfo.files()
                     var largestFileIndex = 0
                     var largestSize = 0L
@@ -121,9 +116,8 @@ object TorrentEngine {
                     
                     handle.prioritizeFiles(priorities)
                     
-                    // FIX 2: Removed setSequentialDownload(true) as it's unresolved in this version.
-                    // Prioritizing the file usually triggers enough sequential behavior for basic streaming.
-                    // handle.setSequentialDownload(true) 
+                    // Prioritize the first and last pieces of the file for smoother streaming start
+                    // (Optional optimization, jlibtorrent handles some of this)
                     
                     isReady = true
                     val videoPath = saveDir.absolutePath + "/" + files.filePath(largestFileIndex)
@@ -132,9 +126,13 @@ object TorrentEngine {
 
                 // Monitor Progress
                 val progress = (status.progress() * 100).toInt()
-                
+                val seeds = status.numSeeds()
+                val downloadRate = status.downloadRate() / 1024 // KB/s
+
                 if (progress < 100) {
                     trySend(StreamState.Buffering(progress))
+                    // Optional: You can send download rate in the message
+                    // trySend(StreamState.Preparing("Buffering $progress% ($seeds seeds, $downloadRate KB/s)"))
                 }
 
                 delay(1000)
@@ -152,6 +150,17 @@ object TorrentEngine {
 
     fun stop() {
         session?.pause()
+    }
+
+    // Helper to extract SHA1 Hex from Magnet URI
+    private fun parseMagnetHash(magnet: String): String? {
+        return try {
+            val pattern = "xt=urn:btih:([a-fA-F0-9]{40})".toRegex()
+            val match = pattern.find(magnet)
+            match?.groupValues?.get(1)
+        } catch (e: Exception) {
+            null
+        }
     }
 }
 

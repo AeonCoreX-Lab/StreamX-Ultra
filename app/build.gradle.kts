@@ -71,12 +71,14 @@ android {
         kotlinCompilerExtensionVersion = "1.5.10"
     }
 
+    // --- এই অংশটি Stripping Error সমাধান করবে ---
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
         jniLibs {
-            useLegacyPackaging = true
+            // jlibtorrent লাইব্রেরি স্ট্রিপ করা বন্ধ করবে
+            keepDebugSymbols += "**/libjlibtorrent*.so"
         }
     }
 }
