@@ -16,7 +16,7 @@ jobs:
     steps:
       # --- ধাপ ১: রিপোজিটরির কোড আনা ---
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0 # ইতিহাস চেক করার জন্য সম্পূর্ণ হিস্ট্রি আনা প্রয়োজন
 

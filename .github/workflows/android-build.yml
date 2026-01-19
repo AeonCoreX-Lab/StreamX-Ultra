@@ -13,7 +13,7 @@ jobs:
     steps:
       # ধাপ ১: রিপোজিটরির কোড আনা
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # ধাপ ২: JDK 17 সেটআপ করা
       - name: Set up JDK 17
