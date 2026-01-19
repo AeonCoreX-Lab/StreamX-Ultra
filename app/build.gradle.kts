@@ -12,16 +12,16 @@ android {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4 
-        versionName = "1.2.1" 
+        versionCode = 4
+        versionName = "1.2.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
- 
+
         vectorDrawables {
             useSupportLibrary = true
         }
 
         // --- SECURE API KEY INJECTION ---
-        val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\"" 
+        val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\""
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
     }
 
@@ -64,7 +64,7 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = true 
+        buildConfig = true
     }
 
     composeOptions {
@@ -75,7 +75,6 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
-        // jlibtorrent uses native libraries (.so), ensures they are packaged correctly
         jniLibs {
             useLegacyPackaging = true
         }
@@ -91,10 +90,14 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    
-    // Retrofit & Gson
+
+    // Retrofit & Gson & XML
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    implementation("com.squareup.retrofit2:converter-scalars:2.9.0") // ADDED FOR NYAA RSS (XML)
+
+    // Jsoup for parsing HTML/XML
+    implementation("org.jsoup:jsoup:1.17.2") // ADDED FOR NYAA PARSING
 
     // Foundation & Navigation
     implementation("androidx.compose.foundation:foundation:1.6.7")
@@ -112,14 +115,10 @@ dependencies {
     implementation("androidx.media3:media3-common:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
-    
-       // --- JLIBTORRENT ENGINE (LATEST 2.0.12.7) ---
+
+    // --- JLIBTORRENT ENGINE (LATEST 2.0.12.7) ---
     val jlibtorrentVersion = "2.0.12.7"
-    
-    // Core library
     implementation("com.frostwire:jlibtorrent:$jlibtorrentVersion")
-    
-    // Multi-architecture support for Android
     implementation("com.frostwire:jlibtorrent-android-arm:$jlibtorrentVersion")
     implementation("com.frostwire:jlibtorrent-android-arm64:$jlibtorrentVersion")
     implementation("com.frostwire:jlibtorrent-android-x86:$jlibtorrentVersion")

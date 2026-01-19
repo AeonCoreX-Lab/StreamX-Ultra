@@ -9,7 +9,6 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.converter.scalars.ScalarsConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
-import java.net.URLEncoder
 
 // --- API INTERFACES ---
 interface TorrentApi {
@@ -32,8 +31,6 @@ interface TorrentApi {
 }
 
 object TorrentProviders {
-    // YTS is already in your code, keeping it separate or merging logic here
-    
     private val eztvApi = Retrofit.Builder()
         .baseUrl("https://eztv.re/") // Or https://eztv.wf/
         .addConverterFactory(GsonConverterFactory.create())
@@ -76,7 +73,6 @@ object TorrentProviders {
         return withContext(Dispatchers.IO) {
             try {
                 // Formatting Query: "One Piece 1071" or "Naruto S01E05"
-                // Anime logic is tricky, usually "Show Name + Episode Number" works best for Nyaa
                 val searchQuery = "$queryName $episode"
                 val xmlString = nyaaApi.getAnimeTorrents(query = searchQuery)
                 
@@ -86,16 +82,13 @@ object TorrentProviders {
                 
                 items.mapNotNull { item ->
                     val title = item.select("title").text()
-                    val magnet = item.select("link").text() // Nyaa RSS puts magnet in link or sometimes guid
-                    // Nyaa RSS doesn't always explicitly give seeds in standard tags, 
-                    // usually description contains it or we assume generic based on sorting.
-                    // For better parsing, we might need a Regex on the description tag.
+                    val magnet = item.select("link").text() // Nyaa RSS puts magnet in link
                     
                     if (magnet.startsWith("magnet:?")) {
                          TorrentResult(
                             title = title,
                             magnet = magnet,
-                            seeds = 100, // RSS doesn't guarantee seed count, assuming high for sorted list
+                            seeds = 100, // RSS doesn't guarantee seed count, assuming high
                             peers = 0,
                             size = "Unknown",
                             source = "NYAA"

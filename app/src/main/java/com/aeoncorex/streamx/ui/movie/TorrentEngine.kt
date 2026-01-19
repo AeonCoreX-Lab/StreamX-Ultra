@@ -5,7 +5,8 @@ import android.os.Environment
 import android.util.Log
 import com.frostwire.jlibtorrent.Priority
 import com.frostwire.jlibtorrent.SessionManager
-import com.frostwire.jlibtorrent.TorrentInfo
+import com.frostwire.jlibtorrent.Sha1Hash
+import com.frostwire.jlibtorrent.TorrentHandle
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -15,7 +16,6 @@ import java.io.File
 
 object TorrentEngine {
     private var session: SessionManager? = null
-    private var currentMagnet: String? = null
     private var isEngineRunning = false
 
     fun init(context: Context) {
@@ -36,8 +36,6 @@ object TorrentEngine {
             return@callbackFlow
         }
 
-        currentMagnet = magnet
-        
         // Save directory setup
         val saveDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "StreamX_Cache")
         if (!saveDir.exists()) saveDir.mkdirs()
@@ -45,44 +43,50 @@ object TorrentEngine {
         try {
             trySend(StreamState.Preparing("Fetching Metadata..."))
             
-            // Fetch/Add Torrent
-            // Note: In a real app, you might want to fetch magnet metadata first using fetchMagnet() 
-            // but for speed we add it directly and wait for metadata.
-            session?.download(TorrentInfo.bdecode(ByteArray(0)), saveDir) // Dummy call or logic handling
-            
-            // Correct way to add magnet in jlibtorrent
-            val byteMagnet = magnet // string handling
-            // We rely on session.download to handle magnet strings internally if supported or manual fetch
-            // Simpler approach for jlibtorrent wrapper:
-            
             // Clean previous downloads to avoid conflict logic for this demo
             session?.stop() 
             session?.start()
-            
-            // Wait a bit for session restart
-            delay(100)
+            delay(500) // Wait for restart
 
-            val handle = session?.download(magnet, saveDir)
+            // 1. Download doesn't return handle directly in jlibtorrent wrapper, it returns void.
+            // We must find the handle after adding it.
+            session?.download(magnet, saveDir)
             
+            // 2. Extract Hash from Magnet Link to find the handle
+            val hashStr = magnet.substringAfter("xt=urn:btih:").substringBefore("&")
+            val sha1Hash = Sha1Hash(hashStr)
+            
+            var handle: TorrentHandle? = null
+            var retries = 0
+            
+            // Wait for handle to appear in session
+            while (isActive && handle == null && retries < 20) {
+                handle = session?.find(sha1Hash)
+                if (handle == null) {
+                    delay(500)
+                    retries++
+                }
+            }
+
             if (handle == null) {
-                trySend(StreamState.Error("Invalid Magnet Link"))
+                trySend(StreamState.Error("Failed to add Torrent"))
                 close()
                 return@callbackFlow
             }
 
             // Loop to check status
             var isReady = false
-            var attempts = 0
+            var metadataAttempts = 0
             
             while (isActive) {
                 val status = handle.status()
                 
-                // 1. Check if Metadata is received
+                // 3. Check if Metadata is received
                 if (!handle.torrentFile().isValid) {
                     trySend(StreamState.Preparing("Downloading Metadata..."))
                     delay(1000)
-                    attempts++
-                    if (attempts > 30) { // 30 seconds timeout for metadata
+                    metadataAttempts++
+                    if (metadataAttempts > 30) { // 30 seconds timeout for metadata
                         trySend(StreamState.Error("Timeout fetching metadata"))
                         close()
                         break
@@ -90,7 +94,7 @@ object TorrentEngine {
                     continue
                 }
 
-                // 2. Metadata Ready - Setup Sequential Download for Streaming
+                // 4. Metadata Ready - Setup Sequential Download for Streaming
                 if (!isReady) {
                     Log.d("TorrentEngine", "Metadata Received. Config for Stream.")
                     
@@ -109,12 +113,13 @@ object TorrentEngine {
                     }
 
                     // Set priorities: High for video, Ignore others
-                    val priorities = Priority.array(files.numFiles(), Priority.IGNORE)
+                    // FIXED: Using Array<Priority> instead of internal array methods that cause type mismatch
+                    val priorities = Array(files.numFiles()) { Priority.IGNORE }
                     priorities[largestFileIndex] = Priority.NORMAL
+                    
                     handle.prioritizeFiles(priorities)
                     
                     // CRITICAL: Enable Sequential Download (Download pieces in order 1,2,3...)
-                    // This allows ExoPlayer to play while downloading
                     handle.setSequentialDownload(true)
                     
                     isReady = true
@@ -122,13 +127,9 @@ object TorrentEngine {
                     trySend(StreamState.Ready(videoPath))
                 }
 
-                // 3. Monitor Progress
+                // 5. Monitor Progress
                 val progress = (status.progress() * 100).toInt()
-                val seeds = status.numSeeds()
-                val speed = status.downloadPayloadRate() / 1024 // KB/s
                 
-                // If using ExoPlayer, we just need the file path (sent in Ready). 
-                // But we can update UI with buffering status.
                 if (progress < 100) {
                     trySend(StreamState.Buffering(progress))
                 }
@@ -142,16 +143,12 @@ object TorrentEngine {
         }
 
         awaitClose {
-            // Optional: Stop download on exit or keep correctly in background service
-            // For now, we keep session alive but maybe pause handle
-            // session?.removeTorrent(handle) 
+            // Optional: Cleanup
         }
     }
 
     fun stop() {
-        // Pausing session is better than killing it if user comes back
         session?.pause()
-        currentMagnet = null
     }
 }
 

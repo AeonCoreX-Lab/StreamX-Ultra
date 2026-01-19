@@ -2,6 +2,7 @@ package com.aeoncorex.streamx.ui.movie
 
 import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.net.Uri
@@ -306,12 +307,12 @@ fun NativeExoPlayer(navController: NavController, videoSource: String) {
     }
 }
 
-// Helper to get Activity from Context
+// Helper to get Activity from Context - FIXED
 fun activityContext(context: Context): Activity? {
     var c = context
-    while (c is androidx.compose.ui.platform.AndroidComposeViewAccessibilityDelegateCompat || c is android.content.ContextWrapper) {
+    while (c is ContextWrapper) {
         if (c is Activity) return c
-        c = (c as android.content.ContextWrapper).baseContext
+        c = c.baseContext
     }
     return null
 }
