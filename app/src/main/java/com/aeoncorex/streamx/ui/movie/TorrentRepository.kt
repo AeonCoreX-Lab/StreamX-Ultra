@@ -19,14 +19,16 @@ data class YtsTorrent(
     val quality: String, // 720p, 1080p, 2160p
     val seeds: Int,
     val peers: Int,
-    val size: String
+    val size: String // e.g. "1.5 GB"
 )
 
+// UI তে দেখানোর জন্য Unified Model
 data class StreamLink(
     val title: String,
     val magnet: String,
     val quality: String,
     val seeds: Int,
+    val size: String, // Added Size field for UI
     val source: String
 )
 
@@ -34,14 +36,13 @@ data class StreamLink(
 interface YtsApi {
     @GET("api/v2/list_movies.json")
     suspend fun listMovies(
-        @Query("query_term") query: String, // Changed param name to generic 'query'
-        @Query("limit") limit: Int = 5      // Increased limit
+        @Query("query_term") query: String,
+        @Query("limit") limit: Int = 20
     ): YtsResponse
 }
 
 // --- REPOSITORY ---
 object TorrentRepository {
-    // YTS মিরর ডোমেইন ব্যবহার করা হয়েছে যাতে ব্লক থাকলেও কাজ করে
     private const val YTS_BASE_URL = "https://yts.mx/" 
     
     private val api = Retrofit.Builder()
@@ -50,7 +51,6 @@ object TorrentRepository {
         .build()
         .create(YtsApi::class.java)
 
-    // আরো শক্তিশালী ট্র্যাকার লিস্ট (ফাস্ট ডাউনলোডের জন্য)
     private val TRACKERS = listOf(
         "udp://open.demonii.com:1337/announce",
         "udp://tracker.openbittorrent.com:80",
@@ -59,15 +59,10 @@ object TorrentRepository {
         "udp://tracker.opentrackr.org:1337/announce",
         "udp://p4p.arenabg.com:1337",
         "udp://tracker.leechers-paradise.org:6969",
-        "udp://tracker.internetwarriors.net:1337",
         "udp://9.rarbg.to:2710",
-        "udp://9.rarbg.me:2710",
         "udp://exodus.desync.com:6969"
     )
 
-    /**
-     * Unified function to get stream links for Movie, Series, or Anime
-     */
     suspend fun getStreamLinks(
         type: MovieType,
         title: String,
@@ -77,46 +72,35 @@ object TorrentRepository {
         isAnime: Boolean = false
     ): List<StreamLink> = withContext(Dispatchers.IO) {
         val allLinks = mutableListOf<StreamLink>()
-
-        Log.d("StreamX_Search", "Searching for: $title | Type: $type | IMDB: $imdbId")
+        Log.d("StreamX", "Searching: $title | Type: $type")
 
         try {
-            // 1. Anime Handling (Nyaa)
+            // 1. Anime (NYAA)
             if (isAnime) {
-                val animeResults = TorrentProviders.fetchAnime(title, episode)
-                allLinks.addAll(animeResults.map {
-                    StreamLink(it.title, it.magnet, "HD", it.seeds, "NYAA")
+                val results = TorrentProviders.fetchAnime(title, episode)
+                allLinks.addAll(results.map {
+                    StreamLink(it.title, it.magnet, "HD", it.seeds, it.size, "NYAA")
                 })
             }
-            // 2. Movies (YTS)
-            else if (type == MovieType.MOVIE) {
-                // লজিক আপডেট: প্রথমে IMDB ID দিয়ে, না পেলে টাইটেল দিয়ে
-                val ytsResults = fetchYtsLinks(imdbId, title)
-                if (ytsResults.isNotEmpty()) {
-                    allLinks.addAll(ytsResults)
-                } else {
-                    Log.d("StreamX_Search", "No YTS links found for $title")
+            // 2. Series (EZTV)
+            else if (type == MovieType.SERIES) {
+                if (imdbId != null) {
+                    val results = TorrentProviders.fetchSeries(imdbId, season, episode)
+                    allLinks.addAll(results.map {
+                        StreamLink(it.title, it.magnet, "HD", it.seeds, it.size, "EZTV")
+                    })
                 }
             }
-            // 3. Series (EZTV)
-            else if (type == MovieType.SERIES) {
-                // Series এর জন্য IMDB ID বাধ্যতামূলক EZTV তে
-                if (imdbId != null) {
-                    val eztvResults = TorrentProviders.fetchSeries(imdbId, season, episode)
-                    allLinks.addAll(eztvResults.map {
-                        StreamLink(it.title, it.magnet, "HD", it.seeds, "EZTV")
-                    })
-                } else {
-                    // যদি IMDB ID না থাকে, টাইটেল দিয়ে Nyaa/Other সোর্স চেক করা যেতে পারে (ভবিষ্যতে)
-                    Log.e("StreamX_Search", "Series Error: IMDB ID is null")
-                }
+            // 3. Movies (YTS)
+            else {
+                val ytsLinks = fetchYtsLinks(imdbId, title)
+                allLinks.addAll(ytsLinks)
             }
 
         } catch (e: Exception) {
-            Log.e("TorrentRepo", "Error fetching streams: ${e.message}")
+            Log.e("TorrentRepo", "Error: ${e.message}")
         }
 
-        // Sort by Seeds (Highest first) to ensure best playback
         return@withContext allLinks.sortedByDescending { it.seeds }
     }
 
@@ -124,22 +108,19 @@ object TorrentRepository {
         return try {
             var movies: List<YtsMovie>? = null
 
-            // ধাপ ১: IMDB ID দিয়ে খোঁজা (সবচেয়ে সঠিক পদ্ধতি)
+            // Try via IMDB ID
             if (!imdbId.isNullOrEmpty()) {
                 val response = api.listMovies(imdbId)
                 movies = response.data?.movies
             }
 
-            // ধাপ ২: যদি ID দিয়ে না পাওয়া যায়, টাইটেল দিয়ে খোঁজা (Fallback)
+            // Fallback via Title
             if (movies.isNullOrEmpty()) {
-                Log.d("StreamX_Search", "IMDB Search failed, trying Title: $title")
-                // টাইটেলের স্পেশাল ক্যারেক্টার মুছে ফেলা (যেমন: Deadpool & Wolverine -> Deadpool Wolverine)
                 val cleanTitle = title.replace(Regex("[^a-zA-Z0-9 ]"), "")
                 val response = api.listMovies(cleanTitle)
                 movies = response.data?.movies
             }
 
-            // রেজাল্ট প্রসেস করা
             movies?.flatMap { movie ->
                 movie.torrents?.map { torrent ->
                     StreamLink(
@@ -147,13 +128,12 @@ object TorrentRepository {
                         magnet = constructMagnet(torrent.hash, movie.title),
                         quality = torrent.quality,
                         seeds = torrent.seeds,
+                        size = torrent.size, // YTS provides size directly
                         source = "YTS"
                     )
                 } ?: emptyList()
             } ?: emptyList()
-
         } catch (e: Exception) {
-            Log.e("TorrentRepo", "YTS API Error: ${e.message}")
             emptyList()
         }
     }

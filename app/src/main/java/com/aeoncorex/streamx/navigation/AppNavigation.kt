@@ -25,6 +25,7 @@ import com.aeoncorex.streamx.ui.movie.MovieScreen
 import com.aeoncorex.streamx.ui.movie.MoviePlayerScreen // Movie/Torrent Player
 import com.aeoncorex.streamx.ui.movie.MovieDetailsScreen
 import com.aeoncorex.streamx.ui.movie.MovieSettingsScreen
+import com.aeoncorex.streamx.ui.movie.MovieLinkSelectionScreen
 // REMOVED: MovieServerSelectionScreen import
 
 @Composable
@@ -68,10 +69,33 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             MovieDetailsScreen(navController, movieId, type)
         }
 
-        // REMOVED: SERVER SELECTION ROUTE
+         // --- NEW: LINK SELECTION SCREEN ---
+        composable(
+            route = "link_selection/{imdbId}/{title}/{type}/{season}/{episode}",
+            arguments = listOf(
+                navArgument("imdbId") { type = NavType.StringType },
+                navArgument("title") { type = NavType.StringType },
+                navArgument("type") { type = NavType.StringType },
+                navArgument("season") { type = NavType.IntType },
+                navArgument("episode") { type = NavType.IntType }
+            )
+        ) { backStackEntry ->
+            val imdbId = backStackEntry.arguments?.getString("imdbId") ?: ""
+            val title = backStackEntry.arguments?.getString("title") ?: ""
+            val type = backStackEntry.arguments?.getString("type") ?: "MOVIE"
+            val season = backStackEntry.arguments?.getInt("season") ?: 0
+            val episode = backStackEntry.arguments?.getInt("episode") ?: 0
 
-        // --- MOVIE PLAYER ROUTE (For Torrents/Movies) ---
-        // এটি MoviePlayerScreen ব্যবহার করবে
+            MovieLinkSelectionScreen(
+                navController = navController,
+                imdbId = imdbId,
+                title = title,
+                type = type,
+                season = season,
+                episode = episode
+            )
+        }
+         // --- MOVIE PLAYER ---
         composable(
             route = "movie_player/{encodedUrl}",
             arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
