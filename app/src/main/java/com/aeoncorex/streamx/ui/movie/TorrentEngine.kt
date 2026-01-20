@@ -5,6 +5,8 @@ import android.os.Environment
 import android.util.Log
 import com.frostwire.jlibtorrent.Priority
 import com.frostwire.jlibtorrent.SessionManager
+import com.frostwire.jlibtorrent.Sha1Hash
+import com.frostwire.jlibtorrent.TorrentHandle
 import com.frostwire.jlibtorrent.TorrentInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
@@ -22,112 +24,162 @@ object TorrentEngine {
     fun init(context: Context) {
         if (session == null) {
             session = SessionManager()
+            // Setting up settings for streaming optimization
             session?.start()
-            // Streaming Settings Optimization
-            val settings = session?.settingsPack()
-            settings?.setInteger("active_downloads", 4)
-            settings?.setInteger("active_seeds", 4)
-            session?.applySettings(settings)
-            
             isEngineRunning = true
+            Log.d("TorrentEngine", "LibTorrent Session Started")
         }
     }
 
+    // Returns a Flow that emits status and eventually the File Path
     fun startStreaming(magnet: String): Flow<StreamState> = callbackFlow {
-        if (session == null) {
+        if (session == null || !isEngineRunning) {
             trySend(StreamState.Error("Engine not initialized"))
             close()
             return@callbackFlow
         }
 
-        val saveDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "StreamX_Temp")
+        // Save directory setup
+        val saveDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "StreamX_Cache")
         if (!saveDir.exists()) saveDir.mkdirs()
 
         try {
-            trySend(StreamState.Preparing("Fetching Metadata..."))
+            trySend(StreamState.Preparing("Initializing Session..."))
+            
+            // Restart session to clear previous handles (Optional, helps with single-stream focus)
+            session?.pause()
+            session?.resume()
 
-            val metadata = withContext(Dispatchers.IO) {
-                session?.fetchMagnet(magnet, 30, saveDir)
-            }
-
-            if (metadata == null) {
-                trySend(StreamState.Error("Metadata Timeout. Check Internet."))
+            // 1. Extract Hash from Magnet Link to track it
+            val hashStr = parseMagnetHash(magnet)
+            if (hashStr == null) {
+                trySend(StreamState.Error("Invalid Magnet Link Format"))
                 close()
                 return@callbackFlow
             }
 
-            val torrentInfo = TorrentInfo.bdecode(metadata)
-            trySend(StreamState.Preparing("Starting Engine..."))
-            
-            session?.download(torrentInfo, saveDir)
+            val sha1Hash = Sha1Hash(hashStr)
 
-            // Find the handle
-            var handle = session?.find(torrentInfo.infoHash())
-            var attempts = 0
-            while (handle == null && attempts < 20) {
-                delay(200)
-                handle = session?.find(torrentInfo.infoHash())
-                attempts++
+            // 2. Fetch Metadata (Required before download in this version)
+            trySend(StreamState.Preparing("Fetching Metadata..."))
+            
+            // fetchMagnet is blocking, so we run it on the IO dispatcher
+            // FIXED: Added 'saveDir' as the 3rd parameter required by the library
+            val metadataBytes = withContext(Dispatchers.IO) {
+                session?.fetchMagnet(magnet, 30, saveDir)
             }
 
-            if (handle != null) {
-                // --- CRITICAL FOR STREAMING: SEQUENTIAL DOWNLOAD ---
-                handle.isSequentialDownload = true
-                
-                // Find largest file (the video)
-                val files = torrentInfo.files()
-                var largestIndex = 0
-                var largestSize = 0L
-                for (i in 0 until files.numFiles()) {
-                    if (files.fileSize(i) > largestSize) {
-                        largestSize = files.fileSize(i)
-                        largestIndex = i
-                    }
+            if (metadataBytes == null) {
+                trySend(StreamState.Error("Timeout: Could not fetch torrent metadata"))
+                close()
+                return@callbackFlow
+            }
+
+            // Decode the raw bytes into a TorrentInfo object
+            val torrentInfo = try {
+                TorrentInfo.bdecode(metadataBytes)
+            } catch (e: Exception) {
+                trySend(StreamState.Error("Invalid Metadata received"))
+                close()
+                return@callbackFlow
+            }
+
+            // 3. Start Download using the TorrentInfo object
+            trySend(StreamState.Preparing("Starting Download..."))
+            session?.download(torrentInfo, saveDir)
+
+            var handle: TorrentHandle? = null
+            var retries = 0
+            
+            // 4. Find the TorrentHandle in the session
+            while (isActive && handle == null && retries < 50) {
+                handle = session?.find(sha1Hash)
+                if (handle == null) {
+                    delay(200)
+                    retries++
                 }
+            }
 
-                // Set Priority: Video gets TOP priority, others IGNORE
-                val priorities = Array(files.numFiles()) { Priority.IGNORE }
-                priorities[largestIndex] = Priority.SEVEN // Highest Priority
-                handle.prioritizeFiles(priorities)
+            if (handle == null) {
+                trySend(StreamState.Error("Failed to add Torrent"))
+                close()
+                return@callbackFlow
+            }
 
-                val videoPath = saveDir.absolutePath + "/" + files.filePath(largestIndex)
+            // 5. Metadata is already ready (since we provided TorrentInfo). Configure Priorities.
+            var isReady = false
+            
+            while (isActive) {
+                val status = handle.status()
                 
-                // Wait for a tiny buffer (1%) before sending Ready signal
-                var isPlaying = false
-                while (isActive) {
-                    val status = handle.status()
-                    val progress = (status.progress() * 100).toInt()
-                    val downloadRate = status.downloadRate() / 1024 // KB/s
-
-                    if (!isPlaying && progress > 1) { // 1% buffer হলেই প্লে শুরু
-                        isPlaying = true
-                        trySend(StreamState.Ready(videoPath))
-                    }
-
-                    if (isPlaying && progress < 100) {
-                        trySend(StreamState.Buffering(progress, downloadRate))
-                    }
+                if (!isReady) {
+                    Log.d("TorrentEngine", "Metadata Ready. Config for Stream.")
                     
-                    delay(1000)
+                    val ti = handle.torrentFile() // Use the handle's info
+                    val files = ti.files()
+                    var largestFileIndex = 0
+                    var largestSize = 0L
+                    
+                    for (i in 0 until files.numFiles()) {
+                        val size = files.fileSize(i)
+                        if (size > largestSize) {
+                            largestSize = size
+                            largestFileIndex = i
+                        }
+                    }
+
+                    // Set priorities: High for video (NORMAL), Ignore others
+                    val priorities = Array(files.numFiles()) { Priority.IGNORE }
+                    priorities[largestFileIndex] = Priority.NORMAL
+                    
+                    handle.prioritizeFiles(priorities)
+                    
+                    isReady = true
+                    val videoPath = saveDir.absolutePath + "/" + files.filePath(largestFileIndex)
+                    trySend(StreamState.Ready(videoPath))
                 }
-            } else {
-                trySend(StreamState.Error("Torrent Handle Failed"))
+
+                // Monitor Progress
+                val progress = (status.progress() * 100).toInt()
+                
+                // Only send buffering updates if not 100% yet
+                if (progress < 100) {
+                    trySend(StreamState.Buffering(progress))
+                }
+
+                delay(1000)
             }
 
         } catch (e: Exception) {
-            trySend(StreamState.Error("Engine Error: ${e.message}"))
+            Log.e("TorrentEngine", "Error: ${e.message}")
+            trySend(StreamState.Error(e.message ?: "Unknown Error"))
         }
-        awaitClose { }
+
+        awaitClose {
+            // Optional: Cleanup
+        }
     }
 
     fun stop() {
         session?.pause()
     }
+
+    // Helper to extract SHA1 Hex from Magnet URI
+    private fun parseMagnetHash(magnet: String): String? {
+        return try {
+            val pattern = "xt=urn:btih:([a-fA-F0-9]{40})".toRegex()
+            val match = pattern.find(magnet)
+            match?.groupValues?.get(1)
+        } catch (e: Exception) {
+            null
+        }
+    }
 }
 
+// Keeping the same State class so UI doesn't break
 sealed class StreamState {
     data class Preparing(val message: String) : StreamState()
-    data class Buffering(val progress: Int, val speed: Int) : StreamState() // speed in KB/s
+    data class Buffering(val progress: Int) : StreamState()
     data class Ready(val filePath: String) : StreamState()
     data class Error(val message: String) : StreamState()
 }
