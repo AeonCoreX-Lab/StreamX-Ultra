@@ -134,6 +134,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
 
     // Shimmer & Icons
-    implementation("com.valentinilk.shimmer:compose-shimmer:1.2.0")
+    implementation("com.valentinilk.shimmer:compose-shimmer:1.3.3")
     implementation("androidx.compose.material:material-icons-extended:1.6.7")
 }
