@@ -9,7 +9,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material3.*
@@ -36,7 +35,11 @@ fun MovieLinkSelectionScreen(
     season: Int,
     episode: Int
 ) {
-    val decodedTitle = remember { URLDecoder.decode(title, "UTF-8") }
+    // Decode title safely
+    val decodedTitle = remember { 
+        try { URLDecoder.decode(title, "UTF-8") } catch(e: Exception) { title }
+    }
+    
     var streamLinks by remember { mutableStateOf<List<StreamLink>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -45,9 +48,14 @@ fun MovieLinkSelectionScreen(
     LaunchedEffect(Unit) {
         try {
             val movieType = if (type == "MOVIE") MovieType.MOVIE else MovieType.SERIES
-            // Basic Anime Check (Logic can be improved)
-            val isAnime = decodedTitle.contains("Naruto", true) || decodedTitle.contains("One Piece", true)
             
+            // Simple Logic for Anime detection
+            val isAnime = decodedTitle.contains("Naruto", true) || 
+                          decodedTitle.contains("One Piece", true) || 
+                          decodedTitle.contains("Boruto", true) ||
+                          decodedTitle.contains("Bleach", true) ||
+                          decodedTitle.contains("Attack on Titan", true)
+
             val links = TorrentRepository.getStreamLinks(
                 type = movieType,
                 title = decodedTitle,
@@ -58,7 +66,7 @@ fun MovieLinkSelectionScreen(
             )
             
             if (links.isEmpty()) {
-                errorMessage = "No stream links found. Try using a VPN."
+                errorMessage = "No links found. Try a different server or use VPN."
             } else {
                 streamLinks = links
             }
@@ -101,7 +109,7 @@ fun MovieLinkSelectionScreen(
                 ) {
                     CircularProgressIndicator(color = Color.Cyan)
                     Spacer(Modifier.height(16.dp))
-                    Text("Scanning Torrent Network...", color = Color.Gray)
+                    Text("Searching YTS, EZTV & Cloud...", color = Color.Gray)
                 }
             } else if (errorMessage != null) {
                 Column(
@@ -128,6 +136,7 @@ fun MovieLinkSelectionScreen(
                     }
                     items(streamLinks) { link ->
                         StreamLinkCard(link) {
+                            // If it's a magnet, encode it. If it's http_stream, handle differently if needed.
                             val encodedUrl = URLEncoder.encode(link.magnet, "UTF-8")
                             navController.navigate("movie_player/$encodedUrl")
                         }
@@ -156,9 +165,12 @@ fun StreamLinkCard(link: StreamLink, onClick: () -> Unit) {
             Box(
                 modifier = Modifier
                     .background(
-                        if (link.quality.contains("2160") || link.quality.contains("4k")) Color(0xFF9C27B0) 
-                        else if (link.quality.contains("1080")) Color(0xFF00C853)
-                        else Color.DarkGray, 
+                        when {
+                            link.quality.contains("2160") || link.quality.contains("4k") -> Color(0xFF9C27B0)
+                            link.quality.contains("1080") -> Color(0xFF00C853)
+                            link.source == "Web" -> Color(0xFF2979FF) // Blue for Web/Consumet
+                            else -> Color.DarkGray
+                        }, 
                         RoundedCornerShape(6.dp)
                     )
                     .padding(horizontal = 8.dp, vertical = 4.dp)

@@ -2,7 +2,10 @@ package com.aeoncorex.streamx.ui.movie
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.coroutineScope
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
@@ -19,17 +22,17 @@ data class YtsTorrent(
     val quality: String, // 720p, 1080p, 2160p
     val seeds: Int,
     val peers: Int,
-    val size: String // e.g. "1.5 GB"
+    val size: String
 )
 
-// UI তে দেখানোর জন্য Unified Model
+// UI Unified Model
 data class StreamLink(
     val title: String,
     val magnet: String,
     val quality: String,
     val seeds: Int,
-    val size: String, // Added Size field for UI
-    val source: String
+    val size: String,
+    val source: String // "YTS", "EZTV", "NYAA", "CONSUMET"
 )
 
 // --- API INTERFACE ---
@@ -43,8 +46,8 @@ interface YtsApi {
 
 // --- REPOSITORY ---
 object TorrentRepository {
-    private const val YTS_BASE_URL = "https://yts.mx/" 
-    
+    private const val YTS_BASE_URL = "https://yts.mx/"
+
     private val api = Retrofit.Builder()
         .baseUrl(YTS_BASE_URL)
         .addConverterFactory(GsonConverterFactory.create())
@@ -72,50 +75,72 @@ object TorrentRepository {
         isAnime: Boolean = false
     ): List<StreamLink> = withContext(Dispatchers.IO) {
         val allLinks = mutableListOf<StreamLink>()
-        Log.d("StreamX", "Searching: $title | Type: $type")
+        Log.d("StreamX", "Searching: $title | Type: $type | IMDB: $imdbId")
 
-        try {
-            // 1. Anime (NYAA)
+        // Run searches in parallel to save time
+        coroutineScope {
+            val jobs = mutableListOf<kotlinx.coroutines.Deferred<List<StreamLink>>>()
+
+            // 1. ANIME SOURCE (NYAA)
             if (isAnime) {
-                val results = TorrentProviders.fetchAnime(title, episode)
-                allLinks.addAll(results.map {
-                    StreamLink(it.title, it.magnet, "HD", it.seeds, it.size, "NYAA")
+                jobs.add(async {
+                    try {
+                        TorrentProviders.fetchAnime(title, episode).map {
+                            StreamLink(it.title, it.magnet, "HD", it.seeds, it.size, "NYAA")
+                        }
+                    } catch (e: Exception) { emptyList() }
                 })
             }
-            // 2. Series (EZTV)
-            else if (type == MovieType.SERIES) {
-                if (imdbId != null) {
-                    val results = TorrentProviders.fetchSeries(imdbId, season, episode)
-                    allLinks.addAll(results.map {
-                        StreamLink(it.title, it.magnet, "HD", it.seeds, it.size, "EZTV")
-                    })
-                }
-            }
-            // 3. Movies (YTS)
-            else {
-                val ytsLinks = fetchYtsLinks(imdbId, title)
-                allLinks.addAll(ytsLinks)
+
+            // 2. SERIES SOURCE (EZTV)
+            if (type == MovieType.SERIES && imdbId != null) {
+                jobs.add(async {
+                    try {
+                        TorrentProviders.fetchSeries(imdbId, season, episode).map {
+                            StreamLink(it.title, it.magnet, "HD", it.seeds, it.size, "EZTV")
+                        }
+                    } catch (e: Exception) { emptyList() }
+                })
             }
 
-        } catch (e: Exception) {
-            Log.e("TorrentRepo", "Error: ${e.message}")
+            // 3. MOVIE SOURCE (YTS)
+            if (type == MovieType.MOVIE) {
+                jobs.add(async { fetchYtsLinks(imdbId, title) })
+            }
+
+            // 4. HTTP BACKUP SOURCE (CONSUMET) - Runs for everything
+            jobs.add(async {
+                try {
+                    // Normalize title for search
+                    val searchTitle = if(type == MovieType.SERIES) "$title season $season" else title
+                    ConsumetProvider.getStreamLinks(searchTitle, type.toString())
+                } catch (e: Exception) { emptyList() }
+            })
+
+            // Wait for all to finish and add to list
+            val results = jobs.awaitAll()
+            results.forEach { allLinks.addAll(it) }
         }
 
-        return@withContext allLinks.sortedByDescending { it.seeds }
+        // Remove duplicates based on Magnet URL and sort by seeds
+        return@withContext allLinks
+            .distinctBy { it.magnet }
+            .sortedByDescending { it.seeds }
     }
 
     private suspend fun fetchYtsLinks(imdbId: String?, title: String): List<StreamLink> {
         return try {
             var movies: List<YtsMovie>? = null
 
-            // Try via IMDB ID
-            if (!imdbId.isNullOrEmpty()) {
+            // Try via IMDB ID first (More accurate)
+            if (!imdbId.isNullOrEmpty() && imdbId != "null") {
                 val response = api.listMovies(imdbId)
                 movies = response.data?.movies
             }
 
-            // Fallback via Title
+            // Fallback via Title if ID failed
             if (movies.isNullOrEmpty()) {
+                // Remove special chars for better search match
                 val cleanTitle = title.replace(Regex("[^a-zA-Z0-9 ]"), "")
                 val response = api.listMovies(cleanTitle)
                 movies = response.data?.movies
@@ -128,12 +153,13 @@ object TorrentRepository {
                         magnet = constructMagnet(torrent.hash, movie.title),
                         quality = torrent.quality,
                         seeds = torrent.seeds,
-                        size = torrent.size, // YTS provides size directly
+                        size = torrent.size,
                         source = "YTS"
                     )
                 } ?: emptyList()
             } ?: emptyList()
         } catch (e: Exception) {
+            Log.e("TorrentRepo", "YTS Error: ${e.message}")
             emptyList()
         }
     }
