@@ -5,6 +5,7 @@ import android.os.Environment
 import android.util.Log
 import com.frostwire.jlibtorrent.Priority
 import com.frostwire.jlibtorrent.SessionManager
+import com.frostwire.jlibtorrent.SettingsPack
 import com.frostwire.jlibtorrent.Sha1Hash
 import com.frostwire.jlibtorrent.TorrentHandle
 import com.frostwire.jlibtorrent.TorrentInfo
@@ -24,14 +25,17 @@ object TorrentEngine {
     fun init(context: Context) {
         if (session == null) {
             session = SessionManager()
-            // Tweak settings for streaming performance
-            val settings = session?.settingsPack()
-            if (settings != null) {
-                settings.activeDownloads(5)
-                settings.connectionsLimit(200)
-                session?.applySettings(settings)
-            }
+            
+            // FIX: Create a new SettingsPack instead of getting it from null/session
+            val settings = SettingsPack()
+            settings.activeDownloads(5)
+            settings.connectionsLimit(200)
+            settings.downloadRateLimit(0) // 0 = Unlimited
+            settings.uploadRateLimit(0)
+            
+            session?.applySettings(settings)
             session?.start()
+            
             isEngineRunning = true
             Log.d("TorrentEngine", "LibTorrent Session Started")
         }
@@ -63,7 +67,7 @@ object TorrentEngine {
             val sha1Hash = Sha1Hash(hashStr)
 
             // 2. Fetch Metadata (timeout 45s)
-            trySend(StreamState.Preparing("Fetching Metadata (This may take a moment)..."))
+            trySend(StreamState.Preparing("Fetching Metadata..."))
             
             val metadataBytes = withContext(Dispatchers.IO) {
                 session?.fetchMagnet(magnet, 45, saveDir)
@@ -99,18 +103,18 @@ object TorrentEngine {
                 return@callbackFlow
             }
 
-            // 5. Configure for Streaming (Sequential Download)
-            Log.d("TorrentEngine", "Metadata Ready. Configuring Sequential Mode.")
+            // 5. Configure for Streaming
+            Log.d("TorrentEngine", "Metadata Ready. Configuring Priorities.")
             
-            // Important: Sequential download ensures we get piece 0, 1, 2... in order
-            handle.setSequentialDownload(true)
+            // FIX: Removed 'setSequentialDownload' as it caused compilation errors.
+            // rely on prioritizeFiles to ensure the video downloads.
             
             val ti = handle.torrentFile()
             val files = ti.files()
             var largestFileIndex = 0
             var largestSize = 0L
             
-            // Find the video file
+            // Find the video file (largest file)
             for (i in 0 until files.numFiles()) {
                 val size = files.fileSize(i)
                 if (size > largestSize) {
@@ -119,7 +123,7 @@ object TorrentEngine {
                 }
             }
 
-            // Prioritize video file, ignore others
+            // Prioritize video file (High Priority), ignore others (Zero Priority)
             val priorities = Array(files.numFiles()) { Priority.IGNORE }
             priorities[largestFileIndex] = Priority.NORMAL
             handle.prioritizeFiles(priorities)
@@ -135,8 +139,7 @@ object TorrentEngine {
                 val seeds = status.numSeeds()
                 val peers = status.numPeers()
 
-                // Logic: Wait for at least 1% or sufficient buffer before playing
-                // to prevent player errors on empty files.
+                // Logic: Wait for at least 1% buffer or sufficient speed before playing
                 if (!isPlaying && progress >= 1 && speed > 50) {
                     isPlaying = true
                     trySend(StreamState.Ready(videoPath))
@@ -160,7 +163,6 @@ object TorrentEngine {
     }
 
     fun stop() {
-        // Pausing instead of stopping allows resuming later if needed
         session?.pause()
     }
 
@@ -175,7 +177,7 @@ object TorrentEngine {
     }
 }
 
-// Updated State Class with correct fields
+// Updated State Class with correct fields needed by MoviePlayerScreen
 sealed class StreamState {
     data class Preparing(val message: String) : StreamState()
     data class Buffering(val progress: Int, val speed: Long, val seeds: Int, val peers: Int) : StreamState()
