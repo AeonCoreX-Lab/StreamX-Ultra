@@ -3,7 +3,6 @@ package com.aeoncorex.streamx.ui.movie
 import android.app.Activity
 import android.content.Context
 import android.content.pm.ActivityInfo
-import android.media.AudioManager
 import android.net.Uri
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -25,7 +24,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -34,17 +32,14 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.navigation.NavController
-import kotlinx.coroutines.delay
 import java.io.File
 import java.net.URLDecoder
 
@@ -57,8 +52,13 @@ fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) 
     // States
     var streamUrl by remember { mutableStateOf<String?>(null) }
     var statusMessage by remember { mutableStateOf("Initializing Torrent Engine...") }
+    
+    // Stats
     var downloadSpeed by remember { mutableStateOf("0 KB/s") }
+    var seedsCount by remember { mutableIntStateOf(0) }
+    var peersCount by remember { mutableIntStateOf(0) }
     var progress by remember { mutableIntStateOf(0) }
+    
     var isError by remember { mutableStateOf(false) }
     
     // Engine Logic
@@ -69,9 +69,12 @@ fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) 
                 when(state) {
                     is StreamState.Preparing -> statusMessage = state.message
                     is StreamState.Buffering -> {
-                        statusMessage = "Downloading Metadata..."
+                        statusMessage = "Downloading Metadata... ${state.progress}%"
                         progress = state.progress
+                        // FIXED: Now we access valid properties
                         downloadSpeed = "${state.speed} KB/s"
+                        seedsCount = state.seeds
+                        peersCount = state.peers
                     }
                     is StreamState.Ready -> {
                         streamUrl = state.filePath
@@ -84,6 +87,7 @@ fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) 
                 }
             }
         } else {
+            // Direct URL (HTTP)
             streamUrl = decodedInput
         }
     }
@@ -96,10 +100,13 @@ fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) 
         if (streamUrl != null) {
             AdvancedExoPlayer(navController, streamUrl!!)
             
-            // Show buffer stats if torrenting
+            // Show Overlay Stats if Torrenting
             if (decodedInput.startsWith("magnet:?")) {
                 Box(Modifier.align(Alignment.TopEnd).padding(top = 40.dp, end = 16.dp)) {
-                    Text("▼ $downloadSpeed | $progress%", color = Color.Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("▼ $downloadSpeed", color = Color.Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("S:$seedsCount P:$peersCount | $progress%", color = Color.Yellow, fontSize = 10.sp)
+                    }
                 }
             }
         } else {
@@ -107,8 +114,16 @@ fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) 
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator(color = Color.Red)
                 Spacer(Modifier.height(16.dp))
-                Text(statusMessage, color = Color.White)
-                if(progress > 0) LinearProgressIndicator(progress = progress / 100f, modifier = Modifier.width(200.dp).padding(top = 8.dp), color = Color.Red)
+                Text(statusMessage, color = Color.White, fontSize = 14.sp)
+                
+                if (progress > 0) {
+                    LinearProgressIndicator(
+                        progress = progress / 100f, 
+                        modifier = Modifier.width(200.dp).padding(top = 8.dp), 
+                        color = Color.Red
+                    )
+                    Text("$progress%", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                }
                 
                 if (isError) {
                     Spacer(Modifier.height(16.dp))
@@ -141,7 +156,7 @@ fun AdvancedExoPlayer(navController: NavController, videoSource: String) {
     var isControlsVisible by remember { mutableStateOf(false) }
     var isLocked by remember { mutableStateOf(false) }
     var showTrackSelector by remember { mutableStateOf(false) }
-    var trackSelectorType by remember { mutableStateOf(C.TRACK_TYPE_TEXT) } // Subtitle or Audio
+    var trackSelectorType by remember { mutableStateOf(C.TRACK_TYPE_TEXT) }
 
     // Immersive Mode
     DisposableEffect(Unit) {
@@ -191,14 +206,12 @@ fun AdvancedExoPlayer(navController: NavController, videoSource: String) {
                         Icon(Icons.Default.ArrowBack, null, tint = Color.White)
                     }
                     Row {
-                        // Audio Track Button
                         IconButton(onClick = { 
                             trackSelectorType = C.TRACK_TYPE_AUDIO
                             showTrackSelector = true 
                         }) {
                             Icon(Icons.Default.Audiotrack, null, tint = Color.White)
                         }
-                        // Subtitle Button
                         IconButton(onClick = { 
                             trackSelectorType = C.TRACK_TYPE_TEXT
                             showTrackSelector = true 
@@ -231,7 +244,7 @@ fun AdvancedExoPlayer(navController: NavController, videoSource: String) {
             }
         }
 
-        // 3. Track Selector Dialog (Subtitle/Audio)
+        // 3. Track Selector Dialog
         if (showTrackSelector) {
             TrackSelectionDialog(
                 player = exoPlayer,
@@ -242,17 +255,16 @@ fun AdvancedExoPlayer(navController: NavController, videoSource: String) {
     }
 }
 
-// --- TRACK SELECTION LOGIC ---
+// --- TRACK SELECTION UI ---
 @OptIn(UnstableApi::class)
 @Composable
 fun TrackSelectionDialog(player: ExoPlayer, trackType: Int, onDismiss: () -> Unit) {
     val tracks = remember { player.currentTracks }
     val trackList = remember {
         val list = mutableListOf<TrackInfo>()
-        // Add "Off" option for subtitles
         if (trackType == C.TRACK_TYPE_TEXT) list.add(TrackInfo("Off", null, -1))
         
-        tracks.groups.forEachIndexed { groupIndex, group ->
+        tracks.groups.forEachIndexed { _, group ->
             if (group.type == trackType) {
                 for (i in 0 until group.length) {
                     val format = group.getTrackFormat(i)
@@ -276,13 +288,11 @@ fun TrackSelectionDialog(player: ExoPlayer, trackType: Int, onDismiss: () -> Uni
                             .fillMaxWidth()
                             .clickable {
                                 if (track.group == null) {
-                                    // Turn off
                                     player.trackSelectionParameters = player.trackSelectionParameters
                                         .buildUpon()
                                         .setTrackTypeDisabled(trackType, true)
                                         .build()
                                 } else {
-                                    // Select track
                                     player.trackSelectionParameters = player.trackSelectionParameters
                                         .buildUpon()
                                         .setTrackTypeDisabled(trackType, false)
