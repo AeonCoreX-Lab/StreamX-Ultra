@@ -7,10 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SignalCellularAlt
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,26 +32,39 @@ fun MovieLinkSelectionScreen(
     season: Int,
     episode: Int
 ) {
-    // Decode title safely
-    val decodedTitle = remember { 
-        try { URLDecoder.decode(title, "UTF-8") } catch(e: Exception) { title }
-    }
+    val decodedTitle = remember { try { URLDecoder.decode(title, "UTF-8") } catch(e: Exception) { title } }
     
-    var streamLinks by remember { mutableStateOf<List<StreamLink>>(emptyList()) }
+    // States
+    var torrentLinks by remember { mutableStateOf<List<StreamLink>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Fetch Links on Load
+    // --- WEB SERVER LINKS GENERATION (Direct Logic) ---
+    val webServers = remember {
+        val servers = mutableListOf<ServerLink>()
+        if (imdbId != "null" && imdbId.isNotEmpty()) {
+            if (type == "SERIES" || type == "TV") {
+                // TV Shows
+                servers.add(ServerLink("Server 1 (VidSrc - Auto)", "https://vidsrc.to/embed/tv/$imdbId/$season/$episode"))
+                servers.add(ServerLink("Server 2 (SuperEmbed)", "https://superembed.stream/tv/$imdbId/$season/$episode"))
+                servers.add(ServerLink("Server 3 (2Embed)", "https://www.2embed.cc/embedtv/$imdbId&s=$season&e=$episode"))
+            } else {
+                // Movies
+                servers.add(ServerLink("Server 1 (VidSrc - Auto)", "https://vidsrc.to/embed/movie/$imdbId"))
+                servers.add(ServerLink("Server 2 (SuperEmbed)", "https://superembed.stream/movie/$imdbId"))
+                servers.add(ServerLink("Server 3 (2Embed)", "https://www.2embed.cc/embed/$imdbId"))
+            }
+            // Universal Magnet Player (Web)
+            servers.add(ServerLink("Server 4 (WebTorrent Cloud)", "https://webtor.io/show?imdb=$imdbId"))
+        }
+        servers
+    }
+
+    // Fetch Torrents
     LaunchedEffect(Unit) {
         try {
             val movieType = if (type == "MOVIE") MovieType.MOVIE else MovieType.SERIES
-            
-            // Simple Logic for Anime detection
-            val isAnime = decodedTitle.contains("Naruto", true) || 
-                          decodedTitle.contains("One Piece", true) || 
-                          decodedTitle.contains("Boruto", true) ||
-                          decodedTitle.contains("Bleach", true) ||
-                          decodedTitle.contains("Attack on Titan", true)
+            val isAnime = decodedTitle.contains("Naruto", true) || decodedTitle.contains("One Piece", true)
 
             val links = TorrentRepository.getStreamLinks(
                 type = movieType,
@@ -64,14 +74,9 @@ fun MovieLinkSelectionScreen(
                 episode = episode,
                 isAnime = isAnime
             )
-            
-            if (links.isEmpty()) {
-                errorMessage = "No links found. Try a different server or use VPN."
-            } else {
-                streamLinks = links
-            }
+            torrentLinks = links
         } catch (e: Exception) {
-            errorMessage = "Error: ${e.localizedMessage}"
+            errorMessage = "Torrent Error: ${e.localizedMessage}"
         } finally {
             isLoading = false
         }
@@ -102,41 +107,49 @@ fun MovieLinkSelectionScreen(
                 .padding(padding)
                 .background(Brush.verticalGradient(listOf(Color(0xFF0F0F15), Color.Black)))
         ) {
-            if (isLoading) {
-                Column(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    CircularProgressIndicator(color = Color.Cyan)
-                    Spacer(Modifier.height(16.dp))
-                    Text("Searching YTS, EZTV & Cloud...", color = Color.Gray)
+            LazyColumn(contentPadding = PaddingValues(16.dp)) {
+                
+                // --- SECTION 1: FAST WEB SERVERS ---
+                item {
+                    Text("⚡ FAST CLOUD SERVERS (NO DOWNLOAD)", color = Color.Green, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                 }
-            } else if (errorMessage != null) {
-                Column(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(Icons.Default.CloudDownload, null, tint = Color.Red, modifier = Modifier.size(48.dp))
-                    Spacer(Modifier.height(8.dp))
-                    Text(errorMessage!!, color = Color.White)
-                    Button(
-                        onClick = { navController.popBackStack() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-                    ) { Text("Go Back") }
-                }
-            } else {
-                LazyColumn(contentPadding = PaddingValues(16.dp)) {
-                    item {
-                        Text(
-                            "${streamLinks.size} Links Found", 
-                            color = Color.Cyan, 
-                            fontSize = 12.sp, 
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
+                
+                if (webServers.isEmpty()) {
+                    item { Text("No server links available (Missing IMDB ID)", color = Color.Gray, fontSize = 12.sp) }
+                } else {
+                    items(webServers) { server ->
+                        ServerCard(server) {
+                            // Open in AdBlock Web Player
+                            val encodedUrl = URLEncoder.encode(server.url, "UTF-8")
+                            navController.navigate("webview_player/$encodedUrl")
+                        }
                     }
-                    items(streamLinks) { link ->
+                }
+
+                item { 
+                    Spacer(Modifier.height(20.dp))
+                    Divider(color = Color.DarkGray, thickness = 1.dp)
+                    Spacer(Modifier.height(20.dp))
+                }
+
+                // --- SECTION 2: TORRENTS ---
+                item {
+                    Text("💎 4K/1080p TORRENTS (NATIVE PLAYER)", color = Color.Cyan, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
+                }
+
+                if (isLoading) {
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Cyan, strokeWidth = 2.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text("Searching P2P Networks...", color = Color.Gray, fontSize = 12.sp)
+                        }
+                    }
+                } else if (torrentLinks.isEmpty()) {
+                    item { Text("No torrents found. Please use Server 1 or 2 above.", color = Color.Gray) }
+                } else {
+                    items(torrentLinks) { link ->
                         StreamLinkCard(link) {
-                            // If it's a magnet, encode it. If it's http_stream, handle differently if needed.
                             val encodedUrl = URLEncoder.encode(link.magnet, "UTF-8")
                             navController.navigate("movie_player/$encodedUrl")
                         }
@@ -147,61 +160,66 @@ fun MovieLinkSelectionScreen(
     }
 }
 
+// Data Model & UI for Web Servers
+data class ServerLink(val name: String, val url: String)
+
 @Composable
-fun StreamLinkCard(link: StreamLink, onClick: () -> Unit) {
+fun ServerCard(server: ServerLink, onClick: () -> Unit) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
-        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF202025)),
+        shape = RoundedCornerShape(8.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp)
+            .padding(vertical = 4.dp)
             .clickable { onClick() }
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Quality Badge
+            Icon(Icons.Default.Public, null, tint = Color.Green, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(16.dp))
+            Text(server.name, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Spacer(Modifier.weight(1f))
+            Icon(Icons.Default.PlayCircleOutline, null, tint = Color.White)
+        }
+    }
+}
+
+// Existing StreamLinkCard (Kept as requested)
+@Composable
+fun StreamLinkCard(link: StreamLink, onClick: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).clickable { onClick() }
+    ) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                modifier = Modifier
-                    .background(
-                        when {
-                            link.quality.contains("2160") || link.quality.contains("4k") -> Color(0xFF9C27B0)
-                            link.quality.contains("1080") -> Color(0xFF00C853)
-                            link.source == "Web" -> Color(0xFF2979FF) // Blue for Web/Consumet
-                            else -> Color.DarkGray
-                        }, 
-                        RoundedCornerShape(6.dp)
-                    )
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                modifier = Modifier.background(
+                    when {
+                        link.quality.contains("2160") || link.quality.contains("4k") -> Color(0xFF9C27B0)
+                        link.quality.contains("1080") -> Color(0xFF00C853)
+                        else -> Color.DarkGray
+                    }, RoundedCornerShape(6.dp)
+                ).padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
                 Text(link.quality, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
             }
-
             Spacer(Modifier.width(16.dp))
-
             Column(modifier = Modifier.weight(1f)) {
                 Text(link.source, color = Color.Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    link.title.replace(".", " "), 
-                    color = Color.White, 
-                    fontSize = 14.sp, 
-                    maxLines = 1, 
-                    overflow = TextOverflow.Ellipsis
-                )
+                Text(link.title.replace(".", " "), color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.CloudDownload, null, tint = Color.Gray, modifier = Modifier.size(12.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(link.size, color = Color.Gray, fontSize = 12.sp)
-                    
                     Spacer(Modifier.width(12.dp))
-                    
                     Icon(Icons.Default.SignalCellularAlt, null, tint = if(link.seeds > 20) Color.Green else Color.Yellow, modifier = Modifier.size(12.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("${link.seeds} Seeds", color = if(link.seeds > 20) Color.Green else Color.Yellow, fontSize = 12.sp)
                 }
             }
-
             Icon(Icons.Default.PlayArrow, null, tint = Color.White)
         }
     }

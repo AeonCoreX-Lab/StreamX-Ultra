@@ -26,7 +26,8 @@ import com.aeoncorex.streamx.ui.movie.MoviePlayerScreen // Movie/Torrent Player
 import com.aeoncorex.streamx.ui.movie.MovieDetailsScreen
 import com.aeoncorex.streamx.ui.movie.MovieSettingsScreen
 import com.aeoncorex.streamx.ui.movie.MovieLinkSelectionScreen
-// REMOVED: MovieServerSelectionScreen import
+import com.aeoncorex.streamx.ui.movie.AdBlockWebView
+
 
 @Composable
 fun AppNavigation(themeViewModel: ThemeViewModel) {
@@ -107,6 +108,16 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         // --- MUSIC SECTION ROUTES ---
         composable("music") { MusicScreen(navController) }
         composable("music_player") { MusicPlayerScreen(navController) }
+        
+        // --- NEW: AD-FREE WEB PLAYER ROUTE ---
+        composable(
+            route = "webview_player/{url}",
+            arguments = listOf(navArgument("url") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val url = backStackEntry.arguments?.getString("url") ?: ""
+            // Decode URL handled automatically by NavType mostly, but safety check inside component
+            AdBlockWebView(url = url, navController = navController)
+        }
         
         // --- OTHER ROUTES ---
         composable("settings") { SettingsScreen(navController) }
