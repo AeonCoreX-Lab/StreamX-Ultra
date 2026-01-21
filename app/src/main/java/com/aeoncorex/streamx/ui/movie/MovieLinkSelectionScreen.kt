@@ -39,23 +39,48 @@ fun MovieLinkSelectionScreen(
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // --- WEB SERVER LINKS GENERATION (Direct Logic) ---
-    val webServers = remember {
+    // --- WEB SERVER LINKS (UPDATED) ---
+    val webServers = remember(imdbId, type, season, episode) {
         val servers = mutableListOf<ServerLink>()
+        
         if (imdbId != "null" && imdbId.isNotEmpty()) {
-            if (type == "SERIES" || type == "TV") {
-                // TV Shows
-                servers.add(ServerLink("Server 1 (VidSrc - Auto)", "https://vidsrc.to/embed/tv/$imdbId/$season/$episode"))
-                servers.add(ServerLink("Server 2 (SuperEmbed)", "https://superembed.stream/tv/$imdbId/$season/$episode"))
-                servers.add(ServerLink("Server 3 (2Embed)", "https://www.2embed.cc/embedtv/$imdbId&s=$season&e=$episode"))
+            val isSeries = type.equals("SERIES", ignoreCase = true) || type.equals("TV", ignoreCase = true)
+
+            // 1. VidSrc Pro (Multi-Audio)
+            // Docs: https://vidsrc.xyz/embed/movie?imdb=tt123 or https://vidsrc.xyz/embed/tv?imdb=tt123&season=1&episode=1
+            val vidsrcProUrl = if (isSeries) {
+                "https://vidsrc.xyz/embed/tv?imdb=$imdbId&season=$season&episode=$episode"
             } else {
-                // Movies
-                servers.add(ServerLink("Server 1 (VidSrc - Auto)", "https://vidsrc.to/embed/movie/$imdbId"))
-                servers.add(ServerLink("Server 2 (SuperEmbed)", "https://superembed.stream/movie/$imdbId"))
-                servers.add(ServerLink("Server 3 (2Embed)", "https://www.2embed.cc/embed/$imdbId"))
+                "https://vidsrc.xyz/embed/movie?imdb=$imdbId"
             }
-            // Universal Magnet Player (Web)
-            servers.add(ServerLink("Server 4 (WebTorrent Cloud)", "https://webtor.io/show?imdb=$imdbId"))
+            servers.add(ServerLink("VidSrc Pro (Multi-Audio)", vidsrcProUrl))
+
+            // 2. SuperEmbed (VIP Player)
+            // Docs: https://multiembed.mov/directstream.php?video_id=tt123 (&s=1&e=1)
+            val superEmbedUrl = if (isSeries) {
+                "https://multiembed.mov/directstream.php?video_id=$imdbId&s=$season&e=$episode"
+            } else {
+                "https://multiembed.mov/directstream.php?video_id=$imdbId"
+            }
+            servers.add(ServerLink("SuperEmbed (VIP Fast)", superEmbedUrl))
+
+            // 3. VidSrc Me (Backup)
+            // Docs: https://vidsrc.me/embed/movie?imdb=tt123
+            val vidsrcMeUrl = if (isSeries) {
+                "https://vidsrc.me/embed/tv?imdb=$imdbId&season=$season&episode=$episode"
+            } else {
+                "https://vidsrc.me/embed/movie?imdb=$imdbId"
+            }
+            servers.add(ServerLink("VidSrc Me (Backup)", vidsrcMeUrl))
+
+            // 4. 2Embed (Clean)
+            // Docs: https://www.2embed.stream/2embed.php?id=tt123 or tv-2embed.php?id=tt123&season=1&episode=1
+            val twoEmbedUrl = if (isSeries) {
+                "https://www.2embed.stream/tv-2embed.php?id=$imdbId&season=$season&episode=$episode"
+            } else {
+                "https://www.2embed.stream/2embed.php?id=$imdbId"
+            }
+            servers.add(ServerLink("2Embed (Clean)", twoEmbedUrl))
         }
         servers
     }
@@ -186,7 +211,7 @@ fun ServerCard(server: ServerLink, onClick: () -> Unit) {
     }
 }
 
-// Existing StreamLinkCard (Kept as requested)
+// Existing StreamLinkCard
 @Composable
 fun StreamLinkCard(link: StreamLink, onClick: () -> Unit) {
     Card(
