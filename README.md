@@ -155,6 +155,17 @@ Contributions make the open-source community an amazing place to learn, inspire,
  * Commit your Changes (git commit -m 'Add some AmazingFeature')
  * Push to the Branch (git push origin feature/AmazingFeature)
  * Open a Pull Request
+ 
+## ❤️ Support My Work
+
+If you find my work useful and would like to support independent development and research,  
+you can do so here:
+
+<p align="center">
+  <a href="https://support-page-eta.vercel.app/" target="_blank">
+    <img src="https://img.shields.io/badge/Support%20My%20Work-Donate-blueviolet?style=for-the-badge&logo=bitcoin" />
+  </a>
+</p>
 
 ## 📄 License
 Distributed under the MIT License. See LICENSE for more information.
