@@ -94,9 +94,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
 
     // Retrofit & Gson & XML
-    implementation("com.squareup.retrofit2:retrofit:2.9.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("com.squareup.retrofit2:converter-scalars:2.9.0") // ADDED FOR NYAA RSS (XML)
+    implementation("com.squareup.retrofit2:retrofit:3.0.0")
+    implementation("com.squareup.retrofit2:converter-gson:3.0.0")
+    implementation("com.squareup.retrofit2:converter-scalars:3.0.0") // ADDED FOR NYAA RSS (XML)
 
     // Jsoup for parsing HTML/XML
     implementation("org.jsoup:jsoup:1.17.2") // ADDED FOR NYAA PARSING
