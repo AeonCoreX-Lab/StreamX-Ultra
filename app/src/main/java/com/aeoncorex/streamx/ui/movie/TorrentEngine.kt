@@ -22,7 +22,7 @@ object TorrentEngine {
     private var session: SessionManager? = null
     private var isEngineRunning = false
     
-    // বাফার সাইজ মাত্র ৫ মেগাবাইট রাখা হয়েছে যাতে ১-২ সেকেন্ডেই প্লে শুরু হয়
+    // Buffer size set to 5MB for fast playback start
     private const val MIN_BUFFER_SIZE = 5L * 1024 * 1024 
 
     fun init(context: Context) {
@@ -102,9 +102,13 @@ object TorrentEngine {
 
             // --- CRITICAL STREAMING OPTIMIZATION ---
             
-            // A. Set Priorities: Video = HIGH, Others = IGNORE
+            // A. Set Priorities: Video = DEFAULT (Download), Others = IGNORE (Skip)
             val priorities = Array(files.numFiles()) { Priority.IGNORE }
-            priorities[largestFileIndex] = Priority.SEVEN
+            
+            // FIX: Changed from Priority.SEVEN to Priority.DEFAULT to fix compilation error.
+            // DEFAULT ensures the file is downloaded, and SEQUENTIAL_DOWNLOAD flag below ensures streaming order.
+            priorities[largestFileIndex] = Priority.DEFAULT 
+            
             handle.prioritizeFiles(priorities)
 
             // B. Force Sequential Download (Download 0% -> 100% in order)
@@ -125,7 +129,7 @@ object TorrentEngine {
                 val doneBytes = status.totalDone()
 
                 if (!isPlaying) {
-                    // প্লে কন্ডিশন: ৫ মেগাবাইট বাফার অথবা ১% ডাউনলোড
+                    // Play Condition: 5MB buffer or 1% downloaded
                     val isEnoughBuffer = doneBytes > MIN_BUFFER_SIZE
                     val hasStarted = progress >= 1 
                     
@@ -136,7 +140,7 @@ object TorrentEngine {
                         trySend(StreamState.Buffering(progress, speed.toLong(), seeds, peers))
                     }
                 } else {
-                    // প্লে চলাকালীন আপডেট
+                    // Update during playback
                     if (progress < 100) {
                         trySend(StreamState.Buffering(progress, speed.toLong(), seeds, peers))
                     }
