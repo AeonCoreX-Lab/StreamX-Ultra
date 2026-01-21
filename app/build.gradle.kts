@@ -128,7 +128,7 @@ dependencies {
     implementation("org.libtorrent4j:libtorrent4j-android-x86_64:2.1.0-38")
 
     // Coil (Image Loading)
-    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     // DataStore & Lifecycle
     implementation("androidx.datastore:datastore-preferences:1.0.0")
