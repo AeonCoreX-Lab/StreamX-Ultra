@@ -8,7 +8,6 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.annotation.OptIn
-import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -43,6 +42,8 @@ import androidx.navigation.NavController
 import java.io.File
 import java.net.URLDecoder
 
+// ensure StreamState is available in this package
+
 @OptIn(UnstableApi::class)
 @Composable
 fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) {
@@ -51,7 +52,7 @@ fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) 
 
     // States
     var streamUrl by remember { mutableStateOf<String?>(null) }
-    var statusMessage by remember { mutableStateOf("Initializing Torrent Engine...") }
+    var statusMessage by remember { mutableStateOf("Initializing Engine...") }
     
     // Stats
     var downloadSpeed by remember { mutableStateOf("0 KB/s") }
@@ -69,9 +70,8 @@ fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) 
                 when(state) {
                     is StreamState.Preparing -> statusMessage = state.message
                     is StreamState.Buffering -> {
-                        statusMessage = "Downloading Metadata... ${state.progress}%"
+                        statusMessage = "Downloading... ${state.progress}%"
                         progress = state.progress
-                        // FIXED: Now we access valid properties
                         downloadSpeed = "${state.speed} KB/s"
                         seedsCount = state.seeds
                         peersCount = state.peers
@@ -255,7 +255,6 @@ fun AdvancedExoPlayer(navController: NavController, videoSource: String) {
     }
 }
 
-// --- TRACK SELECTION UI ---
 @OptIn(UnstableApi::class)
 @Composable
 fun TrackSelectionDialog(player: ExoPlayer, trackType: Int, onDismiss: () -> Unit) {

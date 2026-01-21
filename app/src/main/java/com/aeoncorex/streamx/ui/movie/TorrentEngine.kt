@@ -3,12 +3,6 @@ package com.aeoncorex.streamx.ui.movie
 import android.content.Context
 import android.os.Environment
 import android.util.Log
-import com.frostwire.jlibtorrent.Priority
-import com.frostwire.jlibtorrent.SessionManager
-import com.frostwire.jlibtorrent.SettingsPack
-import com.frostwire.jlibtorrent.Sha1Hash
-import com.frostwire.jlibtorrent.TorrentHandle
-import com.frostwire.jlibtorrent.TorrentInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
@@ -16,55 +10,56 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import org.libtorrent4j.Priority
+import org.libtorrent4j.SessionManager
+import org.libtorrent4j.SettingsPack
+import org.libtorrent4j.TorrentFlags
+import org.libtorrent4j.TorrentHandle
+import org.libtorrent4j.TorrentInfo
 import java.io.File
 
 object TorrentEngine {
     private var session: SessionManager? = null
     private var isEngineRunning = false
-    private const val STREAM_READY_BUFFER_MB = 15L // 15MB বাফার হলে প্লে হবে
+    
+    // বাফার সাইজ মাত্র ৫ মেগাবাইট রাখা হয়েছে যাতে ১-২ সেকেন্ডেই প্লে শুরু হয়
+    private const val MIN_BUFFER_SIZE = 5L * 1024 * 1024 
 
     fun init(context: Context) {
         if (session == null) {
             session = SessionManager()
             val settings = SettingsPack()
-            settings.activeDownloads(5)
+            
+            // Streaming Optimization Settings
+            settings.activeDownloads(3)
             settings.connectionsLimit(200)
-            settings.downloadRateLimit(0)
+            settings.downloadRateLimit(0) // Unlimited Speed
             settings.uploadRateLimit(0)
-            settings.anonymousMode(false) 
+            settings.anonymousMode(false)
+            
             session?.applySettings(settings)
             session?.start()
             isEngineRunning = true
-            Log.d("TorrentEngine", "LibTorrent Session Started")
+            Log.d("TorrentEngine", "Engine Started")
         }
     }
 
     fun startStreaming(magnet: String): Flow<StreamState> = callbackFlow {
         if (session == null || !isEngineRunning) {
-            trySend(StreamState.Error("Engine not initialized"))
+            trySend(StreamState.Error("Engine Not Initialized"))
             close()
             return@callbackFlow
         }
 
-        // Cache Directory
         val saveDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "StreamX_Cache")
         if (!saveDir.exists()) saveDir.mkdirs()
 
         try {
-            trySend(StreamState.Preparing("Initializing Session..."))
+            trySend(StreamState.Preparing("Connecting to Peers..."))
             
-            val hashStr = parseMagnetHash(magnet) ?: run {
-                trySend(StreamState.Error("Invalid Magnet Link"))
-                close()
-                return@callbackFlow
-            }
-
-            val sha1Hash = Sha1Hash(hashStr)
-
-            // Metadata Fetching
-            trySend(StreamState.Preparing("Fetching Metadata..."))
+            // 1. Fetch Metadata (Timeout 30s)
             val metadataBytes = withContext(Dispatchers.IO) {
-                session?.fetchMagnet(magnet, 45, saveDir)
+                session?.fetchMagnet(magnet, 30, saveDir)
             }
 
             if (metadataBytes == null) {
@@ -74,43 +69,50 @@ object TorrentEngine {
             }
 
             val torrentInfo = TorrentInfo.bdecode(metadataBytes)
+            
+            // 2. Find Largest File (The Movie)
+            val files = torrentInfo.files()
+            var largestFileIndex = 0
+            var largestSize = 0L
+            for (i in 0 until files.numFiles()) {
+                val size = files.fileSize(i)
+                if (size > largestSize) {
+                    largestSize = size
+                    largestFileIndex = i
+                }
+            }
+            
+            // 3. Start Downloading
             session?.download(torrentInfo, saveDir)
 
+            // Wait for handle
             var handle: TorrentHandle? = null
             var retries = 0
+            val sha1Hash = torrentInfo.infoHash()
             while (isActive && handle == null && retries < 50) {
                 handle = session?.find(sha1Hash)
                 if (handle == null) { delay(200); retries++ }
             }
 
             if (handle == null || !handle.isValid) {
-                trySend(StreamState.Error("Failed to start torrent handle"))
+                trySend(StreamState.Error("Failed to start download"))
                 close()
                 return@callbackFlow
             }
 
-            // --- CRITICAL FIX: SEQUENTIAL DOWNLOAD SETUP ---
-            val files = torrentInfo.files()
-            var largestFileIndex = 0
-            var largestSize = 0L
-
-            // সব ফাইল চেক করে মেইন ভিডিও ফাইল বের করা
-            for (i in 0 until files.numFiles()) {
-                if (files.fileSize(i) > largestSize) {
-                    largestSize = files.fileSize(i)
-                    largestFileIndex = i
-                }
-            }
-
-            // শুধুমাত্র ভিডিও ফাইলটি হাই প্রায়োরিটি দেওয়া
+            // --- CRITICAL STREAMING OPTIMIZATION ---
+            
+            // A. Set Priorities: Video = HIGH, Others = IGNORE
             val priorities = Array(files.numFiles()) { Priority.IGNORE }
-            priorities[largestFileIndex] = Priority.SEVEN // Highest Priority
+            priorities[largestFileIndex] = Priority.SEVEN
             handle.prioritizeFiles(priorities)
-            
-            // **Sequential Download অন করা (ভিডিওর শুরু থেকে ডাউনলোড হবে)**
-            handle.setSequentialDownload(true) 
-            
-            val videoPath = saveDir.absolutePath + "/" + files.filePath(largestFileIndex)
+
+            // B. Force Sequential Download (Download 0% -> 100% in order)
+            // This flag is essential for streaming!
+            handle.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+
+            val videoFileName = files.filePath(largestFileIndex)
+            val videoPath = File(saveDir, videoFileName).absolutePath
             var isPlaying = false
 
             // Monitoring Loop
@@ -122,16 +124,19 @@ object TorrentEngine {
                 val peers = status.numPeers()
                 val doneBytes = status.totalDone()
 
-                // Play Logic: 15MB বা ২% ডাউনলোড হলে প্লে হবে
                 if (!isPlaying) {
-                    if (doneBytes > STREAM_READY_BUFFER_MB * 1024 * 1024 || progress >= 2) {
+                    // প্লে কন্ডিশন: ৫ মেগাবাইট বাফার অথবা ১% ডাউনলোড
+                    val isEnoughBuffer = doneBytes > MIN_BUFFER_SIZE
+                    val hasStarted = progress >= 1 
+                    
+                    if (isEnoughBuffer || hasStarted) {
                         isPlaying = true
                         trySend(StreamState.Ready(videoPath))
                     } else {
                         trySend(StreamState.Buffering(progress, speed.toLong(), seeds, peers))
                     }
                 } else {
-                    // প্লে চলাকালীন আপডেট পাঠানো (অপশনাল)
+                    // প্লে চলাকালীন আপডেট
                     if (progress < 100) {
                         trySend(StreamState.Buffering(progress, speed.toLong(), seeds, peers))
                     }
@@ -144,17 +149,13 @@ object TorrentEngine {
             trySend(StreamState.Error(e.message ?: "Unknown Error"))
         }
 
-        awaitClose { /* Keep session alive specifically for background download if needed */ }
+        awaitClose { 
+            // Optional: Pause session to save data when user leaves
+            // session?.pause()
+        }
     }
 
     fun stop() {
-        // session?.pause()
-    }
-
-    private fun parseMagnetHash(magnet: String): String? {
-        return try {
-            val pattern = "xt=urn:btih:([a-fA-F0-9]{40})".toRegex()
-            pattern.find(magnet)?.groupValues?.get(1)
-        } catch (e: Exception) { null }
+        // session?.stop() 
     }
 }

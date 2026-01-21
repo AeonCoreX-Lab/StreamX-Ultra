@@ -77,8 +77,8 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
         jniLibs {
-            // jlibtorrent লাইব্রেরি স্ট্রিপ করা বন্ধ করবে
-            keepDebugSymbols += "**/libjlibtorrent*.so"
+            // Keep native libraries for all architectures
+            keepDebugSymbols += "**/libtorrent4j*.so"
         }
     }
 }
@@ -118,13 +118,14 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
 
-    // --- JLIBTORRENT ENGINE (LATEST 2.0.12.7) ---
-    val jlibtorrentVersion = "2.0.12.7"
-    implementation("com.frostwire:jlibtorrent:$jlibtorrentVersion")
-    implementation("com.frostwire:jlibtorrent-android-arm:$jlibtorrentVersion")
-    implementation("com.frostwire:jlibtorrent-android-arm64:$jlibtorrentVersion")
-    implementation("com.frostwire:jlibtorrent-android-x86:$jlibtorrentVersion")
-    implementation("com.frostwire:jlibtorrent-android-x86_64:$jlibtorrentVersion")
+    // --- LIBTORRENT4J (Version 2.1.0-38) ---
+    // Core Library
+    implementation("org.libtorrent4j:libtorrent4j:2.1.0-38")
+    // Native Libraries for all architectures
+    implementation("org.libtorrent4j:libtorrent4j-android-arm:2.1.0-38")
+    implementation("org.libtorrent4j:libtorrent4j-android-arm64:2.1.0-38")
+    implementation("org.libtorrent4j:libtorrent4j-android-x86:2.1.0-38")
+    implementation("org.libtorrent4j:libtorrent4j-android-x86_64:2.1.0-38")
 
     // Coil (Image Loading)
     implementation("io.coil-kt:coil-compose:2.6.0")
