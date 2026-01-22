@@ -11,6 +11,7 @@ import kotlinx.coroutines.isActive
 import org.libtorrent4j.Priority
 import org.libtorrent4j.SessionManager
 import org.libtorrent4j.SettingsPack
+import org.libtorrent4j.Sha1Hash
 import org.libtorrent4j.TorrentFlags
 import org.libtorrent4j.swig.settings_pack
 import java.io.File
@@ -54,15 +55,24 @@ object TorrentEngine {
             }
 
             // 3. Extract InfoHash Manually (Needed to find the handle later)
-            val infoHash = try {
+            val infoHashStr = try {
                 val uri = Uri.parse(magnetLink)
                 uri.getQueryParameter("xt")?.substringAfter("urn:btih:") ?: ""
             } catch (e: Exception) {
                 ""
             }
 
-            if (infoHash.isEmpty()) {
+            if (infoHashStr.isEmpty()) {
                 trySend(StreamState.Error("Invalid Magnet Link"))
+                close()
+                return@callbackFlow
+            }
+
+            // Create Sha1Hash object once
+            val infoHash = try {
+                Sha1Hash(infoHashStr)
+            } catch (e: Exception) {
+                trySend(StreamState.Error("Invalid Hash Format"))
                 close()
                 return@callbackFlow
             }
@@ -78,7 +88,7 @@ object TorrentEngine {
             // We use the direct download method which accepts the magnet link, save path, and flags.
             // TorrentFlags.SEQUENTIAL_DOWNLOAD ensures piece 0, 1, 2... are downloaded in order for streaming.
             session?.download(finalMagnet, downloadDir, TorrentFlags.SEQUENTIAL_DOWNLOAD)
-            Log.d(TAG, "Download initiated for hash: $infoHash")
+            Log.d(TAG, "Download initiated for hash: $infoHashStr")
 
             trySend(StreamState.Preparing("Connecting to peers..."))
 
@@ -110,8 +120,8 @@ object TorrentEngine {
                             // Set Priorities: High for movie file, Ignore others
                             for (i in 0 until torrentInfo.numFiles()) {
                                 if (i == largestFileIndex) {
-                                    // Priority.NORMAL is the standard download priority
-                                    handle.filePriority(i, Priority.NORMAL) 
+                                    // FIXED: Use Priority.DEFAULT instead of Priority.NORMAL
+                                    handle.filePriority(i, Priority.DEFAULT) 
                                 } else {
                                     handle.filePriority(i, Priority.IGNORE)
                                 }
