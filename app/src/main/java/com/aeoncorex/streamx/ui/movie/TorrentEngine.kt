@@ -1,18 +1,18 @@
 package com.aeoncorex.streamx.ui.movie
 
 import android.content.Context
-import android.net.Uri
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import org.libtorrent4j.Priority
 import org.libtorrent4j.SessionManager
 import org.libtorrent4j.SettingsPack
-import org.libtorrent4j.Sha1Hash
-import org.libtorrent4j.swig.sha1_hash
+import org.libtorrent4j.TorrentInfo
 import org.libtorrent4j.swig.settings_pack
 import java.io.File
 
@@ -45,42 +45,40 @@ object TorrentEngine {
                 Log.d(TAG, "Torrent Session Started")
             }
 
-            // 3. Manually Extract InfoHash from Magnet Link
-            // Format: magnet:?xt=urn:btih:<HASH>&...
-            val uri = Uri.parse(magnetLink)
-            val xt = uri.getQueryParameter("xt") ?: ""
-            val infoHashStr = if (xt.contains("urn:btih:")) {
-                xt.substringAfter("urn:btih:")
-            } else {
-                trySend(StreamState.Error("Invalid Magnet Link: Missing Hash"))
+            trySend(StreamState.Preparing("Fetching Metadata..."))
+
+            // 3. Fetch Metadata (This fixes the 'String vs TorrentInfo' mismatch)
+            // We fetch the .torrent data first using the magnet link.
+            // Timeout is set to 30 seconds.
+            val torrentData: ByteArray? = withContext(Dispatchers.IO) {
+                session?.fetchMagnet(magnetLink, 30)
+            }
+
+            if (torrentData == null) {
+                trySend(StreamState.Error("Failed to fetch metadata. No peers found."))
                 close()
                 return@callbackFlow
             }
 
-            // 4. Create Sha1Hash correctly via SWIG
-            // We create the SWIG object first to avoid ambiguous constructor issues
-            val swigHash = try {
-                sha1_hash(infoHashStr)
-            } catch (e: Exception) {
-                trySend(StreamState.Error("Invalid Hash Format"))
-                close()
-                return@callbackFlow
-            }
-            val infoHash = Sha1Hash(swigHash)
+            // 4. Create TorrentInfo from bytes
+            // Write to a temp file first as TorrentInfo(byte[]) might be unstable in some swig versions
+            val tempFile = File(downloadDir, "meta_${System.currentTimeMillis()}.torrent")
+            tempFile.writeBytes(torrentData)
+            val torrentInfo = TorrentInfo(tempFile)
+            
+            // 5. Start Download using valid TorrentInfo
+            session?.download(torrentInfo, downloadDir)
+            
+            // Get the valid InfoHash directly from the object (Fixes SWIG constructor errors)
+            val infoHash = torrentInfo.infoHash()
+            Log.d(TAG, "Download started. Hash: $infoHash")
 
-            // 5. Start Download
-            // We use the simple download method which handles the magnet parsing internally
-            // for the actual download logic.
-            session?.download(magnetLink, downloadDir)
-            Log.d(TAG, "Download initiated for hash: $infoHashStr")
-
-            trySend(StreamState.Preparing("Metadata..."))
+            trySend(StreamState.Preparing("Starting Download..."))
 
             // 6. Monitoring Loop
             var isPlaying = false
             var fileSelected = false
             var largestFileIndex = -1
-            var isSequentialSet = false
 
             while (isActive) {
                 val handle = session?.find(infoHash)
@@ -88,10 +86,9 @@ object TorrentEngine {
                 if (handle != null && handle.isValid) {
                     val status = handle.status()
 
-                    // A. Metadata Loaded -> Select Largest File
-                    if (!fileSelected && status.hasMetadata()) {
-                        val torrentInfo = handle.torrentFile()
-                        
+                    // A. Select Largest File (The Movie)
+                    if (!fileSelected) {
+                        // Since we already have TorrentInfo, we can do this immediately
                         var maxFileSize = 0L
                         for (i in 0 until torrentInfo.numFiles()) {
                             val fileSize = torrentInfo.files().fileSize(i)
@@ -124,7 +121,6 @@ object TorrentEngine {
 
                     if (!isPlaying && fileSelected) {
                         if (bytesDownloaded > MIN_BUFFER_SIZE) {
-                            val torrentInfo = handle.torrentFile()
                             val fileName = torrentInfo.files().filePath(largestFileIndex)
                             val videoFile = File(downloadDir, fileName)
                             
@@ -139,7 +135,7 @@ object TorrentEngine {
                     } else if (isPlaying) {
                         trySend(StreamState.Buffering(progress, speed.toLong(), seeds, peers))
                     } else {
-                        trySend(StreamState.Preparing("Metadata... S:$seeds P:$peers"))
+                        trySend(StreamState.Preparing("Buffering... S:$seeds P:$peers"))
                     }
                 } else {
                     trySend(StreamState.Preparing("Connecting to peers..."))
@@ -158,7 +154,7 @@ object TorrentEngine {
     }
 
     fun stop() {
-        // session?.stop() // Optional: keep session alive for background download if needed
+        // session?.stop() 
     }
     
     fun clearCache(context: Context) {
