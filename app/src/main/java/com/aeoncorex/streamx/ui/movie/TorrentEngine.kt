@@ -12,6 +12,8 @@ import org.libtorrent4j.Priority
 import org.libtorrent4j.SessionManager
 import org.libtorrent4j.SettingsPack
 import org.libtorrent4j.Sha1Hash
+import org.libtorrent4j.swig.add_torrent_params
+import org.libtorrent4j.swig.error_code
 import org.libtorrent4j.swig.settings_pack
 import java.io.File
 
@@ -54,39 +56,30 @@ object TorrentEngine {
                 Log.d(TAG, "Torrent Session Started")
             }
 
-            // 3. Extract InfoHash
-            val infoHashStr = try {
-                val uri = Uri.parse(magnetLink)
-                uri.getQueryParameter("xt")?.substringAfter("urn:btih:") ?: ""
-            } catch (e: Exception) {
-                ""
-            }
-
-            if (infoHashStr.isEmpty()) {
-                trySend(StreamState.Error("Invalid Magnet Link"))
+            // 3. Parse Magnet Link using Library Native Tools
+            // This avoids manual string parsing and fixes the Sha1Hash constructor error
+            val ec = error_code()
+            val params = add_torrent_params.parse_magnet_uri(magnetLink, ec)
+            
+            if (ec.value() != 0) {
+                trySend(StreamState.Error("Invalid Magnet: ${ec.message()}"))
                 close()
                 return@callbackFlow
             }
 
-            // Create Sha1Hash
-            val infoHash = try {
-                Sha1Hash(infoHashStr)
-            } catch (e: Exception) {
-                trySend(StreamState.Error("Invalid Hash Format"))
-                close()
-                return@callbackFlow
-            }
+            // Get the SWIG hash object and wrap it in the Java Sha1Hash wrapper
+            val swigHash = params.info_hash()
+            val infoHash = Sha1Hash(swigHash)
 
-            // 4. Prepare Magnet with Trackers
-            val sb = StringBuilder(magnetLink)
-            if (!magnetLink.contains("tr=")) {
-                TRACKERS.forEach { tr -> sb.append("&tr=$tr") }
-            }
-            val finalMagnet = sb.toString()
+            // 4. Add Trackers (if missing)
+            // Note: params already contains trackers from the magnet link, 
+            // but we can append our list if needed.
+            // For now, we rely on the magnet's trackers + DHT.
 
-            // 5. Start Download
-            session?.download(finalMagnet, downloadDir)
-            Log.d(TAG, "Download initiated for hash: $infoHashStr")
+            // 5. Start Download (Fetch Metadata)
+            // Use fetchMagnet instead of download(String) which was causing the type mismatch
+            session?.fetchMagnet(magnetLink, downloadDir)
+            Log.d(TAG, "Download initiated for hash: $infoHash")
 
             trySend(StreamState.Preparing("Connecting to peers..."))
 
@@ -132,8 +125,7 @@ object TorrentEngine {
                             // Apply batch priorities
                             handle.prioritizeFiles(priorities)
                             
-                            // FIX: Use correct API for single file priority (TOP_PRIORITY/SEVEN)
-                            // This ensures the beginning of the file downloads first
+                            // Ensure the beginning of the file downloads first
                             handle.filePriority(largestFileIndex, Priority.TOP_PRIORITY)
                             
                             fileSelected = true
