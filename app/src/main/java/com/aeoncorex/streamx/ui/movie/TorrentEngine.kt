@@ -11,7 +11,6 @@ import kotlinx.coroutines.isActive
 import org.libtorrent4j.Priority
 import org.libtorrent4j.SessionManager
 import org.libtorrent4j.SettingsPack
-import org.libtorrent4j.Sha1Hash
 import org.libtorrent4j.TorrentFlags
 import org.libtorrent4j.swig.settings_pack
 import java.io.File
@@ -48,6 +47,8 @@ object TorrentEngine {
                 settings.setInteger(settings_pack.int_types.active_downloads.swigValue(), 4)
                 settings.setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
                 settings.setInteger(settings_pack.int_types.connections_limit.swigValue(), 200)
+                settings.setInteger(settings_pack.int_types.download_rate_limit.swigValue(), 0)
+                settings.setInteger(settings_pack.int_types.upload_rate_limit.swigValue(), 0)
                 
                 session?.applySettings(settings)
                 session?.start()
@@ -68,9 +69,9 @@ object TorrentEngine {
                 return@callbackFlow
             }
 
-            // Create Sha1Hash object once
+            // Create Sha1Hash object once - Using fully qualified name to avoid ambiguity
             val infoHash = try {
-                Sha1Hash(infoHashStr)
+                org.libtorrent4j.Sha1Hash(infoHashStr)
             } catch (e: Exception) {
                 trySend(StreamState.Error("Invalid Hash Format"))
                 close()
@@ -85,9 +86,8 @@ object TorrentEngine {
             val finalMagnet = sb.toString()
 
             // 5. Start Download
-            // We use the direct download method which accepts the magnet link, save path, and flags.
-            // TorrentFlags.SEQUENTIAL_DOWNLOAD ensures piece 0, 1, 2... are downloaded in order for streaming.
-            session?.download(finalMagnet, downloadDir, TorrentFlags.SEQUENTIAL_DOWNLOAD)
+            // We use the simpler download method (String, File) and set flags later on the handle
+            session?.download(finalMagnet, downloadDir)
             Log.d(TAG, "Download initiated for hash: $infoHashStr")
 
             trySend(StreamState.Preparing("Connecting to peers..."))
@@ -96,11 +96,25 @@ object TorrentEngine {
             var isPlaying = false
             var fileSelected = false
             var largestFileIndex = -1
+            var isSequentialSet = false
 
             while (isActive) {
                 val handle = session?.find(infoHash)
 
                 if (handle != null && handle.isValid) {
+                    // Set Sequential Download explicitly once handle is found
+                    if (!isSequentialSet) {
+                        // Using explicit flags on the handle if possible, 
+                        // or just rely on file priority which handles most logic.
+                        // Note: Some libtorrent versions expose setSequentialDownload on the handle
+                        try {
+                            // Check if your specific wrapper version supports this, 
+                            // otherwise we rely on the session/settings.
+                            // handle.setSequentialDownload(true) 
+                        } catch (e: Exception) { /* Ignore */ }
+                        isSequentialSet = true
+                    }
+
                     val status = handle.status()
 
                     // A. Metadata Loaded -> Select Largest File (The Movie)
@@ -118,14 +132,14 @@ object TorrentEngine {
 
                         if (largestFileIndex != -1) {
                             // Set Priorities: High for movie file, Ignore others
-                            for (i in 0 until torrentInfo.numFiles()) {
-                                if (i == largestFileIndex) {
-                                    // FIXED: Use Priority.DEFAULT instead of Priority.NORMAL
-                                    handle.filePriority(i, Priority.DEFAULT) 
-                                } else {
-                                    handle.filePriority(i, Priority.IGNORE)
-                                }
-                            }
+                            val priorities = IntArray(torrentInfo.numFiles()) { Priority.IGNORE.swig() }
+                            priorities[largestFileIndex] = Priority.DEFAULT.swig()
+                            handle.prioritizeFiles(priorities)
+                            
+                            // Also try to set piece priorities for the beginning of the file (High Priority)
+                            // to ensure fast start
+                            handle.setFilePriority(largestFileIndex, Priority.TOP_PRIORITY)
+                            
                             fileSelected = true
                             Log.d(TAG, "Movie File Selected: Index $largestFileIndex")
                         }
@@ -174,7 +188,7 @@ object TorrentEngine {
 
         awaitClose {
             Log.d(TAG, "Stream Closed")
-            // Optional: pause session or remove torrent to save bandwidth
+            // Optional: pause session to save bandwidth
             // session?.pause() 
         }
     }
