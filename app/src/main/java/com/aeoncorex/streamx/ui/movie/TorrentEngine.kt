@@ -12,26 +12,14 @@ import org.libtorrent4j.Priority
 import org.libtorrent4j.SessionManager
 import org.libtorrent4j.SettingsPack
 import org.libtorrent4j.Sha1Hash
-import org.libtorrent4j.swig.add_torrent_params
-import org.libtorrent4j.swig.error_code
+import org.libtorrent4j.swig.sha1_hash
 import org.libtorrent4j.swig.settings_pack
 import java.io.File
 
 object TorrentEngine {
     private var session: SessionManager? = null
     private const val TAG = "TorrentEngine"
-
-    // Play when 3MB is buffered
-    private const val MIN_BUFFER_SIZE = 3L * 1024 * 1024 
-
-    private val TRACKERS = listOf(
-        "udp://tracker.opentrackr.org:1337/announce",
-        "udp://9.rarbg.com:2810/announce",
-        "udp://tracker.openbittorrent.com:80/announce",
-        "udp://opentracker.i2p.rocks:6969/announce",
-        "http://tracker.openbittorrent.com:80/announce",
-        "udp://open.demonii.com:1337/announce"
-    )
+    private const val MIN_BUFFER_SIZE = 5L * 1024 * 1024 // 5MB Buffer
 
     fun start(context: Context, magnetLink: String): Flow<StreamState> = callbackFlow {
         try {
@@ -44,10 +32,11 @@ object TorrentEngine {
             if (session == null) {
                 session = SessionManager()
                 val settings = SettingsPack()
-                // Enable DHT and optimize for streaming
                 settings.setInteger(settings_pack.int_types.active_downloads.swigValue(), 4)
                 settings.setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
                 settings.setInteger(settings_pack.int_types.connections_limit.swigValue(), 200)
+                
+                // Optimize for streaming
                 settings.setInteger(settings_pack.int_types.download_rate_limit.swigValue(), 0)
                 settings.setInteger(settings_pack.int_types.upload_rate_limit.swigValue(), 0)
                 
@@ -56,32 +45,36 @@ object TorrentEngine {
                 Log.d(TAG, "Torrent Session Started")
             }
 
-            // 3. Parse Magnet Link using Library Native Tools
-            // This avoids manual string parsing and fixes the Sha1Hash constructor error
-            val ec = error_code()
-            val params = add_torrent_params.parse_magnet_uri(magnetLink, ec)
-            
-            if (ec.value() != 0) {
-                trySend(StreamState.Error("Invalid Magnet: ${ec.message()}"))
+            // 3. Manually Extract InfoHash from Magnet Link
+            // Format: magnet:?xt=urn:btih:<HASH>&...
+            val uri = Uri.parse(magnetLink)
+            val xt = uri.getQueryParameter("xt") ?: ""
+            val infoHashStr = if (xt.contains("urn:btih:")) {
+                xt.substringAfter("urn:btih:")
+            } else {
+                trySend(StreamState.Error("Invalid Magnet Link: Missing Hash"))
                 close()
                 return@callbackFlow
             }
 
-            // Get the SWIG hash object and wrap it in the Java Sha1Hash wrapper
-            val swigHash = params.info_hash()
+            // 4. Create Sha1Hash correctly via SWIG
+            // We create the SWIG object first to avoid ambiguous constructor issues
+            val swigHash = try {
+                sha1_hash(infoHashStr)
+            } catch (e: Exception) {
+                trySend(StreamState.Error("Invalid Hash Format"))
+                close()
+                return@callbackFlow
+            }
             val infoHash = Sha1Hash(swigHash)
 
-            // 4. Add Trackers (if missing)
-            // Note: params already contains trackers from the magnet link, 
-            // but we can append our list if needed.
-            // For now, we rely on the magnet's trackers + DHT.
+            // 5. Start Download
+            // We use the simple download method which handles the magnet parsing internally
+            // for the actual download logic.
+            session?.download(magnetLink, downloadDir)
+            Log.d(TAG, "Download initiated for hash: $infoHashStr")
 
-            // 5. Start Download (Fetch Metadata)
-            // Use fetchMagnet instead of download(String) which was causing the type mismatch
-            session?.fetchMagnet(magnetLink, downloadDir)
-            Log.d(TAG, "Download initiated for hash: $infoHash")
-
-            trySend(StreamState.Preparing("Connecting to peers..."))
+            trySend(StreamState.Preparing("Metadata..."))
 
             // 6. Monitoring Loop
             var isPlaying = false
@@ -93,18 +86,9 @@ object TorrentEngine {
                 val handle = session?.find(infoHash)
 
                 if (handle != null && handle.isValid) {
-                    // Set Sequential Download
-                    if (!isSequentialSet) {
-                        try {
-                            // Some versions expose this, if not, priorities handle it
-                            // handle.setSequentialDownload(true) 
-                        } catch (e: Exception) { /* Ignore */ }
-                        isSequentialSet = true
-                    }
-
                     val status = handle.status()
 
-                    // A. Metadata Loaded -> Select Largest File (The Movie)
+                    // A. Metadata Loaded -> Select Largest File
                     if (!fileSelected && status.hasMetadata()) {
                         val torrentInfo = handle.torrentFile()
                         
@@ -118,14 +102,12 @@ object TorrentEngine {
                         }
 
                         if (largestFileIndex != -1) {
-                            // FIX: Use Array<Priority> instead of IntArray
+                            // Prioritize the video file
                             val priorities = Array(torrentInfo.numFiles()) { Priority.IGNORE }
                             priorities[largestFileIndex] = Priority.DEFAULT
-                            
-                            // Apply batch priorities
                             handle.prioritizeFiles(priorities)
                             
-                            // Ensure the beginning of the file downloads first
+                            // High priority for the beginning of the file (for buffering)
                             handle.filePriority(largestFileIndex, Priority.TOP_PRIORITY)
                             
                             fileSelected = true
@@ -138,7 +120,6 @@ object TorrentEngine {
                     val speed = status.downloadPayloadRate() / 1024 // KB/s
                     val seeds = status.numSeeds()
                     val peers = status.numPeers()
-                    
                     val bytesDownloaded = status.totalDone()
 
                     if (!isPlaying && fileSelected) {
@@ -161,7 +142,7 @@ object TorrentEngine {
                         trySend(StreamState.Preparing("Metadata... S:$seeds P:$peers"))
                     }
                 } else {
-                    trySend(StreamState.Preparing("Searching for peers..."))
+                    trySend(StreamState.Preparing("Connecting to peers..."))
                 }
                 delay(1000)
             }
@@ -177,7 +158,7 @@ object TorrentEngine {
     }
 
     fun stop() {
-        // session?.stop()
+        // session?.stop() // Optional: keep session alive for background download if needed
     }
     
     fun clearCache(context: Context) {
