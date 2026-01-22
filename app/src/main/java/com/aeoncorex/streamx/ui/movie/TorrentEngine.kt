@@ -11,7 +11,7 @@ import kotlinx.coroutines.isActive
 import org.libtorrent4j.Priority
 import org.libtorrent4j.SessionManager
 import org.libtorrent4j.SettingsPack
-import org.libtorrent4j.TorrentFlags
+import org.libtorrent4j.Sha1Hash
 import org.libtorrent4j.swig.settings_pack
 import java.io.File
 
@@ -19,8 +19,8 @@ object TorrentEngine {
     private var session: SessionManager? = null
     private const val TAG = "TorrentEngine"
 
-    // Play when 5MB is buffered (Adjusted for faster start)
-    private const val MIN_BUFFER_SIZE = 5L * 1024 * 1024 
+    // Play when 3MB is buffered
+    private const val MIN_BUFFER_SIZE = 3L * 1024 * 1024 
 
     private val TRACKERS = listOf(
         "udp://tracker.opentrackr.org:1337/announce",
@@ -34,7 +34,6 @@ object TorrentEngine {
     fun start(context: Context, magnetLink: String): Flow<StreamState> = callbackFlow {
         try {
             // 1. Setup Cache Directory
-            // Use externalCacheDir to prevent gallery scanning (treated as temp files)
             val rootDir = context.externalCacheDir ?: context.cacheDir
             val downloadDir = File(rootDir, "StreamX_Temp")
             if (!downloadDir.exists()) downloadDir.mkdirs()
@@ -55,7 +54,7 @@ object TorrentEngine {
                 Log.d(TAG, "Torrent Session Started")
             }
 
-            // 3. Extract InfoHash Manually (Needed to find the handle later)
+            // 3. Extract InfoHash
             val infoHashStr = try {
                 val uri = Uri.parse(magnetLink)
                 uri.getQueryParameter("xt")?.substringAfter("urn:btih:") ?: ""
@@ -69,9 +68,9 @@ object TorrentEngine {
                 return@callbackFlow
             }
 
-            // Create Sha1Hash object once - Using fully qualified name to avoid ambiguity
+            // Create Sha1Hash
             val infoHash = try {
-                org.libtorrent4j.Sha1Hash(infoHashStr)
+                Sha1Hash(infoHashStr)
             } catch (e: Exception) {
                 trySend(StreamState.Error("Invalid Hash Format"))
                 close()
@@ -86,7 +85,6 @@ object TorrentEngine {
             val finalMagnet = sb.toString()
 
             // 5. Start Download
-            // We use the simpler download method (String, File) and set flags later on the handle
             session?.download(finalMagnet, downloadDir)
             Log.d(TAG, "Download initiated for hash: $infoHashStr")
 
@@ -102,14 +100,10 @@ object TorrentEngine {
                 val handle = session?.find(infoHash)
 
                 if (handle != null && handle.isValid) {
-                    // Set Sequential Download explicitly once handle is found
+                    // Set Sequential Download
                     if (!isSequentialSet) {
-                        // Using explicit flags on the handle if possible, 
-                        // or just rely on file priority which handles most logic.
-                        // Note: Some libtorrent versions expose setSequentialDownload on the handle
                         try {
-                            // Check if your specific wrapper version supports this, 
-                            // otherwise we rely on the session/settings.
+                            // Some versions expose this, if not, priorities handle it
                             // handle.setSequentialDownload(true) 
                         } catch (e: Exception) { /* Ignore */ }
                         isSequentialSet = true
@@ -131,14 +125,16 @@ object TorrentEngine {
                         }
 
                         if (largestFileIndex != -1) {
-                            // Set Priorities: High for movie file, Ignore others
-                            val priorities = IntArray(torrentInfo.numFiles()) { Priority.IGNORE.swig() }
-                            priorities[largestFileIndex] = Priority.DEFAULT.swig()
+                            // FIX: Use Array<Priority> instead of IntArray
+                            val priorities = Array(torrentInfo.numFiles()) { Priority.IGNORE }
+                            priorities[largestFileIndex] = Priority.DEFAULT
+                            
+                            // Apply batch priorities
                             handle.prioritizeFiles(priorities)
                             
-                            // Also try to set piece priorities for the beginning of the file (High Priority)
-                            // to ensure fast start
-                            handle.setFilePriority(largestFileIndex, Priority.TOP_PRIORITY)
+                            // FIX: Use correct API for single file priority (TOP_PRIORITY/SEVEN)
+                            // This ensures the beginning of the file downloads first
+                            handle.filePriority(largestFileIndex, Priority.TOP_PRIORITY)
                             
                             fileSelected = true
                             Log.d(TAG, "Movie File Selected: Index $largestFileIndex")
@@ -151,17 +147,14 @@ object TorrentEngine {
                     val seeds = status.numSeeds()
                     val peers = status.numPeers()
                     
-                    // We check totalDone because we set other files to IGNORE
                     val bytesDownloaded = status.totalDone()
 
                     if (!isPlaying && fileSelected) {
-                        // Play when buffer is sufficient
                         if (bytesDownloaded > MIN_BUFFER_SIZE) {
                             val torrentInfo = handle.torrentFile()
                             val fileName = torrentInfo.files().filePath(largestFileIndex)
                             val videoFile = File(downloadDir, fileName)
                             
-                            // Check if file physically exists and has content
                             if (videoFile.exists() && videoFile.length() > 0) {
                                 isPlaying = true
                                 Log.d(TAG, "Ready to Play: ${videoFile.absolutePath}")
@@ -188,13 +181,11 @@ object TorrentEngine {
 
         awaitClose {
             Log.d(TAG, "Stream Closed")
-            // Optional: pause session to save bandwidth
-            // session?.pause() 
         }
     }
 
     fun stop() {
-        // session?.stop() // Careful, this stops the whole engine
+        // session?.stop()
     }
     
     fun clearCache(context: Context) {
