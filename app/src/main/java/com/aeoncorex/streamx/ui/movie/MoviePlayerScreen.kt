@@ -42,8 +42,6 @@ import androidx.navigation.NavController
 import java.io.File
 import java.net.URLDecoder
 
-// ensure StreamState is available in this package
-
 @OptIn(UnstableApi::class)
 @Composable
 fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) {
@@ -54,7 +52,7 @@ fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) 
     var streamUrl by remember { mutableStateOf<String?>(null) }
     var statusMessage by remember { mutableStateOf("Initializing Engine...") }
     
-    // Stats
+    // Stats for UI
     var downloadSpeed by remember { mutableStateOf("0 KB/s") }
     var seedsCount by remember { mutableIntStateOf(0) }
     var peersCount by remember { mutableIntStateOf(0) }
@@ -65,10 +63,13 @@ fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) 
     // Engine Logic
     LaunchedEffect(decodedInput) {
         if (decodedInput.startsWith("magnet:?")) {
-            TorrentEngine.init(context)
-            TorrentEngine.startStreaming(decodedInput).collect { state ->
+            // টরেন্ট ইঞ্জিন স্টার্ট করা হচ্ছে
+            // নতুন TorrentEngine কোড অনুযায়ী init বা startStreaming এর বদলে start ব্যবহার করছি
+            TorrentEngine.start(context, decodedInput).collect { state ->
                 when(state) {
-                    is StreamState.Preparing -> statusMessage = state.message
+                    is StreamState.Preparing -> {
+                        statusMessage = state.message
+                    }
                     is StreamState.Buffering -> {
                         statusMessage = "Downloading... ${state.progress}%"
                         progress = state.progress
@@ -77,6 +78,7 @@ fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) 
                         peersCount = state.peers
                     }
                     is StreamState.Ready -> {
+                        // ফাইল রেডি হলে পাথ সেট করা
                         streamUrl = state.filePath
                         statusMessage = ""
                     }
@@ -87,20 +89,22 @@ fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) 
                 }
             }
         } else {
-            // Direct URL (HTTP)
+            // যদি ডাইরেক্ট লিঙ্ক হয় (HTTP)
             streamUrl = decodedInput
         }
     }
 
+    // স্ক্রিন থেকে বের হলে টরেন্ট বন্ধ করা
     DisposableEffect(Unit) {
         onDispose { TorrentEngine.stop() }
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (streamUrl != null) {
+            // প্লেয়ার চালু হবে
             AdvancedExoPlayer(navController, streamUrl!!)
             
-            // Show Overlay Stats if Torrenting
+            // টরেন্ট হলে উপরে ছোট করে স্ট্যাটাস দেখানো
             if (decodedInput.startsWith("magnet:?")) {
                 Box(Modifier.align(Alignment.TopEnd).padding(top = 40.dp, end = 16.dp)) {
                     Column(horizontalAlignment = Alignment.End) {
@@ -110,7 +114,7 @@ fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) 
                 }
             }
         } else {
-            // Loading UI
+            // লোডিং স্ক্রিন
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator(color = Color.Red)
                 Spacer(Modifier.height(16.dp))
@@ -118,9 +122,10 @@ fun MoviePlayerScreen(navController: NavController, encodedMagnetOrUrl: String) 
                 
                 if (progress > 0) {
                     LinearProgressIndicator(
-                        progress = progress / 100f, 
+                        progress = { progress / 100f },
                         modifier = Modifier.width(200.dp).padding(top = 8.dp), 
-                        color = Color.Red
+                        color = Color.Red,
+                        trackColor = Color.Gray
                     )
                     Text("$progress%", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 }
@@ -145,7 +150,14 @@ fun AdvancedExoPlayer(navController: NavController, videoSource: String) {
     // Player Setup
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
-            val mediaItem = if (videoSource.startsWith("/")) MediaItem.fromUri(Uri.fromFile(File(videoSource))) else MediaItem.fromUri(Uri.parse(videoSource))
+            // এখানে চেক করা হচ্ছে সোর্সটি অনলাইন লিঙ্ক নাকি ডাউনলোড করা লোকাল ফাইল
+            val mediaItem = if (videoSource.startsWith("http") || videoSource.startsWith("https")) {
+                MediaItem.fromUri(Uri.parse(videoSource))
+            } else {
+                // লোকাল ফাইল পাথ (Cache Directory)
+                MediaItem.fromUri(Uri.fromFile(File(videoSource)))
+            }
+            
             setMediaItem(mediaItem)
             prepare()
             playWhenReady = true
@@ -156,19 +168,23 @@ fun AdvancedExoPlayer(navController: NavController, videoSource: String) {
     var isControlsVisible by remember { mutableStateOf(false) }
     var isLocked by remember { mutableStateOf(false) }
     var showTrackSelector by remember { mutableStateOf(false) }
-    var trackSelectorType by remember { mutableStateOf(C.TRACK_TYPE_TEXT) }
+    var trackSelectorType by remember { mutableIntStateOf(C.TRACK_TYPE_TEXT) }
 
-    // Immersive Mode
+    // Immersive Mode (Full Screen)
     DisposableEffect(Unit) {
         val window = activity?.window
-        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        WindowCompat.getInsetsController(window!!, window.decorView).hide(WindowInsetsCompat.Type.systemBars())
-        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        if (window != null) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            WindowCompat.getInsetsController(window, window.decorView).hide(WindowInsetsCompat.Type.systemBars())
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
         
         onDispose {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            if (window != null) {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
             exoPlayer.release()
         }
     }
@@ -180,7 +196,11 @@ fun AdvancedExoPlayer(navController: NavController, videoSource: String) {
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { isControlsVisible = !isControlsVisible },
-                    onDoubleTap = { if (!isLocked) { if (it.x > size.width / 2) exoPlayer.seekForward() else exoPlayer.seekBack() } }
+                    onDoubleTap = { 
+                        if (!isLocked) { 
+                            if (it.x > size.width / 2) exoPlayer.seekForward() else exoPlayer.seekBack() 
+                        } 
+                    }
                 )
             }
     ) {
@@ -197,7 +217,7 @@ fun AdvancedExoPlayer(navController: NavController, videoSource: String) {
             modifier = Modifier.fillMaxSize()
         )
 
-        // 2. Custom Controls
+        // 2. Custom Controls Overlay
         if (isControlsVisible) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(0.6f))) {
                 // Top Bar
@@ -206,12 +226,14 @@ fun AdvancedExoPlayer(navController: NavController, videoSource: String) {
                         Icon(Icons.Default.ArrowBack, null, tint = Color.White)
                     }
                     Row {
+                        // Audio Track Selector
                         IconButton(onClick = { 
                             trackSelectorType = C.TRACK_TYPE_AUDIO
                             showTrackSelector = true 
                         }) {
                             Icon(Icons.Default.Audiotrack, null, tint = Color.White)
                         }
+                        // Subtitle Selector
                         IconButton(onClick = { 
                             trackSelectorType = C.TRACK_TYPE_TEXT
                             showTrackSelector = true 
@@ -221,25 +243,41 @@ fun AdvancedExoPlayer(navController: NavController, videoSource: String) {
                     }
                 }
 
-                // Center Controls
+                // Center Controls (Play/Pause/Seek)
                 if (!isLocked) {
                     Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(50.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { exoPlayer.seekBack() }) { Icon(Icons.Rounded.Replay10, null, tint = Color.White, modifier = Modifier.size(50.dp)) }
+                        IconButton(onClick = { exoPlayer.seekBack() }) { 
+                            Icon(Icons.Rounded.Replay10, null, tint = Color.White, modifier = Modifier.size(50.dp)) 
+                        }
                         
-                        IconButton(onClick = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() }, modifier = Modifier.size(80.dp).background(Color.White, RoundedCornerShape(50))) {
-                            Icon(if (exoPlayer.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(50.dp))
+                        IconButton(
+                            onClick = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() }, 
+                            modifier = Modifier.size(80.dp).background(Color.White, RoundedCornerShape(50))
+                        ) {
+                            Icon(
+                                if (exoPlayer.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 
+                                null, 
+                                tint = Color.Black, 
+                                modifier = Modifier.size(50.dp)
+                            )
                         }
 
-                        IconButton(onClick = { exoPlayer.seekForward() }) { Icon(Icons.Rounded.Forward10, null, tint = Color.White, modifier = Modifier.size(50.dp)) }
+                        IconButton(onClick = { exoPlayer.seekForward() }) { 
+                            Icon(Icons.Rounded.Forward10, null, tint = Color.White, modifier = Modifier.size(50.dp)) 
+                        }
                     }
                 }
 
-                // Bottom Bar
+                // Bottom Bar (Lock Button)
                 IconButton(
                     onClick = { isLocked = !isLocked },
                     modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)
                 ) {
-                    Icon(if (isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, null, tint = if(isLocked) Color.Red else Color.White)
+                    Icon(
+                        if (isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, 
+                        null, 
+                        tint = if(isLocked) Color.Red else Color.White
+                    )
                 }
             }
         }
@@ -255,6 +293,7 @@ fun AdvancedExoPlayer(navController: NavController, videoSource: String) {
     }
 }
 
+// Track Selector Dialog Helper
 @OptIn(UnstableApi::class)
 @Composable
 fun TrackSelectionDialog(player: ExoPlayer, trackType: Int, onDismiss: () -> Unit) {
