@@ -66,15 +66,17 @@ fun MovieDetailsScreen(
     }
 
     // --- NAVIGATION TO LINK SELECTION ---
+    // UPDATED: Now passes both IMDB ID and TMDB ID
     fun openLinkSelection(season: Int, episode: Int) {
         if (details == null) return
         
         val titleEnc = URLEncoder.encode(details!!.basic.title, "UTF-8")
         val imdbId = details!!.imdbId ?: "null"
+        val tmdbId = details!!.basic.id // Get TMDB ID from basic info
         val typeStr = if (type == MovieType.MOVIE) "MOVIE" else "SERIES"
         
-        // Navigate to the Link Selection Screen (Link Finder)
-        navController.navigate("link_selection/$imdbId/$titleEnc/$typeStr/$season/$episode")
+        // Pass TMDB ID in the route so the next screen can use it for SuperEmbed/2Embed
+        navController.navigate("link_selection/$imdbId/$tmdbId/$titleEnc/$typeStr/$season/$episode")
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -149,7 +151,7 @@ fun MovieDetailsScreen(
                                             if (type == MovieType.MOVIE) {
                                                 openLinkSelection(0, 0)
                                             } else {
-                                                // Default to S1E1 for Series Play button
+                                                // Default to S1E1 (or current selected season) for Series Play button
                                                 openLinkSelection(selectedSeason, 1)
                                             }
                                         },
@@ -234,6 +236,7 @@ fun MovieDetailsScreen(
                                                     overview = episode.overview ?: "No description available.",
                                                     stillPath = episode.stillPath,
                                                     onClick = {
+                                                        // Pass correct season and episode
                                                         openLinkSelection(selectedSeason, episode.episodeNumber)
                                                     }
                                                 )
@@ -269,7 +272,7 @@ fun MovieDetailsScreen(
                         Spacer(Modifier.height(24.dp))
                     }
 
-                    // 5. MORE LIKE THIS (RECOMMENDATIONS) - NEW SECTION
+                    // 5. MORE LIKE THIS (RECOMMENDATIONS)
                     if (movie.recommendations.isNotEmpty()) {
                         item {
                             Text(
@@ -285,7 +288,7 @@ fun MovieDetailsScreen(
                             ) {
                                 items(movie.recommendations) { recMovie ->
                                     RecommendationCard(movie = recMovie) {
-                                        // Navigate to new detail screen
+                                        // Recursively open details for recommended item
                                         val typeStr = if (recMovie.type == MovieType.MOVIE) "MOVIE" else "SERIES"
                                         navController.navigate("movie_detail/${recMovie.id}/$typeStr")
                                     }

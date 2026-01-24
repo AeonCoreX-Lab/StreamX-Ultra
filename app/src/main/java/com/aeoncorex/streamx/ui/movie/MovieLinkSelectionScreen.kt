@@ -26,7 +26,8 @@ import java.net.URLEncoder
 @Composable
 fun MovieLinkSelectionScreen(
     navController: NavController,
-    imdbId: String,
+    imdbId: String, // Can be "null" string
+    tmdbId: Int,    // NEW: Pass TMDB ID from details screen
     title: String,
     type: String, // "MOVIE" or "SERIES"
     season: Int,
@@ -39,62 +40,31 @@ fun MovieLinkSelectionScreen(
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // --- WEB SERVER LINKS (UPDATED) ---
-    val webServers = remember(imdbId, type, season, episode) {
-        val servers = mutableListOf<ServerLink>()
-        
-        if (imdbId != "null" && imdbId.isNotEmpty()) {
-            val isSeries = type.equals("SERIES", ignoreCase = true) || type.equals("TV", ignoreCase = true)
-
-            // 1. VidSrc Pro (Multi-Audio)
-            // Docs: https://vidsrc.xyz/embed/movie?imdb=tt123 or https://vidsrc.xyz/embed/tv?imdb=tt123&season=1&episode=1
-            val vidsrcProUrl = if (isSeries) {
-                "https://vidsrc.xyz/embed/tv?imdb=$imdbId&season=$season&episode=$episode"
-            } else {
-                "https://vidsrc.xyz/embed/movie?imdb=$imdbId"
-            }
-            servers.add(ServerLink("VidSrc Pro (Multi-Audio)", vidsrcProUrl))
-
-            // 2. SuperEmbed (VIP Player)
-            // Docs: https://multiembed.mov/directstream.php?video_id=tt123 (&s=1&e=1)
-            val superEmbedUrl = if (isSeries) {
-                "https://multiembed.mov/directstream.php?video_id=$imdbId&s=$season&e=$episode"
-            } else {
-                "https://multiembed.mov/directstream.php?video_id=$imdbId"
-            }
-            servers.add(ServerLink("SuperEmbed (VIP Fast)", superEmbedUrl))
-
-            // 3. VidSrc Me (Backup)
-            // Docs: https://vidsrc.me/embed/movie?imdb=tt123
-            val vidsrcMeUrl = if (isSeries) {
-                "https://vidsrc.me/embed/tv?imdb=$imdbId&season=$season&episode=$episode"
-            } else {
-                "https://vidsrc.me/embed/movie?imdb=$imdbId"
-            }
-            servers.add(ServerLink("VidSrc Me (Backup)", vidsrcMeUrl))
-
-            // 4. 2Embed (Clean)
-            // Docs: https://www.2embed.stream/2embed.php?id=tt123 or tv-2embed.php?id=tt123&season=1&episode=1
-            val twoEmbedUrl = if (isSeries) {
-                "https://www.2embed.stream/tv-2embed.php?id=$imdbId&season=$season&episode=$episode"
-            } else {
-                "https://www.2embed.stream/2embed.php?id=$imdbId"
-            }
-            servers.add(ServerLink("2Embed (Clean)", twoEmbedUrl))
-        }
-        servers
+    // --- WEB SERVER LINKS GENERATION ---
+    // This block automatically generates the correct URLs based on available IDs
+    val webServers = remember(imdbId, tmdbId, type, season, episode) {
+        ServerLinkGenerator.generateLinks(
+            imdbId = if (imdbId == "null" || imdbId.isEmpty()) null else imdbId,
+            tmdbId = if (tmdbId == 0) null else tmdbId,
+            isSeries = type.equals("SERIES", ignoreCase = true) || type.equals("TV", ignoreCase = true),
+            season = season,
+            episode = episode
+        )
     }
 
     // Fetch Torrents
     LaunchedEffect(Unit) {
         try {
-            val movieType = if (type == "MOVIE") MovieType.MOVIE else MovieType.SERIES
+            val movieType = if (type == "MOVIE" || type == "movie") MovieType.MOVIE else MovieType.SERIES
             val isAnime = decodedTitle.contains("Naruto", true) || decodedTitle.contains("One Piece", true)
+
+            // Pass valid IMDB ID if available
+            val validImdb = if (imdbId != "null" && imdbId.isNotEmpty()) imdbId else null
 
             val links = TorrentRepository.getStreamLinks(
                 type = movieType,
                 title = decodedTitle,
-                imdbId = if (imdbId == "null") null else imdbId,
+                imdbId = validImdb,
                 season = season,
                 episode = episode,
                 isAnime = isAnime
@@ -140,7 +110,7 @@ fun MovieLinkSelectionScreen(
                 }
                 
                 if (webServers.isEmpty()) {
-                    item { Text("No server links available (Missing IMDB ID)", color = Color.Gray, fontSize = 12.sp) }
+                    item { Text("No server links available (Missing IDs)", color = Color.Gray, fontSize = 12.sp) }
                 } else {
                     items(webServers) { server ->
                         ServerCard(server) {
@@ -185,6 +155,75 @@ fun MovieLinkSelectionScreen(
     }
 }
 
+// --- HELPER: URL GENERATOR ---
+// This handles the specific logic for SuperEmbed and 2Embed
+object ServerLinkGenerator {
+    fun generateLinks(
+        imdbId: String?,
+        tmdbId: Int?,
+        isSeries: Boolean,
+        season: Int,
+        episode: Int
+    ): List<ServerLink> {
+        val servers = mutableListOf<ServerLink>()
+
+        // 1. SuperEmbed (Prioritize TMDB, then IMDb)
+        // Docs: https://multiembed.mov/?video_id=522931&tmdb=1
+        if (tmdbId != null) {
+            val url = if (isSeries) {
+                "https://multiembed.mov/?video_id=$tmdbId&tmdb=1&s=$season&e=$episode"
+            } else {
+                "https://multiembed.mov/?video_id=$tmdbId&tmdb=1"
+            }
+            servers.add(ServerLink("SuperEmbed (TMDB - Fast)", url))
+        } else if (imdbId != null) {
+            val url = if (isSeries) {
+                "https://multiembed.mov/?video_id=$imdbId&s=$season&e=$episode"
+            } else {
+                "https://multiembed.mov/?video_id=$imdbId"
+            }
+            servers.add(ServerLink("SuperEmbed (IMDb - Fast)", url))
+        }
+
+        // 2. 2Embed (Specific Logic)
+        // Docs: https://www.2embed.stream/embed/movie/{id} or /tv/{id}/{s}/{e}
+        if (tmdbId != null) {
+            val url = if (isSeries) {
+                "https://www.2embed.stream/embed/tv/$tmdbId/$season/$episode"
+            } else {
+                "https://www.2embed.stream/embed/movie/$tmdbId"
+            }
+            servers.add(ServerLink("2Embed (TMDB - Clean)", url))
+        } else if (imdbId != null) {
+            val url = if (isSeries) {
+                "https://www.2embed.stream/embed/tv/$imdbId/$season/$episode"
+            } else {
+                "https://www.2embed.stream/embed/movie/$imdbId"
+            }
+            servers.add(ServerLink("2Embed (IMDb - Clean)", url))
+        }
+
+        // 3. VidSrc Pro (Reliable Backup)
+        if (imdbId != null) {
+            val url = if (isSeries) {
+                "https://vidsrc.xyz/embed/tv?imdb=$imdbId&season=$season&episode=$episode"
+            } else {
+                "https://vidsrc.xyz/embed/movie?imdb=$imdbId"
+            }
+            servers.add(ServerLink("VidSrc Pro (IMDb - Multi)", url))
+        } else if (tmdbId != null) {
+             val url = if (isSeries) {
+                "https://vidsrc.xyz/embed/tv?tmdb=$tmdbId&season=$season&episode=$episode"
+            } else {
+                "https://vidsrc.xyz/embed/movie?tmdb=$tmdbId"
+            }
+            servers.add(ServerLink("VidSrc Pro (TMDB - Multi)", url))
+        }
+        
+        return servers
+    }
+}
+
 // Data Model & UI for Web Servers
 data class ServerLink(val name: String, val url: String)
 
@@ -204,48 +243,12 @@ fun ServerCard(server: ServerLink, onClick: () -> Unit) {
         ) {
             Icon(Icons.Default.Public, null, tint = Color.Green, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(16.dp))
-            Text(server.name, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Column {
+                Text(server.name, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(server.url.take(40) + "...", color = Color.Gray, fontSize = 10.sp)
+            }
             Spacer(Modifier.weight(1f))
             Icon(Icons.Default.PlayCircleOutline, null, tint = Color.White)
-        }
-    }
-}
-
-// Existing StreamLinkCard
-@Composable
-fun StreamLinkCard(link: StreamLink, onClick: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).clickable { onClick() }
-    ) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier.background(
-                    when {
-                        link.quality.contains("2160") || link.quality.contains("4k") -> Color(0xFF9C27B0)
-                        link.quality.contains("1080") -> Color(0xFF00C853)
-                        else -> Color.DarkGray
-                    }, RoundedCornerShape(6.dp)
-                ).padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Text(link.quality, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-            }
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(link.source, color = Color.Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Text(link.title.replace(".", " "), color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.CloudDownload, null, tint = Color.Gray, modifier = Modifier.size(12.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(link.size, color = Color.Gray, fontSize = 12.sp)
-                    Spacer(Modifier.width(12.dp))
-                    Icon(Icons.Default.SignalCellularAlt, null, tint = if(link.seeds > 20) Color.Green else Color.Yellow, modifier = Modifier.size(12.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("${link.seeds} Seeds", color = if(link.seeds > 20) Color.Green else Color.Yellow, fontSize = 12.sp)
-                }
-            }
-            Icon(Icons.Default.PlayArrow, null, tint = Color.White)
         }
     }
 }
