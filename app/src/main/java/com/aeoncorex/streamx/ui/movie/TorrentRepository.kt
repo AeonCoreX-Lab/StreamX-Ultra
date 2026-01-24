@@ -22,14 +22,7 @@ data class YtsTorrent(
     val size: String
 )
 
-data class StreamLink(
-    val title: String,
-    val magnet: String,
-    val quality: String,
-    val seeds: Int,
-    val size: String,
-    val source: String
-)
+// Note: StreamLink is now defined in MovieModels.kt
 
 // --- API INTERFACE (Dynamic URL) ---
 interface YtsApi {
@@ -43,7 +36,6 @@ interface YtsApi {
 
 // --- REPOSITORY ---
 object TorrentRepository {
-    // মিরর লিস্ট (যদি একটি ব্লক থাকে অন্যটি কাজ করবে)
     private val YTS_MIRRORS = listOf(
         "https://yts.mx/api/v2/list_movies.json",
         "https://yts.lt/api/v2/list_movies.json",
@@ -52,7 +44,7 @@ object TorrentRepository {
     )
 
     private val api = Retrofit.Builder()
-        .baseUrl("https://yts.bz/") // Base URL placeholder
+        .baseUrl("https://yts.bz/")
         .addConverterFactory(GsonConverterFactory.create())
         .build()
         .create(YtsApi::class.java)
@@ -85,7 +77,7 @@ object TorrentRepository {
             if (isAnime) {
                 jobs.add(async {
                     try { TorrentProviders.fetchAnime(title, episode).map {
-                        StreamLink(it.title, it.magnet, "HD", it.seeds, it.size, "NYAA")
+                        StreamLink(it.title, it.magnet, "HD", it.seeds, it.peers, it.size, "NYAA")
                     }} catch (e: Exception) { emptyList() }
                 })
             }
@@ -94,7 +86,7 @@ object TorrentRepository {
             if (type == MovieType.SERIES && imdbId != null) {
                 jobs.add(async {
                     try { TorrentProviders.fetchSeries(imdbId, season, episode).map {
-                        StreamLink(it.title, it.magnet, "HD", it.seeds, it.size, "EZTV")
+                        StreamLink(it.title, it.magnet, "HD", it.seeds, it.peers, it.size, "EZTV")
                     }} catch (e: Exception) { emptyList() }
                 })
             }
@@ -120,12 +112,11 @@ object TorrentRepository {
             .sortedByDescending { it.seeds }
     }
 
-    // নতুন মিরর লজিক
     private suspend fun fetchYtsWithMirrors(imdbId: String?, title: String): List<StreamLink> {
         for (url in YTS_MIRRORS) {
             try {
                 val links = fetchYtsInternal(url, imdbId, title)
-                if (links.isNotEmpty()) return links // যদি ডাটা পাই, লুপ ব্রেক করে রিটার্ন করো
+                if (links.isNotEmpty()) return links 
             } catch (e: Exception) {
                 Log.e("TorrentRepo", "Mirror failed: $url, trying next...")
                 continue
@@ -137,13 +128,11 @@ object TorrentRepository {
     private suspend fun fetchYtsInternal(url: String, imdbId: String?, title: String): List<StreamLink> {
         var movies: List<YtsMovie>? = null
 
-        // ১. আগে IMDB ID দিয়ে ট্রাই করো
         if (!imdbId.isNullOrEmpty() && imdbId != "null") {
             val response = api.listMovies(url, imdbId)
             movies = response.data?.movies
         }
 
-        // ২. না পেলে টাইটেল দিয়ে ট্রাই করো
         if (movies.isNullOrEmpty()) {
             val cleanTitle = title.replace(Regex("[^a-zA-Z0-9 ]"), "")
             val response = api.listMovies(url, cleanTitle)
@@ -157,6 +146,7 @@ object TorrentRepository {
                     magnet = constructMagnet(torrent.hash, movie.title),
                     quality = torrent.quality,
                     seeds = torrent.seeds,
+                    peers = torrent.peers,
                     size = torrent.size,
                     source = "YTS"
                 )

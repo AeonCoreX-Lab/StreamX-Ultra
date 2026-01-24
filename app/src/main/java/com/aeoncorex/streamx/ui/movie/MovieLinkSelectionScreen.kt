@@ -22,16 +22,6 @@ import androidx.navigation.NavController
 import java.net.URLDecoder
 import java.net.URLEncoder
 
-// --- DATA MODEL (ADDED TO FIX COMPILATION) ---
-data class StreamLink(
-    val title: String,
-    val magnet: String,
-    val seeds: Int,
-    val peers: Int,
-    val size: String,
-    val source: String // "YTS", "EZTV", "NYAA"
-)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MovieLinkSelectionScreen(
@@ -68,8 +58,6 @@ fun MovieLinkSelectionScreen(
             val isAnime = decodedTitle.contains("Naruto", true) || decodedTitle.contains("One Piece", true)
             val validImdb = if (imdbId != "null" && imdbId.isNotEmpty()) imdbId else null
 
-            // Mocking repository call for compilation (Replace with actual TorrentRepository call)
-            // Ensure TorrentRepository.getStreamLinks returns List<StreamLink>
             val links = TorrentRepository.getStreamLinks(
                 type = movieType,
                 title = decodedTitle,
@@ -152,7 +140,6 @@ fun MovieLinkSelectionScreen(
                     item { Text("No torrents found. Please use Server 1 or 2 above.", color = Color.Gray) }
                 } else {
                     items(torrentLinks) { link ->
-                        // FIXED: Now StreamLinkCard is defined below
                         StreamLinkCard(link) {
                             val encodedUrl = URLEncoder.encode(link.magnet, "UTF-8")
                             navController.navigate("movie_player/$encodedUrl")
@@ -164,7 +151,6 @@ fun MovieLinkSelectionScreen(
     }
 }
 
-// --- HELPER COMPONENT (ADDED TO FIX COMPILATION) ---
 @Composable
 fun StreamLinkCard(link: StreamLink, onClick: () -> Unit) {
     Card(
@@ -196,6 +182,11 @@ fun StreamLinkCard(link: StreamLink, onClick: () -> Unit) {
                     Box(modifier = Modifier.background(Color.DarkGray, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 2.dp)) {
                         Text(link.source, color = Color.Cyan, fontSize = 9.sp)
                     }
+                    Spacer(Modifier.width(8.dp))
+                    // Quality Badge
+                    Box(modifier = Modifier.background(Color.DarkGray, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 2.dp)) {
+                        Text(link.quality, color = Color.Yellow, fontSize = 9.sp)
+                    }
                 }
             }
             
@@ -204,7 +195,6 @@ fun StreamLinkCard(link: StreamLink, onClick: () -> Unit) {
     }
 }
 
-// --- SERVER LINK GENERATOR ---
 object ServerLinkGenerator {
     fun generateLinks(
         imdbId: String?,

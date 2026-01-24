@@ -2,6 +2,17 @@ package com.aeoncorex.streamx.ui.movie
 
 import com.google.gson.annotations.SerializedName
 
+// --- SHARED DATA MODELS ---
+data class StreamLink(
+    val title: String,
+    val magnet: String,
+    val quality: String,
+    val seeds: Int,
+    val peers: Int,
+    val size: String,
+    val source: String
+)
+
 // --- TMDB MODELS ---
 data class TmdbResponse(val results: List<MovieDto>)
 
@@ -47,7 +58,7 @@ data class MovieDetailResponse(
     val videos: Videos?,
     val recommendations: TmdbResponse?,
     val seasons: List<SeasonDto>?,
-    val external_ids: ExternalIds? // NEW: Crucial for Torrent Lookup
+    val external_ids: ExternalIds?
 )
 
 data class ExternalIds(
@@ -90,7 +101,7 @@ data class FullMovieDetails(
     val trailerKey: String?,
     val recommendations: List<Movie>,
     val seasons: List<SeasonDto> = emptyList(),
-    val imdbId: String? // Store IMDB ID here
+    val imdbId: String?
 )
 
 data class CastMember(val name: String, val role: String, val imageUrl: String)

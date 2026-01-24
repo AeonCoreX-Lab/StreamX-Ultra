@@ -34,14 +34,13 @@ object ConsumetProvider {
             val bestMatch = searchRes.results?.firstOrNull() 
 
             if (bestMatch != null) {
-                // We construct a link object. 
-                // Note: The player needs to handle "http_stream" specifically if it's not a magnet.
                 links.add(
                     StreamLink(
                         title = "[HTTP] ${bestMatch.title}",
-                        magnet = "http_stream_placeholder", // Logic in Player needs to handle fetching actual stream if this is selected
+                        magnet = "http_stream_placeholder", 
                         quality = "Auto",
-                        seeds = 100, // Fake high seed count so it appears at top
+                        seeds = 100, 
+                        peers = 0, // Added default 0 for peers
                         size = "Stream", 
                         source = "Web"
                     )
