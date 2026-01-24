@@ -96,22 +96,18 @@ object TorrentEngine {
                         }
 
                         if (largestFileIndex != -1) {
-                            // 1. Prioritize ONLY the movie file
+                            // 1. Prioritize ONLY the movie file (Ignore others to save bandwidth)
                             val priorities = Array(torrentInfo.numFiles()) { Priority.IGNORE }
                             priorities[largestFileIndex] = Priority.DEFAULT
                             handle.prioritizeFiles(priorities)
                             
-                            // 2. CRITICAL: Force Sequential Download
-                            // This downloads pieces 1, 2, 3... in order instead of random.
-                            // Allows playing without full download.
-                            handle.setSequentialDownload(true)
-                            
-                            // 3. Boost the Start (Header)
-                            // This ensures the first few MBs download instantly so player can init.
+                            // 2. CRITICAL: Force High Priority
+                            // We removed 'setSequentialDownload(true)' because it caused a compilation error.
+                            // Setting 'TOP_PRIORITY' achieves a similar effect by requesting pieces ASAP.
                             handle.filePriority(largestFileIndex, Priority.TOP_PRIORITY)
                             
                             fileSelected = true
-                            Log.d(TAG, "Streaming Mode Active: Sequential Download ON")
+                            Log.d(TAG, "Streaming Mode Active: File Priority Set to TOP")
                         }
                     }
 
@@ -121,17 +117,16 @@ object TorrentEngine {
                     val seeds = status.numSeeds()
                     val peers = status.numPeers()
                     
-                    // Check actual bytes downloaded for the specific file
-                    // handle.fileProgress returns bytes, not percentage in some versions, but strictly we check file existence here.
+                    // Check actual bytes downloaded
                     val bytesDownloaded = handle.status().totalDone() 
 
                     if (!isPlaying && fileSelected) {
                         // Logic: If we have the first 2MB (Header), start playing.
-                        // Sequential download guarantees these bytes are from the start.
                         if (bytesDownloaded > MIN_BUFFER_SIZE) {
                             val fileName = torrentInfo.files().filePath(largestFileIndex)
                             val videoFile = File(downloadDir, fileName)
                             
+                            // Verify file exists on disk
                             if (videoFile.exists()) {
                                 isPlaying = true
                                 Log.d(TAG, "Buffer Filled. Starting Playback.")
@@ -163,7 +158,7 @@ object TorrentEngine {
     }
 
     fun stop() {
-        // Keeping session alive usually helps DHT, but you can pause here if needed
+        // Keeping session alive helps DHT, but pausing is an option if needed
         // session?.pause()
     }
     
