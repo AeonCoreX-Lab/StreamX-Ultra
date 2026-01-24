@@ -22,14 +22,24 @@ import androidx.navigation.NavController
 import java.net.URLDecoder
 import java.net.URLEncoder
 
+// --- DATA MODEL (ADDED TO FIX COMPILATION) ---
+data class StreamLink(
+    val title: String,
+    val magnet: String,
+    val seeds: Int,
+    val peers: Int,
+    val size: String,
+    val source: String // "YTS", "EZTV", "NYAA"
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MovieLinkSelectionScreen(
     navController: NavController,
-    imdbId: String, // Can be "null" string
-    tmdbId: Int,    // NEW: Pass TMDB ID from details screen
+    imdbId: String,
+    tmdbId: Int,
     title: String,
-    type: String, // "MOVIE" or "SERIES"
+    type: String,
     season: Int,
     episode: Int
 ) {
@@ -41,7 +51,6 @@ fun MovieLinkSelectionScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     // --- WEB SERVER LINKS GENERATION ---
-    // This block automatically generates the correct URLs based on available IDs
     val webServers = remember(imdbId, tmdbId, type, season, episode) {
         ServerLinkGenerator.generateLinks(
             imdbId = if (imdbId == "null" || imdbId.isEmpty()) null else imdbId,
@@ -57,10 +66,10 @@ fun MovieLinkSelectionScreen(
         try {
             val movieType = if (type == "MOVIE" || type == "movie") MovieType.MOVIE else MovieType.SERIES
             val isAnime = decodedTitle.contains("Naruto", true) || decodedTitle.contains("One Piece", true)
-
-            // Pass valid IMDB ID if available
             val validImdb = if (imdbId != "null" && imdbId.isNotEmpty()) imdbId else null
 
+            // Mocking repository call for compilation (Replace with actual TorrentRepository call)
+            // Ensure TorrentRepository.getStreamLinks returns List<StreamLink>
             val links = TorrentRepository.getStreamLinks(
                 type = movieType,
                 title = decodedTitle,
@@ -114,7 +123,6 @@ fun MovieLinkSelectionScreen(
                 } else {
                     items(webServers) { server ->
                         ServerCard(server) {
-                            // Open in AdBlock Web Player
                             val encodedUrl = URLEncoder.encode(server.url, "UTF-8")
                             navController.navigate("webview_player/$encodedUrl")
                         }
@@ -144,6 +152,7 @@ fun MovieLinkSelectionScreen(
                     item { Text("No torrents found. Please use Server 1 or 2 above.", color = Color.Gray) }
                 } else {
                     items(torrentLinks) { link ->
+                        // FIXED: Now StreamLinkCard is defined below
                         StreamLinkCard(link) {
                             val encodedUrl = URLEncoder.encode(link.magnet, "UTF-8")
                             navController.navigate("movie_player/$encodedUrl")
@@ -155,8 +164,47 @@ fun MovieLinkSelectionScreen(
     }
 }
 
-// --- HELPER: URL GENERATOR ---
-// This handles the specific logic for SuperEmbed and 2Embed
+// --- HELPER COMPONENT (ADDED TO FIX COMPILATION) ---
+@Composable
+fun StreamLinkCard(link: StreamLink, onClick: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A20)),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clickable { onClick() }
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Seeds Icon
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(40.dp)) {
+                Icon(Icons.Default.ArrowDownward, null, tint = Color.Green, modifier = Modifier.size(20.dp))
+                Text("${link.seeds}", color = Color.Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+            
+            Spacer(Modifier.width(12.dp))
+            
+            Column(modifier = Modifier.weight(1f)) {
+                Text(link.title, color = Color.White, fontWeight = FontWeight.Medium, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(link.size, color = Color.Gray, fontSize = 11.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Box(modifier = Modifier.background(Color.DarkGray, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 2.dp)) {
+                        Text(link.source, color = Color.Cyan, fontSize = 9.sp)
+                    }
+                }
+            }
+            
+            Icon(Icons.Default.PlayCircle, null, tint = Color.Cyan, modifier = Modifier.size(32.dp))
+        }
+    }
+}
+
+// --- SERVER LINK GENERATOR ---
 object ServerLinkGenerator {
     fun generateLinks(
         imdbId: String?,
@@ -167,56 +215,36 @@ object ServerLinkGenerator {
     ): List<ServerLink> {
         val servers = mutableListOf<ServerLink>()
 
-        // 1. SuperEmbed (Prioritize TMDB, then IMDb)
-        // Docs: https://multiembed.mov/?video_id=522931&tmdb=1
+        // 1. SuperEmbed (Prioritize TMDB)
         if (tmdbId != null) {
-            val url = if (isSeries) {
-                "https://multiembed.mov/?video_id=$tmdbId&tmdb=1&s=$season&e=$episode"
-            } else {
-                "https://multiembed.mov/?video_id=$tmdbId&tmdb=1"
-            }
+            val url = if (isSeries) "https://multiembed.mov/?video_id=$tmdbId&tmdb=1&s=$season&e=$episode"
+                      else "https://multiembed.mov/?video_id=$tmdbId&tmdb=1"
             servers.add(ServerLink("SuperEmbed (TMDB - Fast)", url))
         } else if (imdbId != null) {
-            val url = if (isSeries) {
-                "https://multiembed.mov/?video_id=$imdbId&s=$season&e=$episode"
-            } else {
-                "https://multiembed.mov/?video_id=$imdbId"
-            }
+            val url = if (isSeries) "https://multiembed.mov/?video_id=$imdbId&s=$season&e=$episode"
+                      else "https://multiembed.mov/?video_id=$imdbId"
             servers.add(ServerLink("SuperEmbed (IMDb - Fast)", url))
         }
 
-        // 2. 2Embed (Specific Logic)
-        // Docs: https://www.2embed.stream/embed/movie/{id} or /tv/{id}/{s}/{e}
+        // 2. 2Embed
         if (tmdbId != null) {
-            val url = if (isSeries) {
-                "https://www.2embed.stream/embed/tv/$tmdbId/$season/$episode"
-            } else {
-                "https://www.2embed.stream/embed/movie/$tmdbId"
-            }
+            val url = if (isSeries) "https://www.2embed.stream/embed/tv/$tmdbId/$season/$episode"
+                      else "https://www.2embed.stream/embed/movie/$tmdbId"
             servers.add(ServerLink("2Embed (TMDB - Clean)", url))
         } else if (imdbId != null) {
-            val url = if (isSeries) {
-                "https://www.2embed.stream/embed/tv/$imdbId/$season/$episode"
-            } else {
-                "https://www.2embed.stream/embed/movie/$imdbId"
-            }
+            val url = if (isSeries) "https://www.2embed.stream/embed/tv/$imdbId/$season/$episode"
+                      else "https://www.2embed.stream/embed/movie/$imdbId"
             servers.add(ServerLink("2Embed (IMDb - Clean)", url))
         }
 
-        // 3. VidSrc Pro (Reliable Backup)
+        // 3. VidSrc Pro
         if (imdbId != null) {
-            val url = if (isSeries) {
-                "https://vidsrc.xyz/embed/tv?imdb=$imdbId&season=$season&episode=$episode"
-            } else {
-                "https://vidsrc.xyz/embed/movie?imdb=$imdbId"
-            }
+            val url = if (isSeries) "https://vidsrc.xyz/embed/tv?imdb=$imdbId&season=$season&episode=$episode"
+                      else "https://vidsrc.xyz/embed/movie?imdb=$imdbId"
             servers.add(ServerLink("VidSrc Pro (IMDb - Multi)", url))
         } else if (tmdbId != null) {
-             val url = if (isSeries) {
-                "https://vidsrc.xyz/embed/tv?tmdb=$tmdbId&season=$season&episode=$episode"
-            } else {
-                "https://vidsrc.xyz/embed/movie?tmdb=$tmdbId"
-            }
+             val url = if (isSeries) "https://vidsrc.xyz/embed/tv?tmdb=$tmdbId&season=$season&episode=$episode"
+                      else "https://vidsrc.xyz/embed/movie?tmdb=$tmdbId"
             servers.add(ServerLink("VidSrc Pro (TMDB - Multi)", url))
         }
         
@@ -224,7 +252,6 @@ object ServerLinkGenerator {
     }
 }
 
-// Data Model & UI for Web Servers
 data class ServerLink(val name: String, val url: String)
 
 @Composable

@@ -38,8 +38,7 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         composable("auth") { AuthScreen(navController) }
         composable("home") { MainScreen(navController) }
         
-        // --- LIVE TV PLAYER ROUTE (Existing) ---
-        // এটি আগের মতোই PlayerScreen ব্যবহার করবে
+        // --- LIVE TV PLAYER ROUTE ---
         composable(
             route = "player/{encodedUrl}",
             arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
@@ -70,11 +69,13 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             MovieDetailsScreen(navController, movieId, type)
         }
 
-         // --- NEW: LINK SELECTION SCREEN ---
+         // --- LINK SELECTION SCREEN (FIXED) ---
         composable(
-            route = "link_selection/{imdbId}/{title}/{type}/{season}/{episode}",
+            // FIXED: Added {tmdbId} to the route path
+            route = "link_selection/{imdbId}/{tmdbId}/{title}/{type}/{season}/{episode}",
             arguments = listOf(
                 navArgument("imdbId") { type = NavType.StringType },
+                navArgument("tmdbId") { type = NavType.IntType }, // FIXED: Added Argument Type
                 navArgument("title") { type = NavType.StringType },
                 navArgument("type") { type = NavType.StringType },
                 navArgument("season") { type = NavType.IntType },
@@ -82,6 +83,7 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             )
         ) { backStackEntry ->
             val imdbId = backStackEntry.arguments?.getString("imdbId") ?: ""
+            val tmdbId = backStackEntry.arguments?.getInt("tmdbId") ?: 0 // FIXED: Get Value
             val title = backStackEntry.arguments?.getString("title") ?: ""
             val type = backStackEntry.arguments?.getString("type") ?: "MOVIE"
             val season = backStackEntry.arguments?.getInt("season") ?: 0
@@ -90,12 +92,14 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             MovieLinkSelectionScreen(
                 navController = navController,
                 imdbId = imdbId,
+                tmdbId = tmdbId, // FIXED: Passing the value
                 title = title,
                 type = type,
                 season = season,
                 episode = episode
             )
         }
+
          // --- MOVIE PLAYER ---
         composable(
             route = "movie_player/{encodedUrl}",
@@ -109,13 +113,12 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         composable("music") { MusicScreen(navController) }
         composable("music_player") { MusicPlayerScreen(navController) }
         
-        // --- NEW: AD-FREE WEB PLAYER ROUTE ---
+        // --- AD-FREE WEB PLAYER ROUTE ---
         composable(
             route = "webview_player/{url}",
             arguments = listOf(navArgument("url") { type = NavType.StringType })
         ) { backStackEntry ->
             val url = backStackEntry.arguments?.getString("url") ?: ""
-            // Decode URL handled automatically by NavType mostly, but safety check inside component
             AdBlockWebView(url = url, navController = navController)
         }
         
