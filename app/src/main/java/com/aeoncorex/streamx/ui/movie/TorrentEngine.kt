@@ -48,10 +48,9 @@ object TorrentEngine {
             trySend(StreamState.Preparing("Fetching Metadata..."))
 
             // 3. Fetch Metadata (This fixes the 'String vs TorrentInfo' mismatch)
-            // We fetch the .torrent data first using the magnet link.
-            // Timeout is set to 30 seconds.
+            // FIXED: Added 'downloadDir' as the 3rd argument to satisfy parameter 'p2'
             val torrentData: ByteArray? = withContext(Dispatchers.IO) {
-                session?.fetchMagnet(magnetLink, 30)
+                session?.fetchMagnet(magnetLink, 30, downloadDir)
             }
 
             if (torrentData == null) {
