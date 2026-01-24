@@ -205,7 +205,22 @@ object ServerLinkGenerator {
     ): List<ServerLink> {
         val servers = mutableListOf<ServerLink>()
 
-        // 1. SuperEmbed (Prioritize TMDB)
+        // ------------------------------------------------------------
+        // 1. CLOUD STREAM (VidSrc.win) - NEW ULTIMATE SERVER
+        // ------------------------------------------------------------
+        // This is the "Next Level" player request
+        if (tmdbId != null) {
+             val url = if (isSeries) "https://vidsrc.win/tv.html?id=$tmdbId&s=$season&e=$episode"
+                       else "https://vidsrc.win/movie.html?id=$tmdbId"
+             // High priority label
+             servers.add(ServerLink("Cloud Stream (Fastest - Recommended)", url))
+        } else if (imdbId != null) {
+             val url = if (isSeries) "https://vidsrc.win/tv.html?id=$imdbId&s=$season&e=$episode"
+                       else "https://vidsrc.win/movie.html?id=$imdbId"
+             servers.add(ServerLink("Cloud Stream (Fastest - Recommended)", url))
+        }
+
+        // 2. SuperEmbed (Prioritize TMDB)
         if (tmdbId != null) {
             val url = if (isSeries) "https://multiembed.mov/?video_id=$tmdbId&tmdb=1&s=$season&e=$episode"
                       else "https://multiembed.mov/?video_id=$tmdbId&tmdb=1"
@@ -216,7 +231,7 @@ object ServerLinkGenerator {
             servers.add(ServerLink("SuperEmbed (IMDb - Fast)", url))
         }
 
-        // 2. 2Embed
+        // 3. 2Embed
         if (tmdbId != null) {
             val url = if (isSeries) "https://www.2embed.stream/embed/tv/$tmdbId/$season/$episode"
                       else "https://www.2embed.stream/embed/movie/$tmdbId"
@@ -227,7 +242,7 @@ object ServerLinkGenerator {
             servers.add(ServerLink("2Embed (IMDb - Clean)", url))
         }
 
-        // 3. VidSrc Pro
+        // 4. VidSrc Pro
         if (imdbId != null) {
             val url = if (isSeries) "https://vidsrc.xyz/embed/tv?imdb=$imdbId&season=$season&episode=$episode"
                       else "https://vidsrc.xyz/embed/movie?imdb=$imdbId"
@@ -246,8 +261,13 @@ data class ServerLink(val name: String, val url: String)
 
 @Composable
 fun ServerCard(server: ServerLink, onClick: () -> Unit) {
+    // Cloud Stream Special Highlight
+    val isCloudStream = server.name.contains("Cloud Stream")
+    val cardColor = if (isCloudStream) Color(0xFF2A2A35) else Color(0xFF202025)
+    val iconColor = if (isCloudStream) Color(0xFFFFD700) else Color.Green // Gold for Cloud Stream
+
     Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF202025)),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
         shape = RoundedCornerShape(8.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -258,11 +278,17 @@ fun ServerCard(server: ServerLink, onClick: () -> Unit) {
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.Public, null, tint = Color.Green, modifier = Modifier.size(20.dp))
+            Icon(
+                if (isCloudStream) Icons.Default.Cloud else Icons.Default.Public, 
+                null, 
+                tint = iconColor, 
+                modifier = Modifier.size(20.dp)
+            )
             Spacer(Modifier.width(16.dp))
             Column {
                 Text(server.name, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Text(server.url.take(40) + "...", color = Color.Gray, fontSize = 10.sp)
+                // Hide URL for cleaner look, or show shortened
+                Text(server.url.take(30) + "...", color = Color.Gray, fontSize = 10.sp)
             }
             Spacer(Modifier.weight(1f))
             Icon(Icons.Default.PlayCircleOutline, null, tint = Color.White)

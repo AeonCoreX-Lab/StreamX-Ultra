@@ -1,4 +1,3 @@
-
 package com.aeoncorex.streamx
 
 import android.os.Bundle
@@ -14,6 +13,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aeoncorex.streamx.navigation.AppNavigation
 import com.aeoncorex.streamx.ui.music.MusicManager
+import com.aeoncorex.streamx.ui.movie.TorrentEngine
 import com.aeoncorex.streamx.ui.theme.StreamXUltraTheme
 import com.aeoncorex.streamx.ui.theme.ThemeViewModel
 
@@ -21,7 +21,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // --- IMPORTANT: Music Player Initialize ---
+        // --- 1. SMART CACHE CLEAN ON STARTUP ---
+        // Removes old temp files if the app crashed previously
+        TorrentEngine.clearCache(applicationContext)
+        
+        // --- Music Player Initialize ---
         MusicManager.initialize(applicationContext)
 
         setContent {
@@ -47,7 +51,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // --- Release Player Resources ---
         MusicManager.release()
+        // --- 2. AUTO CLEAR CACHE ON EXIT ---
+        TorrentEngine.clearCache(applicationContext)
     }
 }

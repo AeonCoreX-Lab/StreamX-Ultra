@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
+import android.net.Uri
 import android.view.ViewGroup
 import android.webkit.*
 import androidx.activity.compose.BackHandler
@@ -24,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.navigation.NavController
+import java.io.ByteArrayInputStream
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -32,29 +34,22 @@ fun AdBlockWebView(url: String, navController: NavController) {
     var isLoading by remember { mutableStateOf(true) }
     var webView: WebView? = remember { null }
 
-    // --- 1. AUTO-ROTATE SYSTEM ---
-    // Automatically enable sensor rotation (Landscape/Portrait) when player opens
-    // and revert to Portrait when player closes.
+    // Extract the main host dynamically (e.g., "vidsrc.win" from the full URL)
+    // This makes it FUTURE PROOF. No need to hardcode server names anymore.
+    val initialHost = remember(url) {
+        try { Uri.parse(url).host ?: "" } catch (e: Exception) { "" }
+    }
+
+    // --- AUTO-ROTATE SYSTEM ---
     DisposableEffect(Unit) {
         val activity = context as? Activity
         val originalOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        
-        // Force Auto-Rotate (Sensor)
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
-
-        onDispose {
-            // Restore to Portrait (or previous state)
-            activity?.requestedOrientation = originalOrientation
-        }
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        onDispose { activity?.requestedOrientation = originalOrientation }
     }
 
-    // Handle Back Press (Go back in browser history or close player)
     BackHandler {
-        if (webView?.canGoBack() == true) {
-            webView?.goBack()
-        } else {
-            navController.popBackStack()
-        }
+        if (webView?.canGoBack() == true) webView?.goBack() else navController.popBackStack()
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -72,87 +67,126 @@ fun AdBlockWebView(url: String, navController: NavController) {
                         databaseEnabled = true
                         useWideViewPort = true
                         loadWithOverviewMode = true
-                        mediaPlaybackRequiresUserGesture = false // Allow Autoplay
+                        mediaPlaybackRequiresUserGesture = false // AutoPlay ON
                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                        // Spoof User Agent to look like a desktop PC (Often bypasses mobile ads)
-                        userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
                         
-                        // Prevent Multiple Windows (Popups)
-                        setSupportMultipleWindows(false)
+                        // Desktop User Agent blocks many mobile-specific redirects
+                        userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+                        
+                        // --- CORE POPUP BLOCKER ---
+                        setSupportMultipleWindows(false) // Block window.open()
                         javaScriptCanOpenWindowsAutomatically = false
                     }
 
-                    // --- 2. ULTIMATE AD BLOCKING CLIENT ---
                     webViewClient = object : WebViewClient() {
-                        // Massive list of Ad/Tracker Domains
-                        private val adHosts = setOf(
-                            "doubleclick.net", "googlesyndication.com", "google-analytics.com",
-                            "adnxs.com", "popads.net", "popcash.net", "adsterra.com",
-                            "mc.yandex.ru", "bebi.com", "histats.com", "onclickmedium.com",
-                            "propellerads.com", "ad-maven.com", "juicyads.com",
-                            "facebook.com", "twitter.com", "linkedin.com", // Block Social Trackers
-                            "bet365.com", "1xbet.com" // Block Gambling Ads
+                        // --- 1. THE BLACKLIST (Universal Ad Domains) ---
+                        // We block these specific patterns regardless of where they come from.
+                        private val adPatterns = listOf(
+                            "doubleclick", "googlesyndication", "google-analytics",
+                            "adnxs", "popads", "popcash", "adsterra", "propellerads",
+                            "ad-maven", "juicyads", "bet365", "1xbet", "mc.yandex",
+                            "histats", "bebi", "onclick", "tracker", "pixel", "flyer",
+                            "ad.js", "ads.js", "banner", "popup"
                         )
 
-                        // Whitelist: ONLY allow these domains to load main content
-                        private val allowedHosts = listOf(
-                            "vidsrc", "multiembed", "superembed", "2embed", "youtube", "webtor", "google.com/recaptcha"
-                        )
-
-                        // A. Block Resources (Images/Scripts) from Ad Servers
+                        // --- 2. RESOURCE INTERCEPTOR (The Firewall) ---
+                        // Blocks ad scripts/images BEFORE they load to save data and speed up player.
                         override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                             val requestUrl = request?.url.toString().lowercase()
                             
-                            // If URL contains any ad host -> BLOCK IT (Return empty response)
-                            if (adHosts.any { requestUrl.contains(it) }) {
-                                return WebResourceResponse("text/plain", "utf-8", null)
+                            // Block known ad patterns
+                            if (adPatterns.any { requestUrl.contains(it) }) {
+                                // Return empty response (Blank 0kb file)
+                                return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream("".toByteArray()))
                             }
                             return super.shouldInterceptRequest(view, request)
                         }
 
-                        // B. Strict Redirect Blocking (The "Firewall")
-                        @Deprecated("Deprecated in Java")
-                        override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                            if (url == null) return false
+                        // --- 3. SMART REDIRECT BLOCKER ---
+                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                            val nextUrl = request?.url.toString().lowercase()
+                            val nextHost = request?.url?.host ?: ""
 
-                            val cleanUrl = url.lowercase()
-                            
-                            // CHECK: Is this a valid video player URL?
-                            val isAllowed = allowedHosts.any { cleanUrl.contains(it) }
-
-                            return if (isAllowed) {
-                                false // Allow loading (It's the movie/player)
-                            } else {
-                                true // BLOCK redirect (It's likely a popup/ad redirect)
+                            // A. Block Deep Links (App Openers)
+                            if (nextUrl.startsWith("intent://") || nextUrl.startsWith("market://") || 
+                                nextUrl.startsWith("whatsapp://") || nextUrl.startsWith("telegram://") ||
+                                nextUrl.startsWith("shopee://") || nextUrl.startsWith("lazada://")) {
+                                return true // BLOCK
                             }
+
+                            // B. Allow Essential Cloud Infrastructure
+                            if (nextHost.contains("google.com/recaptcha") || 
+                                nextHost.contains("cloudflare") || 
+                                nextHost.contains("gstatic")) {
+                                return false // ALLOW
+                            }
+
+                            // C. Dynamic Whitelist Logic (Future Proofing)
+                            // If the new URL matches the Initial Server's Host (e.g., staying on vidsrc.win), ALLOW.
+                            if (initialHost.isNotEmpty() && nextHost.contains(initialHost)) {
+                                return false
+                            }
+
+                            // D. Block everything else (Likely a Popunder/Redirect)
+                            // Most streaming servers play video inside an iframe, they don't navigate the main window.
+                            // So, any main window navigation that isn't the host itself is usually an ad.
+                            return true 
                         }
 
-                        // C. Inject CSS/JS to remove Ad Elements visually
+                        // --- 4. JS INJECTOR (The Cleaner) ---
                         override fun onPageFinished(view: WebView?, url: String?) {
                             isLoading = false
-                            val js = """
+                            
+                            // This JS runs inside the web page to surgically remove ads
+                            val cleanerJs = """
                                 javascript:(function() {
-                                    // 1. Remove Ad Elements by Class/ID
-                                    var style = document.createElement('style');
-                                    style.innerHTML = 'div[class*="ad"], iframe[src*="ads"], .popup, .overlay, #ad, .ads, .banner-ads { display: none !important; }';
-                                    document.head.appendChild(style);
+                                    // A. Function to kill elements
+                                    function removeAds() {
+                                        // 1. Generic Ad Classes/IDs
+                                        var selectors = [
+                                            'div[class*="ad"]', 'div[id*="ad"]', 
+                                            'iframe[src*="ads"]', 'iframe[src*="pop"]',
+                                            '.popup', '.overlay', '.banner', 
+                                            'a[target="_blank"]', // Remove new tab links
+                                            'div[style*="z-index: 2147483647"]', // Topmost overlays
+                                            '#player_overlay'
+                                        ];
+                                        
+                                        selectors.forEach(sel => {
+                                            document.querySelectorAll(sel).forEach(el => el.remove());
+                                        });
+
+                                        // 2. Remove invisible click-jacking layers
+                                        document.querySelectorAll('div').forEach(div => {
+                                            var style = window.getComputedStyle(div);
+                                            if (style.position === 'absolute' && style.width === '100%' && style.height === '100%' && style.opacity === '0') {
+                                                div.remove();
+                                            }
+                                        });
+                                    }
+
+                                    // B. Run immediately
+                                    removeAds();
+
+                                    // C. Set up a MutationObserver to kill NEW ads that load later (Real-time protection)
+                                    var observer = new MutationObserver(function(mutations) {
+                                        removeAds();
+                                        
+                                        // Auto-Play Logic
+                                        var playBtn = document.querySelector('.play-button') || document.querySelector('button[aria-label="Play"]');
+                                        if(playBtn) playBtn.click();
+                                        
+                                        var video = document.querySelector('video');
+                                        if(video && video.paused) { video.play(); }
+                                    });
                                     
-                                    // 2. Remove "Click to Play" overlays often found in embed players
-                                    var overlays = document.querySelectorAll('div[style*="z-index: 999"]');
-                                    overlays.forEach(el => el.remove());
+                                    observer.observe(document.body, { childList: true, subtree: true });
                                     
-                                    // 3. Auto-Click Play button if found
-                                    var video = document.querySelector('video');
-                                    if(video) { video.play(); }
+                                    // D. Neutalize Window Open (Popup Killer)
+                                    window.open = function() { console.log('Popup blocked by StreamX'); return null; };
                                 })()
                             """
-                            view?.evaluateJavascript(js, null)
-                        }
-                    }
-
-                    webChromeClient = object : WebChromeClient() {
-                        override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                            if (newProgress > 80) isLoading = false
+                            view?.evaluateJavascript(cleanerJs, null)
                         }
                     }
 
@@ -163,23 +197,14 @@ fun AdBlockWebView(url: String, navController: NavController) {
             modifier = Modifier.fillMaxSize()
         )
 
-        // Loading Indicator
         if (isLoading) {
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.Center),
-                color = Color.Cyan
-            )
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Red)
         }
 
-        // Close Button (Top Right)
+        // Close Button
         IconButton(
             onClick = { navController.popBackStack() },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp)
-                .background(Color.Black.copy(0.6f), androidx.compose.foundation.shape.CircleShape)
-        ) {
-            Icon(Icons.Default.Close, null, tint = Color.White)
-        }
+            modifier = Modifier.align(Alignment.TopEnd).padding(16.dp).background(Color.Black.copy(0.6f), androidx.compose.foundation.shape.CircleShape)
+        ) { Icon(Icons.Default.Close, null, tint = Color.White) }
     }
 }
