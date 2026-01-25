@@ -2,148 +2,129 @@ package com.aeoncorex.streamx.ui.movie
 
 import android.content.Context
 import android.util.Log
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.withContext
-import org.libtorrent4j.Priority
-import org.libtorrent4j.SessionManager
-import org.libtorrent4j.SettingsPack
-import org.libtorrent4j.TorrentInfo
+import org.libtorrent4j.*
 import org.libtorrent4j.swig.settings_pack
 import java.io.File
 
 object TorrentEngine {
     private var session: SessionManager? = null
     private const val TAG = "TorrentEngine"
-    
-    // Reduced buffer to 2MB for faster start (Telegram style)
-    private const val MIN_BUFFER_SIZE = 2L * 1024 * 1024 
+
+    // User request: Increased buffer to 10MB for stability
+    private const val MIN_BUFFER_SIZE = 10L * 1024 * 1024 
 
     fun start(context: Context, magnetLink: String): Flow<StreamState> = callbackFlow {
         try {
-            // 1. Setup Cache Directory
+            // 1. Setup Directories
             val rootDir = context.externalCacheDir ?: context.cacheDir
             val downloadDir = File(rootDir, "StreamX_Temp")
             if (!downloadDir.exists()) downloadDir.mkdirs()
 
-            // 2. Initialize Session
+            // 2. Initialize LibTorrent Session
             if (session == null) {
                 session = SessionManager()
                 val settings = SettingsPack()
                 settings.setInteger(settings_pack.int_types.active_downloads.swigValue(), 4)
                 settings.setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
-                settings.setInteger(settings_pack.int_types.connections_limit.swigValue(), 200)
-                
-                // Optimize for streaming (Unlimited speed)
+                settings.setString(settings_pack.string_types.listen_interfaces.swigValue(), "0.0.0.0:6881")
+                // Increase download rate limits (0 = infinite)
                 settings.setInteger(settings_pack.int_types.download_rate_limit.swigValue(), 0)
-                settings.setInteger(settings_pack.int_types.upload_rate_limit.swigValue(), 0)
-                
-                session?.applySettings(settings)
-                session?.start()
-                Log.d(TAG, "Torrent Session Started")
+                session?.start(settings)
             }
+
+            // 3. Add Torrent
+            val params = AddTorrentParams.parseMagnetUri(magnetLink)
+            params.savePath(downloadDir.absolutePath)
+            
+            // Allow more strict checking of the Magnet URI
+            val handle = session!!.addTorrent(params)
+
+            // --- CRITICAL FIX: SEQUENTIAL DOWNLOAD ---
+            // This forces the torrent to download pieces in order (1, 2, 3...)
+            // Essential for video streaming.
+            handle.setSequentialDownload(true)
 
             trySend(StreamState.Preparing("Fetching Metadata..."))
 
-            // 3. Fetch Metadata
-            val torrentData: ByteArray? = withContext(Dispatchers.IO) {
-                session?.fetchMagnet(magnetLink, 30, downloadDir)
-            }
-
-            if (torrentData == null) {
-                trySend(StreamState.Error("Failed to fetch metadata. No peers found."))
-                close()
-                return@callbackFlow
-            }
-
-            // 4. Create TorrentInfo
-            val tempFile = File(downloadDir, "meta_${System.currentTimeMillis()}.torrent")
-            tempFile.writeBytes(torrentData)
-            val torrentInfo = TorrentInfo(tempFile)
-            
-            // 5. Start Download
-            session?.download(torrentInfo, downloadDir)
-            
-            val infoHash = torrentInfo.infoHash()
-            Log.d(TAG, "Download started. Hash: $infoHash")
-
-            trySend(StreamState.Preparing("Starting Engine..."))
-
-            // 6. Monitoring Loop
-            var isPlaying = false
-            var fileSelected = false
-            var largestFileIndex = -1
+            var videoFile: File? = null
+            var isReadyToPlay = false
+            var prioritiesSet = false
 
             while (isActive) {
-                val handle = session?.find(infoHash)
+                val status = handle.status()
+                val progress = (status.progress() * 100).toInt()
+                val seeds = status.numSeeds()
+                val peers = status.numPeers()
+                val speed = status.downloadPayloadRate() / 1024 // KB/s
 
-                if (handle != null && handle.isValid) {
-                    val status = handle.status()
+                if (handle.hasMetadata()) {
+                    val ti = handle.torrentFile()
 
-                    // --- A. SMART SEQUENTIAL LOGIC (THE FIX) ---
-                    if (!fileSelected) {
-                        var maxFileSize = 0L
-                        for (i in 0 until torrentInfo.numFiles()) {
-                            val fileSize = torrentInfo.files().fileSize(i)
-                            if (fileSize > maxFileSize) {
-                                maxFileSize = fileSize
-                                largestFileIndex = i
+                    // 4. Identify the Largest File (The Movie)
+                    if (videoFile == null) {
+                        var largestFileSize = 0L
+                        var videoIndex = -1
+
+                        for (i in 0 until ti.numFiles()) {
+                            val fileSize = ti.files().fileSize(i)
+                            if (fileSize > largestFileSize) {
+                                largestFileSize = fileSize
+                                videoIndex = i
                             }
                         }
 
-                        if (largestFileIndex != -1) {
-                            // 1. Prioritize ONLY the movie file (Ignore others to save bandwidth)
-                            val priorities = Array(torrentInfo.numFiles()) { Priority.IGNORE }
-                            priorities[largestFileIndex] = Priority.DEFAULT
-                            handle.prioritizeFiles(priorities)
-                            
-                            // 2. CRITICAL: Force High Priority
-                            // We removed 'setSequentialDownload(true)' because it caused a compilation error.
-                            // Setting 'TOP_PRIORITY' achieves a similar effect by requesting pieces ASAP.
-                            handle.filePriority(largestFileIndex, Priority.TOP_PRIORITY)
-                            
-                            fileSelected = true
-                            Log.d(TAG, "Streaming Mode Active: File Priority Set to TOP")
+                        if (videoIndex != -1) {
+                            val filePath = ti.files().filePath(videoIndex)
+                            videoFile = File(downloadDir, filePath)
+                            Log.d(TAG, "Target File: $filePath")
                         }
                     }
 
-                    // --- B. Stream Status ---
-                    val progress = (status.progress() * 100).toInt()
-                    val speed = status.downloadPayloadRate() / 1024 // KB/s
-                    val seeds = status.numSeeds()
-                    val peers = status.numPeers()
-                    
-                    // Check actual bytes downloaded
-                    val bytesDownloaded = handle.status().totalDone() 
-
-                    if (!isPlaying && fileSelected) {
-                        // Logic: If we have the first 2MB (Header), start playing.
-                        if (bytesDownloaded > MIN_BUFFER_SIZE) {
-                            val fileName = torrentInfo.files().filePath(largestFileIndex)
-                            val videoFile = File(downloadDir, fileName)
-                            
-                            // Verify file exists on disk
-                            if (videoFile.exists()) {
-                                isPlaying = true
-                                Log.d(TAG, "Buffer Filled. Starting Playback.")
-                                trySend(StreamState.Ready(videoFile.absolutePath))
-                            }
-                        } else {
-                            trySend(StreamState.Buffering(progress, speed.toLong(), seeds, peers))
+                    // 5. Set Priorities (Header & Footer)
+                    // We need the start and end of the file for the player to read metadata correctly.
+                    if (!prioritiesSet && videoFile != null) {
+                        val numPieces = ti.numPieces()
+                        // Prioritize first 10 pieces (Header)
+                        for (i in 0 until 10.coerceAtMost(numPieces)) {
+                            handle.setPiecePriority(i, Priority.SEVEN)
                         }
-                    } else if (isPlaying) {
-                        // Continue updating UI stats while playing
+                        // Prioritize last 5 pieces (Footer/Moov Atom)
+                        for (i in (numPieces - 5).coerceAtLeast(0) until numPieces) {
+                            handle.setPiecePriority(i, Priority.SEVEN)
+                        }
+                        // Set the rest to Normal priority but Sequential mode handles the order
+                        prioritiesSet = true
+                    }
+
+                    // 6. Check Ready State
+                    val downloadedBytes = status.totalDone()
+                    
+                    // If we have enough data (10MB) AND the file actually exists on disk
+                    if (downloadedBytes >= MIN_BUFFER_SIZE && !isReadyToPlay) {
+                        videoFile?.let {
+                            if (it.exists() && it.length() > 0) {
+                                isReadyToPlay = true
+                                trySend(StreamState.Ready(it.absolutePath))
+                            }
+                        }
+                    }
+
+                    // Update UI
+                    if (!isReadyToPlay) {
                         trySend(StreamState.Buffering(progress, speed.toLong(), seeds, peers))
                     } else {
-                        trySend(StreamState.Preparing("Buffering... S:$seeds"))
+                        // Keep sending stats even while playing
+                        trySend(StreamState.Buffering(progress, speed.toLong(), seeds, peers))
                     }
                 } else {
-                    trySend(StreamState.Preparing("Connecting to peers..."))
+                    trySend(StreamState.Preparing("Connecting to $seeds seeds..."))
                 }
+
                 delay(1000)
             }
 
@@ -153,15 +134,16 @@ object TorrentEngine {
         }
 
         awaitClose {
-            Log.d(TAG, "Stream Closed")
+            Log.d(TAG, "Stopping Session")
+            // Clean up: Remove torrent to stop background downloading when user exits
+            // But keep session alive for DHT nodes if needed later
+            val handle = session?.findTorrent(AddTorrentParams.parseMagnetUri(magnetLink).infoHash)
+            if (handle != null && handle.isValid) {
+                session?.remove(handle)
+            }
         }
     }
 
-    fun stop() {
-        // Keeping session alive helps DHT, but pausing is an option if needed
-        // session?.pause()
-    }
-    
     fun clearCache(context: Context) {
         try {
             val rootDir = context.externalCacheDir ?: context.cacheDir

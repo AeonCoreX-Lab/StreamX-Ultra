@@ -213,13 +213,13 @@ object ServerLinkGenerator {
              val url = if (isSeries) "https://vidsrc.win/tv.html?id=$tmdbId&s=$season&e=$episode"
                        else "https://vidsrc.win/movie.html?id=$tmdbId"
              // High priority label
-             servers.add(ServerLink("Cloud Stream (Fastest - Recommended)", url))
+             servers.add(ServerLink("Vidsrc Win (next level player)", url))
         } else if (imdbId != null) {
              val url = if (isSeries) "https://vidsrc.win/tv.html?id=$imdbId&s=$season&e=$episode"
                        else "https://vidsrc.win/movie.html?id=$imdbId"
-             servers.add(ServerLink("Cloud Stream (Fastest - Recommended)", url))
+             servers.add(ServerLink("Vidsrc Win (next level player)", url))
         }
-
+        
         // 2. SuperEmbed (Prioritize TMDB)
         if (tmdbId != null) {
             val url = if (isSeries) "https://multiembed.mov/?video_id=$tmdbId&tmdb=1&s=$season&e=$episode"
@@ -261,13 +261,8 @@ data class ServerLink(val name: String, val url: String)
 
 @Composable
 fun ServerCard(server: ServerLink, onClick: () -> Unit) {
-    // Cloud Stream Special Highlight
-    val isCloudStream = server.name.contains("Cloud Stream")
-    val cardColor = if (isCloudStream) Color(0xFF2A2A35) else Color(0xFF202025)
-    val iconColor = if (isCloudStream) Color(0xFFFFD700) else Color.Green // Gold for Cloud Stream
-
     Card(
-        colors = CardDefaults.cardColors(containerColor = cardColor),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF202025)),
         shape = RoundedCornerShape(8.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -278,17 +273,11 @@ fun ServerCard(server: ServerLink, onClick: () -> Unit) {
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                if (isCloudStream) Icons.Default.Cloud else Icons.Default.Public, 
-                null, 
-                tint = iconColor, 
-                modifier = Modifier.size(20.dp)
-            )
+            Icon(Icons.Default.Public, null, tint = Color.Green, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(16.dp))
             Column {
                 Text(server.name, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                // Hide URL for cleaner look, or show shortened
-                Text(server.url.take(30) + "...", color = Color.Gray, fontSize = 10.sp)
+                Text(server.url.take(40) + "...", color = Color.Gray, fontSize = 10.sp)
             }
             Spacer(Modifier.weight(1f))
             Icon(Icons.Default.PlayCircleOutline, null, tint = Color.White)
