@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
 import org.libtorrent4j.SessionManager
-import org.libtorrent4j.SettingsPack
 import org.libtorrent4j.swig.add_torrent_params
 import org.libtorrent4j.swig.libtorrent
 import org.libtorrent4j.swig.settings_pack
@@ -19,36 +18,36 @@ object TorrentEngine {
     private var session: SessionManager? = null
     private const val TAG = "TorrentEngine"
     
-    // Buffering minimum size (30 MB)
+    // বাফারিং এর জন্য মিনিমাম সাইজ (৩০ মেগাবাইট)
     private const val MIN_BUFFER_SIZE = 30L * 1024 * 1024 
 
     fun start(context: Context, magnetLink: String): Flow<StreamState> = callbackFlow {
         try {
-            // 1. Setup Directory
+            // ১. ডিরেক্টরি সেটআপ
             val rootDir = context.externalCacheDir ?: context.cacheDir
             val downloadDir = File(rootDir, "StreamX_Temp")
             if (!downloadDir.exists()) downloadDir.mkdirs()
 
-            // 2. Initialize Session
+            // ২. সেশন ইনিশিয়ালিজেশন
             if (session == null) {
                 session = SessionManager()
-                
-                val settings = SettingsPack()
-                settings.setInteger(settings_pack.int_types.active_downloads.swigValue(), 4)
-                settings.setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
-                settings.setString(settings_pack.string_types.dht_bootstrap_nodes.swigValue(), "router.bittorrent.com:6881")
-                
-                session?.apply(settings)
                 session?.start()
+                
+                // Settings Pack (SWIG style)
+                val sp = settings_pack()
+                sp.set_int(settings_pack.int_types.active_downloads.swigValue(), 4)
+                sp.set_bool(settings_pack.bool_types.enable_dht.swigValue(), true)
+                sp.set_str(settings_pack.string_types.dht_bootstrap_nodes.swigValue(), "router.bittorrent.com:6881")
+                
+                session?.swig()?.apply_settings(sp)
             }
 
-            // 3. Parse Magnet and Start Download
             Log.d(TAG, "Starting Engine for: $magnetLink")
             
-            // Correct way to parse magnet in libtorrent4j
+            // ৩. Magnet Parsing (SWIG Correct Way)
             val ec = error_code()
-            val params = add_torrent_params.create_instance()
-            libtorrent.parse_magnet_uri(magnetLink, params, ec)
+            // আপনার দেওয়া ফাইল অনুযায়ী, এটি একটি গ্লোবাল ফাংশন যা params রিটার্ন করে
+            val params = libtorrent.parse_magnet_uri(magnetLink, ec)
             
             if (ec.value() != 0) {
                 trySend(StreamState.Error("Invalid Magnet Link: ${ec.message()}"))
@@ -56,44 +55,36 @@ object TorrentEngine {
                 return@callbackFlow
             }
 
+            // Save Path সেট করা
             params.set_save_path(downloadDir.absolutePath)
             
-            // Set flags for sequential download (vital for streaming)
-            // Note: flags might be a Long or specialized type depending on swig version, 
-            // but usually setting specific flags on params is done via bitmask or helper methods.
-            // For libtorrent 1.2/2.0+ via libtorrent4j, we often set it on the handle later.
+            // ৪. ডাউনলোডে যোগ করা (SessionManager এর বদলে সরাসরি SWIG session ব্যবহার)
+            session?.swig()?.async_add_torrent(params)
 
-            // Download using the session manager helper to ensure it's tracked
-            session?.download(params)
-
-            // 4. Monitoring Loop
+            // ৫. মনিটরিং লুপ
             while (isActive) {
-                // Find the torrent handle using the info hash from params
                 val handle = session?.swig()?.find_torrent(params.info_hash())
                 
                 if (handle != null && handle.is_valid()) {
                     val status = handle.status()
                     
-                    // Correct properties access (snake_case methods)
-                    val progress = status.progress() // 0.0 to 1.0
+                    // SWIG methods are usually snake_case
+                    val progress = status.progress()
                     val seeds = status.num_seeds()
                     val peers = status.num_peers()
                     val speed = status.download_payload_rate().toLong()
                     val totalDone = status.total_done()
                     
-                    // Force sequential download if not already set
-                    // Sequential download is critical for streaming
+                    // Streaming এর জন্য Sequential Download জরুরি
                     handle.set_sequential_download(true)
 
-                    // Check if we have enough metadata and file structure
                     if (handle.has_metadata()) {
                         val torrentInfo = handle.torrent_file()
-                        
-                        // Prioritize largest file (likely the movie)
                         val numFiles = torrentInfo.num_files()
                         var largestFileIndex = -1
                         var largestSize = 0L
 
+                        // সবচেয়ে বড় ফাইল খুঁজে বের করা (মুভি ফাইল)
                         for (i in 0 until numFiles) {
                             val fileSize = torrentInfo.files().file_size(i)
                             if (fileSize > largestSize) {
@@ -102,25 +93,23 @@ object TorrentEngine {
                             }
                         }
 
-                        // Prioritize the largest file, ignore others
                         if (largestFileIndex != -1) {
-                            handle.file_priority(largestFileIndex, 7) // 7 is top priority
+                            // শুধু মুভি ফাইলটি হাই প্রায়োরিটি দেওয়া (7 = Top Priority)
+                            handle.file_priority(largestFileIndex, 7)
                             
-                            // Set 0 priority (do not download) for others to save bandwidth
+                            // বাকি সব ফাইল ইগনোর করা (0 = Do not download)
                             for (i in 0 until numFiles) {
                                 if (i != largestFileIndex) {
                                     handle.file_priority(i, 0)
                                 }
                             }
                             
-                            // Get path to the video file
                             val filePath = File(downloadDir, torrentInfo.files().file_path(largestFileIndex)).absolutePath
                             
-                            // Streaming Logic
+                            // বাফারিং লজিক
                             if (totalDone > MIN_BUFFER_SIZE || progress >= 1.0f) {
                                 trySend(StreamState.Ready(filePath))
                             } else {
-                                // Multiply progress by 100 for percentage
                                 trySend(StreamState.Buffering((progress * 100).toInt(), speed, seeds, peers))
                             }
                         }
@@ -143,14 +132,15 @@ object TorrentEngine {
             Log.d(TAG, "Stopping Stream Session")
             try {
                 if (session != null) {
-                    // Re-parse magnet to get the hash for removal
                     val ec = error_code()
-                    val p = add_torrent_params.create_instance()
-                    libtorrent.parse_magnet_uri(magnetLink, p, ec)
+                    // রিমুভ করার জন্য হ্যাশ দরকার, তাই আবার পার্স করা হচ্ছে
+                    val p = libtorrent.parse_magnet_uri(magnetLink, ec)
                     
-                    val h = session?.swig()?.find_torrent(p.info_hash())
-                    if (h != null && h.is_valid()) {
-                        session?.remove(h) // Correct usage for removing specific torrent
+                    if (ec.value() == 0) {
+                        val h = session?.swig()?.find_torrent(p.info_hash())
+                        if (h != null && h.is_valid()) {
+                            session?.remove(h)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -160,7 +150,7 @@ object TorrentEngine {
     }
 
     fun stop() {
-        // Singleton session kept alive
+        // Session kept alive specifically
     }
 
     fun clearCache(context: Context) {
