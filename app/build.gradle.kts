@@ -77,7 +77,9 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
         jniLibs {
-            // Keep native libraries for all architectures
+             // এই অংশটি নিশ্চিত করবে যেন সঠিক .so ফাইলটি লোড হয়
+            pickFirsts += "**/libtorrent_jni.so"
+            pickFirsts += "**/libtorrent4j.so" 
             keepDebugSymbols += "**/libtorrent4j*.so"
         }
     }
