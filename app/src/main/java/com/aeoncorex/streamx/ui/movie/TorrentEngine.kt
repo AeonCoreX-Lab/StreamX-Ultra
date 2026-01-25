@@ -7,156 +7,128 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
-import org.libtorrent4j.*
+import org.libtorrent4j.SessionManager
+import org.libtorrent4j.SettingsPack
+import org.libtorrent4j.swig.add_torrent_params
+import org.libtorrent4j.swig.libtorrent
 import org.libtorrent4j.swig.settings_pack
-import org.libtorrent4j.swig.sha1_hash
+import org.libtorrent4j.swig.error_code
 import java.io.File
 
 object TorrentEngine {
     private var session: SessionManager? = null
     private const val TAG = "TorrentEngine"
     
-    // বাফারিং এর জন্য মিনিমাম সাইজ (৩০ মেগাবাইট)
+    // Buffering minimum size (30 MB)
     private const val MIN_BUFFER_SIZE = 30L * 1024 * 1024 
 
     fun start(context: Context, magnetLink: String): Flow<StreamState> = callbackFlow {
         try {
-            // ১. ডিরেক্টরি সেটআপ
+            // 1. Setup Directory
             val rootDir = context.externalCacheDir ?: context.cacheDir
             val downloadDir = File(rootDir, "StreamX_Temp")
             if (!downloadDir.exists()) downloadDir.mkdirs()
 
-            // ২. সেশন ইনিশিয়ালিজেশন
+            // 2. Initialize Session
             if (session == null) {
                 session = SessionManager()
                 
                 val settings = SettingsPack()
                 settings.setInteger(settings_pack.int_types.active_downloads.swigValue(), 4)
                 settings.setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
-                settings.setString(settings_pack.string_types.listen_interfaces.swigValue(), "0.0.0.0:0")
-                settings.setInteger(settings_pack.int_types.download_rate_limit.swigValue(), 0)
-                settings.setInteger(settings_pack.int_types.upload_rate_limit.swigValue(), 0)
-                settings.setInteger(settings_pack.int_types.connections_limit.swigValue(), 200)
-
-                val sessionParams = SessionParams(settings)
+                settings.setString(settings_pack.string_types.dht_bootstrap_nodes.swigValue(), "router.bittorrent.com:6881")
                 
-                // Safe call to start
-                session?.let { mgr ->
-                    if (!mgr.isRunning) {
-                        mgr.start(sessionParams)
-                    }
-                }
+                session?.apply(settings)
+                session?.start()
             }
 
-            // ৩. টরেন্ট প্যারামিটার পার্সিং
-            val params = AddTorrentParams.parseMagnetUri(magnetLink)
-            params.savePath(downloadDir.absolutePath)
+            // 3. Parse Magnet and Start Download
+            Log.d(TAG, "Starting Engine for: $magnetLink")
             
-            // FIX: v1 Hash (SHA1) বের করা - এটি find_torrent এর অ্যামবিগুইটি দূর করবে
-            // Libtorrent 2.x এ info_hashes().v1 সরাসরি sha1_hash দেয়
-            val infoHash: sha1_hash = params.info_hashes().v1
+            // Correct way to parse magnet in libtorrent4j
+            val ec = error_code()
+            val params = add_torrent_params.create_instance()
+            libtorrent.parse_magnet_uri(magnetLink, params, ec)
             
-            // SessionManager এর ভেতর থেকে নেটিভ হ্যান্ডেল বের করা
-            var handle = session?.swig()?.find_torrent(infoHash)
-            
-            if (handle == null || !handle.isValid) {
-                // FIX: Add torrent directly via SWIG to get handle immediately
-                session?.swig()?.add_torrent(params)
-                
-                // হ্যান্ডেলের জন্য অপেক্ষা
-                var retries = 0
-                while (retries < 10 && (handle == null || !handle.isValid)) {
-                    delay(200)
-                    handle = session?.swig()?.find_torrent(infoHash)
-                    retries++
-                }
+            if (ec.value() != 0) {
+                trySend(StreamState.Error("Invalid Magnet Link: ${ec.message()}"))
+                close()
+                return@callbackFlow
             }
 
-            if (handle != null) {
-                // সিকুয়েন্সিয়াল ডাউনলোড অন করা
-                handle.setSequentialDownload(true)
-            }
+            params.set_save_path(downloadDir.absolutePath)
+            
+            // Set flags for sequential download (vital for streaming)
+            // Note: flags might be a Long or specialized type depending on swig version, 
+            // but usually setting specific flags on params is done via bitmask or helper methods.
+            // For libtorrent 1.2/2.0+ via libtorrent4j, we often set it on the handle later.
 
-            trySend(StreamState.Preparing("Metadata Fetching..."))
+            // Download using the session manager helper to ensure it's tracked
+            session?.download(params)
 
-            var videoFile: File? = null
-            var isReadyToPlay = false
-            var isConfigured = false
-
+            // 4. Monitoring Loop
             while (isActive) {
-                if (handle == null || !handle.isValid) {
-                    handle = session?.swig()?.find_torrent(infoHash)
-                    if (handle == null || !handle.isValid) {
-                         delay(1000)
-                         continue 
-                    }
-                }
-
-                val status = handle.status()
-                val progress = (status.progress() * 100).toInt()
-                val seeds = status.numSeeds()
-                val peers = status.numPeers()
-                val speed = status.downloadPayloadRate() / 1024 // KB/s
-                val downloadedBytes = status.totalDone()
-
-                if (handle.hasMetadata()) {
-                    val ti = handle.torrentFile()
-
-                    // ৪. সবচেয়ে বড় ফাইলটি (মুভি) খুঁজে বের করা
-                    if (videoFile == null) {
-                        var largestFileSize = 0L
-                        var videoIndex = -1
-
-                        for (i in 0 until ti.numFiles()) {
-                            val fileSize = ti.files().fileSize(i)
-                            if (fileSize > largestFileSize) {
-                                largestFileSize = fileSize
-                                videoIndex = i
-                            }
-                        }
-
-                        if (videoIndex != -1) {
-                            val filePath = ti.files().filePath(videoIndex)
-                            videoFile = File(downloadDir, filePath)
-                            Log.d(TAG, "Target File: $filePath, Index: $videoIndex")
-                            
-                            if (!isConfigured) {
-                                // FIX: Priority.TOP_PRIORITY ব্যবহার করা
-                                val priorities = Array(ti.numFiles()) { Priority.IGNORE }
-                                priorities[videoIndex] = Priority.TOP_PRIORITY // Changed from SEVEN to TOP_PRIORITY
-                                handle.prioritizeFiles(priorities)
-                                
-                                val numPieces = ti.numPieces()
-                                val startPiece = ti.mapFile(videoIndex, 0L, 1).piece
-                                val endPiece = ti.mapFile(videoIndex, ti.files().fileSize(videoIndex) - 1, 1).piece
-                                
-                                for (i in startPiece until (startPiece + 15).coerceAtMost(numPieces)) {
-                                    handle.setPiecePriority(i, Priority.TOP_PRIORITY)
-                                    handle.setPieceDeadline(i, 1000)
-                                }
-                                for (i in (endPiece - 5).coerceAtLeast(0) until endPiece + 1) {
-                                    handle.setPiecePriority(i, Priority.TOP_PRIORITY)
-                                }
-                                
-                                isConfigured = true
-                            }
-                        }
-                    }
-
-                    // ৫. বাফারিং চেক
-                    if (downloadedBytes >= MIN_BUFFER_SIZE && !isReadyToPlay) {
-                        videoFile?.let {
-                            if (it.exists() && it.length() > MIN_BUFFER_SIZE) {
-                                isReadyToPlay = true
-                                trySend(StreamState.Ready(it.absolutePath))
-                            }
-                        }
-                    }
-
-                    trySend(StreamState.Buffering(progress, speed.toLong(), seeds, peers))
+                // Find the torrent handle using the info hash from params
+                val handle = session?.swig()?.find_torrent(params.info_hash())
+                
+                if (handle != null && handle.is_valid()) {
+                    val status = handle.status()
                     
+                    // Correct properties access (snake_case methods)
+                    val progress = status.progress() // 0.0 to 1.0
+                    val seeds = status.num_seeds()
+                    val peers = status.num_peers()
+                    val speed = status.download_payload_rate().toLong()
+                    val totalDone = status.total_done()
+                    
+                    // Force sequential download if not already set
+                    // Sequential download is critical for streaming
+                    handle.set_sequential_download(true)
+
+                    // Check if we have enough metadata and file structure
+                    if (handle.has_metadata()) {
+                        val torrentInfo = handle.torrent_file()
+                        
+                        // Prioritize largest file (likely the movie)
+                        val numFiles = torrentInfo.num_files()
+                        var largestFileIndex = -1
+                        var largestSize = 0L
+
+                        for (i in 0 until numFiles) {
+                            val fileSize = torrentInfo.files().file_size(i)
+                            if (fileSize > largestSize) {
+                                largestSize = fileSize
+                                largestFileIndex = i
+                            }
+                        }
+
+                        // Prioritize the largest file, ignore others
+                        if (largestFileIndex != -1) {
+                            handle.file_priority(largestFileIndex, 7) // 7 is top priority
+                            
+                            // Set 0 priority (do not download) for others to save bandwidth
+                            for (i in 0 until numFiles) {
+                                if (i != largestFileIndex) {
+                                    handle.file_priority(i, 0)
+                                }
+                            }
+                            
+                            // Get path to the video file
+                            val filePath = File(downloadDir, torrentInfo.files().file_path(largestFileIndex)).absolutePath
+                            
+                            // Streaming Logic
+                            if (totalDone > MIN_BUFFER_SIZE || progress >= 1.0f) {
+                                trySend(StreamState.Ready(filePath))
+                            } else {
+                                // Multiply progress by 100 for percentage
+                                trySend(StreamState.Buffering((progress * 100).toInt(), speed, seeds, peers))
+                            }
+                        }
+                    } else {
+                         trySend(StreamState.Buffering((progress * 100).toInt(), speed, seeds, peers))
+                    }
                 } else {
-                    trySend(StreamState.Preparing("Metadata: Connecting to $seeds seeds..."))
+                    trySend(StreamState.Preparing("Metadata: Connecting to network..."))
                 }
 
                 delay(1000)
@@ -170,12 +142,15 @@ object TorrentEngine {
         awaitClose {
             Log.d(TAG, "Stopping Stream Session")
             try {
-                // FIX: Public API ব্যবহার করে টরেন্ট রিমুভ করা
                 if (session != null) {
-                    val p = AddTorrentParams.parseMagnetUri(magnetLink)
-                    val h = session?.swig()?.find_torrent(p.info_hashes().v1)
-                    if (h != null && h.isValid) {
-                        session?.remove(h)
+                    // Re-parse magnet to get the hash for removal
+                    val ec = error_code()
+                    val p = add_torrent_params.create_instance()
+                    libtorrent.parse_magnet_uri(magnetLink, p, ec)
+                    
+                    val h = session?.swig()?.find_torrent(p.info_hash())
+                    if (h != null && h.is_valid()) {
+                        session?.remove(h) // Correct usage for removing specific torrent
                     }
                 }
             } catch (e: Exception) {
