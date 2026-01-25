@@ -15,50 +15,61 @@ object TorrentEngine {
     private var session: SessionManager? = null
     private const val TAG = "TorrentEngine"
     
-    // বাফারিং এর জন্য মিনিমাম সাইজ (৩০ মেগাবাইট - ভালো কোয়ালিটির জন্য একটু বাড়ানো হলো)
+    // বাফারিং এর জন্য মিনিমাম সাইজ (৩০ মেগাবাইট)
     private const val MIN_BUFFER_SIZE = 30L * 1024 * 1024 
 
     fun start(context: Context, magnetLink: String): Flow<StreamState> = callbackFlow {
         try {
-            // ১. ডিরেক্টরি সেটআপ (App Cache - No Permission Needed)
+            // ১. ডিরেক্টরি সেটআপ
             val rootDir = context.externalCacheDir ?: context.cacheDir
             val downloadDir = File(rootDir, "StreamX_Temp")
             if (!downloadDir.exists()) downloadDir.mkdirs()
 
-            // ২. সেশন ইনিশিয়ালিজেশন (অপটিমাইজড সেটিংস সহ)
+            // ২. সেশন ইনিশিয়ালিজেশন (FIXED for Libtorrent4j 2.x)
             if (session == null) {
                 session = SessionManager()
-                val settings = SettingsPack()
                 
+                val settings = SettingsPack()
                 settings.setInteger(settings_pack.int_types.active_downloads.swigValue(), 4)
                 settings.setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
-                
-                // --- ফিক্স: র‍্যান্ডম পোর্ট ব্যবহার (ব্লকিং এড়াতে) ---
                 settings.setString(settings_pack.string_types.listen_interfaces.swigValue(), "0.0.0.0:0")
-                
-                // স্পিড লিমিট আনলক
                 settings.setInteger(settings_pack.int_types.download_rate_limit.swigValue(), 0)
                 settings.setInteger(settings_pack.int_types.upload_rate_limit.swigValue(), 0)
-                
-                // কানেকশন অপটিমাইজেশন
                 settings.setInteger(settings_pack.int_types.connections_limit.swigValue(), 200)
-                
-                session?.start(settings)
+
+                // FIX: SettingsPack কে SessionParams এ র‍্যাপ করা হয়েছে
+                val sessionParams = SessionParams(settings)
+                session?.start(sessionParams)
             }
 
-            // ৩. টরেন্ট যোগ করা
+            // ৩. টরেন্ট প্যারামিটার পার্সিং
             val params = AddTorrentParams.parseMagnetUri(magnetLink)
             params.savePath(downloadDir.absolutePath)
             
-            // ডুপ্লিকেট টরেন্ট চেক
-            val infoHash = params.infoHash
-            var handle = session?.findTorrent(infoHash)
-            if (handle == null) {
-                handle = session?.addTorrent(params)
+            // FIX: infoHash() মেথড কল এবং swig() এর ব্যবহার
+            val infoHash = params.infoHash() 
+            
+            // SessionManager এর ভেতর থেকে নেটিভ হ্যান্ডেল (swig) বের করে টরেন্ট চেক করা
+            var handle = session?.swig()?.find_torrent(infoHash)
+            
+            if (handle == null || !handle.isValid) {
+                // টরেন্ট অ্যাড করা (সরাসরি নেটিভ মেথড দিয়ে যাতে হ্যান্ডেল সাথে সাথে পাওয়া যায়)
+                // অথবা SessionManager.download(params) ব্যবহার করা যেত, কিন্তু আমরা হ্যান্ডেল রিটার্ন চাই
+                session?.download(params)
+                
+                // একটু অপেক্ষা করা যাতে হ্যান্ডেলটি তৈরি হয়
+                var retries = 0
+                while (retries < 5 && (handle == null || !handle.isValid)) {
+                    handle = session?.swig()?.find_torrent(infoHash)
+                    if (handle == null) delay(200)
+                    retries++
+                }
             }
 
-            // শুরুতেই সিকুয়েন্সিয়াল ডাউনলোড অন করা
-            handle?.setSequentialDownload(true)
+            if (handle != null) {
+                // শুরুতেই সিকুয়েন্সিয়াল ডাউনলোড অন করা
+                handle.setSequentialDownload(true)
+            }
 
             trySend(StreamState.Preparing("Metadata Fetching..."))
 
@@ -68,10 +79,17 @@ object TorrentEngine {
 
             while (isActive) {
                 if (handle == null || !handle.isValid) {
-                    trySend(StreamState.Error("Invalid Torrent Handle"))
-                    break
+                    // লুপের মধ্যে হ্যান্ডেল চেক (যদি অ্যাড হতে দেরি হয়)
+                    handle = session?.swig()?.find_torrent(infoHash)
+                    if (handle == null || !handle.isValid) {
+                         // যদি অনেকক্ষণ চেষ্টার পরেও হ্যান্ডেল না পাওয়া যায়
+                         // তবে অপেক্ষা করা হচ্ছে (Break না করে)
+                         delay(1000)
+                         continue 
+                    }
                 }
 
+                // এখন handle safe
                 val status = handle.status()
                 val progress = (status.progress() * 100).toInt()
                 val seeds = status.numSeeds()
@@ -79,7 +97,6 @@ object TorrentEngine {
                 val speed = status.downloadPayloadRate() / 1024 // KB/s
                 val downloadedBytes = status.totalDone()
 
-                // মেটাডেটা পাওয়ার পর আসল কনফিগারেশন
                 if (handle.hasMetadata()) {
                     val ti = handle.torrentFile()
 
@@ -101,21 +118,21 @@ object TorrentEngine {
                             videoFile = File(downloadDir, filePath)
                             Log.d(TAG, "Target File: $filePath, Index: $videoIndex")
                             
-                            // --- CRITICAL FIX: অন্য সব ফাইল ইগনোর করা ---
                             if (!isConfigured) {
-                                val priorities = IntArray(ti.numFiles()) { 0 } // 0 = Ignore
-                                priorities[videoIndex] = 7 // 7 = Top Priority for Video
+                                // FIX: Priority সেট করা (IntArray এর বদলে Priority Array ব্যবহার করা ভালো, 
+                                // তবে লিবিটরেন্ট ভার্সন ভেদে IntArray কাজ করতে পারে, এখানে Priority Enum ব্যবহার করা হলো)
+                                
+                                val priorities = Array(ti.numFiles()) { Priority.IGNORE }
+                                priorities[videoIndex] = Priority.SEVEN // High Priority
                                 handle.prioritizeFiles(priorities)
                                 
-                                // ভিডিওর শুরু (Header) এবং শেষ (Footer) অংশ আগে নামানো (প্লেয়ারের জন্য জরুরি)
                                 val numPieces = ti.numPieces()
                                 val startPiece = ti.mapFile(videoIndex, 0L, 1).piece
                                 val endPiece = ti.mapFile(videoIndex, ti.files().fileSize(videoIndex) - 1, 1).piece
                                 
-                                // প্রথম ১০ পিস এবং শেষের ৫ পিস হাই প্রায়োরিটি
                                 for (i in startPiece until (startPiece + 15).coerceAtMost(numPieces)) {
                                     handle.setPiecePriority(i, Priority.TOP_PRIORITY)
-                                    handle.setPieceDeadline(i, 1000) // ১ সেকেন্ডের মধ্যে চাওয়ার চেষ্টা
+                                    handle.setPieceDeadline(i, 1000)
                                 }
                                 for (i in (endPiece - 5).coerceAtLeast(0) until endPiece + 1) {
                                     handle.setPiecePriority(i, Priority.TOP_PRIORITY)
@@ -126,7 +143,7 @@ object TorrentEngine {
                         }
                     }
 
-                    // ৫. বাফারিং চেক (ফাইলের অস্তিত্ব এবং সাইজ)
+                    // ৫. বাফারিং চেক
                     if (downloadedBytes >= MIN_BUFFER_SIZE && !isReadyToPlay) {
                         videoFile?.let {
                             if (it.exists() && it.length() > MIN_BUFFER_SIZE) {
@@ -136,7 +153,6 @@ object TorrentEngine {
                         }
                     }
 
-                    // স্ট্যাটাস আপডেট
                     val msg = if (isReadyToPlay) "Streaming" else "Buffering"
                     trySend(StreamState.Buffering(progress, speed.toLong(), seeds, peers))
                     
@@ -154,19 +170,22 @@ object TorrentEngine {
 
         awaitClose {
             Log.d(TAG, "Stopping Stream Session")
-            // অ্যাপ বন্ধ করলে ডাউনলোড পজ করা বা রিমুভ করা
-            // সেশন পুরোপুরি বন্ধ না করে শুধু টরেন্ট পজ করাই ভালো যাতে রিস্টার্টে দ্রুত হয়
-            // তবে মেমোরি লিক এড়াতে রিমুভ অপশন রাখা হলো:
-             val handle = session?.findTorrent(AddTorrentParams.parseMagnetUri(magnetLink).infoHash)
-             if (handle != null) {
-                 session?.remove(handle) 
-             }
+            // ক্লিনআপ: টরেন্ট রিমুভ করা
+            try {
+                val p = AddTorrentParams.parseMagnetUri(magnetLink)
+                // FIX: swig() ব্যবহার করে রিমুভ করা
+                val h = session?.swig()?.find_torrent(p.infoHash())
+                if (h != null && h.isValid) {
+                    session?.session()?.removeTorrent(h)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error removing torrent: ${e.message}")
+            }
         }
     }
 
     fun stop() {
-        // ম্যানুয়ালি সেশন ক্লিনআপ যদি লাগে
-        // session?.stop() // সাধারণত দরকার নেই যদি সিঙ্গেলটন রাখো
+        // সিঙ্গেলটন সেশন তাই স্টপ করার দরকার নেই যদি না অ্যাপ বন্ধ হয়
     }
 
     fun clearCache(context: Context) {
