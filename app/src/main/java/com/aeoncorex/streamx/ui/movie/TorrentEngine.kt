@@ -12,6 +12,7 @@ import org.libtorrent4j.swig.add_torrent_params
 import org.libtorrent4j.swig.libtorrent
 import org.libtorrent4j.swig.settings_pack
 import org.libtorrent4j.swig.error_code
+import org.libtorrent4j.swig.sha1_hash // Added import for explicit typing
 import java.io.File
 
 object TorrentEngine {
@@ -44,7 +45,7 @@ object TorrentEngine {
 
             Log.d(TAG, "Starting Engine for: $magnetLink")
             
-            // 3. Magnet Parsing (Fixed API Usage)
+            // 3. Magnet Parsing
             val ec = error_code()
             val params = libtorrent.parse_magnet_uri(magnetLink, ec)
             
@@ -54,19 +55,18 @@ object TorrentEngine {
                 return@callbackFlow
             }
 
-            // FIX: Use 'save_path' instead of 'set_save_path'
-            params.save_path(downloadDir.absolutePath)
+            // FIX 1: Use set_save_path instead of treating it as a function call on a property
+            params.set_save_path(downloadDir.absolutePath)
             
-            // 4. Add Torrent
-            // FIX: params.info_hashes() creates the info_hash structure. 
-            // We store the v1 hash (SHA1) to find the handle later.
-            val targetInfoHash = params.info_hashes().v1
+            // FIX 2: Access info_hashes as a property, not a function
+            // FIX 3: Explicitly type sha1_hash to avoid overload ambiguity in find_torrent
+            val targetInfoHash: sha1_hash = params.info_hashes.v1
             
             session?.swig()?.async_add_torrent(params)
 
             // 5. Monitoring Loop
             while (isActive) {
-                // FIX: Use targetInfoHash (SHA1) to find the torrent
+                // FIX 4: Use the explicitly typed hash
                 val handle = session?.swig()?.find_torrent(targetInfoHash)
                 
                 if (handle != null && handle.is_valid()) {
@@ -139,8 +139,8 @@ object TorrentEngine {
                     val p = libtorrent.parse_magnet_uri(magnetLink, ec)
                     
                     if (ec.value() == 0) {
-                        // FIX: Use info_hashes().v1 here as well
-                        val h = session?.swig()?.find_torrent(p.info_hashes().v1)
+                        // FIX 5: Access info_hashes as property and explicitly type to sha1_hash
+                        val h = session?.swig()?.find_torrent(p.info_hashes.v1)
                         if (h != null && h.is_valid()) {
                             session?.remove(h)
                         }
