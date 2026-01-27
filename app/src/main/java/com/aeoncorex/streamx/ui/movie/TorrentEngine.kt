@@ -16,7 +16,7 @@ import org.libtorrent4j.swig.sha1_hash
 import org.libtorrent4j.swig.torrent_handle
 import org.libtorrent4j.swig.torrent_status
 import org.libtorrent4j.swig.torrent_info
-import org.libtorrent4j.swig.torrent_flags // Import flags
+import org.libtorrent4j.swig.int_vector // Required for file priorities
 import java.io.File
 
 object TorrentEngine {
@@ -59,18 +59,14 @@ object TorrentEngine {
                 return@callbackFlow
             }
 
-            // FIX: Use property access for save_path
+            // FIX: Use property assignment for save_path (mapped to save_path(String) setter)
             params.save_path = downloadDir.absolutePath
 
-            // FIX: Set sequential download flag on params since handle.set_sequential_download is deprecated
-            val currentFlags = params.flags
-            // Using bitwise OR to add the sequential_download flag (value is handled by SWIG wrapper usually as BigInt or long)
-            // If bitwise op fails on the SWIG type, we rely on file priority alone, but usually:
-            // params.set_flags(currentFlags.or(torrent_flags.sequential_download)) is the pattern if flags are exposed.
-            // For safety in this fix, we will rely on file_priority(7) which implicitly prioritizes the file's pieces.
-
-            // FIX: Access info_hashes as a property and explicit type
+            // FIX: Explicitly type sha1_hash to avoid ambiguity
             val targetInfoHash: sha1_hash = params.info_hashes.v1
+            
+            // Note: sequential_download is handled via flags usually, but we will rely on piece priority
+            // automatically handled by libtorrent or the file priority logic below.
             
             session?.swig()?.async_add_torrent(params)
 
@@ -81,23 +77,24 @@ object TorrentEngine {
                 if (handle != null && handle.is_valid) {
                     val status: torrent_status = handle.status()
                     
-                    // FIX: Use property syntax for SWIG getters
+                    // FIX: 'status' fields are properties (Direct field access in SWIG)
                     val progress = status.progress
                     val seeds = status.num_seeds
                     val peers = status.num_peers
                     val speed = status.download_payload_rate.toLong()
                     val totalDone = status.total_done
                     
-                    // FIX: Use property syntax for metadata check
+                    // FIX: has_metadata is a property on status
                     if (status.has_metadata) {
-                        // FIX: Use property syntax for torrent_file
-                        val torrentInfo: torrent_info = handle.torrent_file
+                        // FIX: torrent_file() is a METHOD on handle
+                        val torrentInfo: torrent_info = handle.torrent_file()
                         val numFiles = torrentInfo.num_files()
                         var largestFileIndex = -1
                         var largestSize = 0L
 
                         // Find the largest file (The Movie)
                         for (i in 0 until numFiles) {
+                            // FIX: files() is a method returning file_storage, file_size(i) is a method
                             val fileSize = torrentInfo.files().file_size(i)
                             if (fileSize > largestSize) {
                                 largestSize = fileSize
@@ -106,17 +103,18 @@ object TorrentEngine {
                         }
 
                         if (largestFileIndex != -1) {
-                            // Prioritize Movie File (7 = Top Priority)
-                            // Note: If file_priority is unresolved, ensure the method signature matches libtorrent4j version.
-                            // Standard libtorrent: file_priority(index, priority)
-                            handle.file_priority(largestFileIndex, 7)
-                            
-                            // Ignore other files (0 = Do not download)
+                            // FIX: Use int_vector for setting priorities (modern libtorrent way)
+                            val priorities = int_vector()
                             for (i in 0 until numFiles) {
-                                if (i != largestFileIndex) {
-                                    handle.file_priority(i, 0)
+                                if (i == largestFileIndex) {
+                                    priorities.push_back(7) // Top Priority
+                                } else {
+                                    priorities.push_back(0) // Do not download
                                 }
                             }
+                            
+                            // Apply priorities
+                            handle.prioritize_files(priorities)
                             
                             val filePath = File(downloadDir, torrentInfo.files().file_path(largestFileIndex)).absolutePath
                             
@@ -152,7 +150,7 @@ object TorrentEngine {
                     if (ec.value() == 0) {
                         val h = session?.swig()?.find_torrent(p.info_hashes.v1)
                         if (h != null && h.is_valid) {
-                            // FIX: Use swig remove_torrent to match the handle type
+                            // FIX: Use swig remove_torrent
                             session?.swig()?.remove_torrent(h)
                         }
                     }
