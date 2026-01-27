@@ -90,9 +90,10 @@ object TorrentEngine {
                         }
 
                         if (torrentInfo != null) {
-                            // FIX: files() returns file_storage
-                            // If explicit type is needed for resolution:
-                            val files: file_storage = torrentInfo.files()
+                            // FIX: Access file_storage correctly. 
+                            // Using standard files() method which should exist on torrent_info.
+                            // If property access fails, ensure it's a method call.
+                            val files = torrentInfo.files() 
                             val numFiles = files.num_files()
                             var largestFileIndex = -1
                             var largestSize = 0L
@@ -116,11 +117,10 @@ object TorrentEngine {
                                     }
                                 }
                                 
-                                // FIX: Use file_priority instead of prioritize_files
+                                // FIX: Use prioritize_files instead of file_priority
                                 try {
-                                    handle.file_priority(priorities)
+                                    handle.prioritize_files(priorities)
                                 } catch (e: Exception) {
-                                    // Fallback/Ignore if method fails in specific binding version
                                     Log.w(TAG, "Failed to set file priority: ${e.message}")
                                 }
                                 
