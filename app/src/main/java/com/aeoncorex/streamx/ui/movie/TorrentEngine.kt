@@ -2,165 +2,166 @@ package com.aeoncorex.streamx.ui.movie
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
+import org.libtorrent4j.Priority
 import org.libtorrent4j.SessionManager
-import org.libtorrent4j.swig.add_torrent_params
-import org.libtorrent4j.swig.libtorrent
+import org.libtorrent4j.SettingsPack
+import org.libtorrent4j.TorrentInfo
 import org.libtorrent4j.swig.settings_pack
-import org.libtorrent4j.swig.error_code
-import org.libtorrent4j.swig.sha1_hash
-import org.libtorrent4j.swig.torrent_handle
-import org.libtorrent4j.swig.torrent_status
-import org.libtorrent4j.swig.torrent_info
-import org.libtorrent4j.swig.int_vector
-import org.libtorrent4j.swig.file_storage
 import java.io.File
 
 object TorrentEngine {
     private var session: SessionManager? = null
     private const val TAG = "TorrentEngine"
     
-    // Minimum buffer size for streaming (30 MB)
-    private const val MIN_BUFFER_SIZE = 30L * 1024 * 1024 
+    // Reduced buffer to 10MB for faster start (Telegram style)
+    private const val MIN_BUFFER_SIZE = 10L * 1024 * 1024 
 
     fun start(context: Context, magnetLink: String): Flow<StreamState> = callbackFlow {
         try {
-            // 1. Directory Setup
+            // 1. Setup Cache Directory
             val rootDir = context.externalCacheDir ?: context.cacheDir
             val downloadDir = File(rootDir, "StreamX_Temp")
             if (!downloadDir.exists()) downloadDir.mkdirs()
 
-            // 2. Session Initialization
+            // 2. Initialize Session
             if (session == null) {
                 session = SessionManager()
+                val settings = SettingsPack()
+                settings.setInteger(settings_pack.int_types.active_downloads.swigValue(), 4)
+                settings.setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
+                settings.setInteger(settings_pack.int_types.connections_limit.swigValue(), 200)
+                
+                // Optimize for streaming (Unlimited speed)
+                settings.setInteger(settings_pack.int_types.download_rate_limit.swigValue(), 0)
+                settings.setInteger(settings_pack.int_types.upload_rate_limit.swigValue(), 0)
+                
+                session?.applySettings(settings)
                 session?.start()
-                
-                // Settings Pack
-                val sp = settings_pack()
-                sp.set_int(settings_pack.int_types.active_downloads.swigValue(), 4)
-                sp.set_bool(settings_pack.bool_types.enable_dht.swigValue(), true)
-                sp.set_str(settings_pack.string_types.dht_bootstrap_nodes.swigValue(), "router.bittorrent.com:6881")
-                
-                session?.swig()?.apply_settings(sp)
+                Log.d(TAG, "Torrent Session Started")
             }
 
-            Log.d(TAG, "Starting Engine for: $magnetLink")
-            
-            // 3. Magnet Parsing
-            val ec = error_code()
-            val params = libtorrent.parse_magnet_uri(magnetLink, ec)
-            
-            if (ec.value() != 0) {
-                trySend(StreamState.Error("Invalid Magnet Link: ${ec.message()}"))
+            trySend(StreamState.Preparing("Fetching Metadata..."))
+
+            // 3. Fetch Metadata
+            val torrentData: ByteArray? = withContext(Dispatchers.IO) {
+                session?.fetchMagnet(magnetLink, 30, downloadDir)
+            }
+
+            if (torrentData == null) {
+                trySend(StreamState.Error("Failed to fetch metadata. No peers found."))
                 close()
                 return@callbackFlow
             }
 
-            // Set save path via property
-            params.save_path = downloadDir.absolutePath
-
-            // Explicit type for info hash
-            val targetInfoHash: sha1_hash = params.info_hashes.v1
+            // 4. Create TorrentInfo
+            val tempFile = File(downloadDir, "meta_${System.currentTimeMillis()}.torrent")
+            tempFile.writeBytes(torrentData)
+            val torrentInfo = TorrentInfo(tempFile)
             
-            session?.swig()?.async_add_torrent(params)
+            // 5. Start Download
+            session?.download(torrentInfo, downloadDir)
+            
+            val infoHash = torrentInfo.infoHash()
+            Log.d(TAG, "Download started. Hash: $infoHash")
 
-            // 5. Monitoring Loop
+            trySend(StreamState.Preparing("Starting Engine..."))
+
+            // 6. Monitoring Loop
+            var isPlaying = false
+            var fileSelected = false
+            var largestFileIndex = -1
+
             while (isActive) {
-                val handle: torrent_handle? = session?.swig()?.find_torrent(targetInfoHash)
-                
-                if (handle != null && handle.is_valid) {
-                    val status: torrent_status = handle.status()
-                    
-                    val progress = status.progress
-                    val seeds = status.num_seeds
-                    val peers = status.num_peers
-                    val speed = status.download_payload_rate.toLong()
-                    val totalDone = status.total_done
-                    
-                    if (status.has_metadata) {
-                        // FIX: Simplified retrieval. If it fails, it throws or returns null implicitly handled.
-                        // We use the 'files()' method which returns file_storage.
-                        val torrentInfo = handle.torrent_file_ptr()
+                val handle = session?.find(infoHash)
 
-                        if (torrentInfo != null && torrentInfo.is_valid) {
-                            val fs: file_storage = torrentInfo.files()
-                            val numFiles = fs.num_files()
-                            
-                            var largestFileIndex = -1
-                            var largestSize = 0L
+                if (handle != null && handle.isValid) {
+                    val status = handle.status()
 
-                            // Find the largest file (The Movie)
-                            for (i in 0 until numFiles) {
-                                val fileSize = fs.file_size(i)
-                                if (fileSize > largestSize) {
-                                    largestSize = fileSize
-                                    largestFileIndex = i
-                                }
+                    // --- A. SMART SEQUENTIAL LOGIC (THE FIX) ---
+                    if (!fileSelected) {
+                        var maxFileSize = 0L
+                        for (i in 0 until torrentInfo.numFiles()) {
+                            val fileSize = torrentInfo.files().fileSize(i)
+                            if (fileSize > maxFileSize) {
+                                maxFileSize = fileSize
+                                largestFileIndex = i
                             }
+                        }
 
-                            if (largestFileIndex != -1) {
-                                // FIX: Loop through files and set priority individually using 'file_priority(index, priority)'
-                                // This replaces the problematic 'prioritize_files(vector)' and works on all versions.
-                                for (i in 0 until numFiles) {
-                                    val priority = if (i == largestFileIndex) 7 else 0
-                                    handle.file_priority(i, priority)
-                                }
-                                
-                                val filePath = File(downloadDir, fs.file_path(largestFileIndex)).absolutePath
-                                
-                                // Buffer Check
-                                if (totalDone > MIN_BUFFER_SIZE || progress >= 1.0f) {
-                                    trySend(StreamState.Ready(filePath))
-                                } else {
-                                    trySend(StreamState.Buffering((progress * 100).toInt(), speed, seeds, peers))
-                                }
+                        if (largestFileIndex != -1) {
+                            // 1. Prioritize ONLY the movie file (Ignore others to save bandwidth)
+                            val priorities = Array(torrentInfo.numFiles()) { Priority.IGNORE }
+                            priorities[largestFileIndex] = Priority.DEFAULT
+                            handle.prioritizeFiles(priorities)
+                            
+                            // 2. CRITICAL: Force High Priority
+                            // We removed 'setSequentialDownload(true)' because it caused a compilation error.
+                            // Setting 'TOP_PRIORITY' achieves a similar effect by requesting pieces ASAP.
+                            handle.filePriority(largestFileIndex, Priority.TOP_PRIORITY)
+                            
+                            fileSelected = true
+                            Log.d(TAG, "Streaming Mode Active: File Priority Set to TOP")
+                        }
+                    }
+
+                    // --- B. Stream Status ---
+                    val progress = (status.progress() * 100).toInt()
+                    val speed = status.downloadPayloadRate() / 1024 // KB/s
+                    val seeds = status.numSeeds()
+                    val peers = status.numPeers()
+                    
+                    // Check actual bytes downloaded
+                    val bytesDownloaded = handle.status().totalDone() 
+
+                    if (!isPlaying && fileSelected) {
+                        // Logic: If we have the first 2MB (Header), start playing.
+                        if (bytesDownloaded > MIN_BUFFER_SIZE) {
+                            val fileName = torrentInfo.files().filePath(largestFileIndex)
+                            val videoFile = File(downloadDir, fileName)
+                            
+                            // Verify file exists on disk
+                            if (videoFile.exists()) {
+                                isPlaying = true
+                                Log.d(TAG, "Buffer Filled. Starting Playback.")
+                                trySend(StreamState.Ready(videoFile.absolutePath))
                             }
                         } else {
-                             trySend(StreamState.Buffering((progress * 100).toInt(), speed, seeds, peers))
+                            trySend(StreamState.Buffering(progress, speed.toLong(), seeds, peers))
                         }
+                    } else if (isPlaying) {
+                        // Continue updating UI stats while playing
+                        trySend(StreamState.Buffering(progress, speed.toLong(), seeds, peers))
                     } else {
-                         trySend(StreamState.Buffering((progress * 100).toInt(), speed, seeds, peers))
+                        trySend(StreamState.Preparing("Buffering... S:$seeds"))
                     }
                 } else {
-                    trySend(StreamState.Preparing("Metadata: Connecting to network..."))
+                    trySend(StreamState.Preparing("Connecting to peers..."))
                 }
-
                 delay(1000)
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Critical Error: ${e.message}")
-            trySend(StreamState.Error("Engine Failed: ${e.message}"))
+            Log.e(TAG, "Error: ${e.message}")
+            trySend(StreamState.Error("Stream Failed: ${e.message}"))
         }
 
         awaitClose {
-            Log.d(TAG, "Stopping Stream Session")
-            try {
-                if (session != null) {
-                    val ec = error_code()
-                    val p = libtorrent.parse_magnet_uri(magnetLink, ec)
-                    
-                    if (ec.value() == 0) {
-                        val h = session?.swig()?.find_torrent(p.info_hashes.v1)
-                        if (h != null && h.is_valid) {
-                            session?.swig()?.remove_torrent(h)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error removing torrent: ${e.message}")
-            }
+            Log.d(TAG, "Stream Closed")
         }
     }
 
     fun stop() {
-        // Session is kept alive for performance
+        // Keeping session alive helps DHT, but pausing is an option if needed
+        // session?.pause()
     }
-
+    
     fun clearCache(context: Context) {
         try {
             val rootDir = context.externalCacheDir ?: context.cacheDir
@@ -169,7 +170,7 @@ object TorrentEngine {
                 downloadDir.deleteRecursively()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Cache Clear Failed")
+            Log.e(TAG, "Failed to clear cache")
         }
     }
 }
