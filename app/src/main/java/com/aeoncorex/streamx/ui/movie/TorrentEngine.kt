@@ -17,7 +17,7 @@ import org.libtorrent4j.swig.torrent_handle
 import org.libtorrent4j.swig.torrent_status
 import org.libtorrent4j.swig.torrent_info
 import org.libtorrent4j.swig.int_vector
-import org.libtorrent4j.swig.file_storage // CRITICAL IMPORT
+import org.libtorrent4j.swig.file_storage
 import java.io.File
 
 object TorrentEngine {
@@ -82,18 +82,16 @@ object TorrentEngine {
                     val totalDone = status.total_done
                     
                     if (status.has_metadata) {
-                        // FIX: Use get_torrent_copy() if torrent_file() is unstable in bindings
-                        // Note: Some wrappers use torrent_file_ptr(), others torrent_file().
-                        // 'torrent_file()' returning 'torrent_info' is standard C++, 
-                        // but Java wrapper often uses 'get_torrent_copy()' to manage memory safely.
+                        // FIX: Use torrent_file_ptr() which is the standard SWIG mapping
                         val torrentInfo: torrent_info? = try {
-                            handle.torrent_file() 
+                            handle.torrent_file_ptr() 
                         } catch (e: Exception) {
                             null 
                         }
 
                         if (torrentInfo != null) {
-                            // FIX: Explicitly use file_storage to resolve methods
+                            // FIX: files() returns file_storage
+                            // If explicit type is needed for resolution:
                             val files: file_storage = torrentInfo.files()
                             val numFiles = files.num_files()
                             var largestFileIndex = -1
@@ -109,7 +107,6 @@ object TorrentEngine {
                             }
 
                             if (largestFileIndex != -1) {
-                                // FIX: Use 'add' for SWIG vector mapping (it implements List in Java)
                                 val priorities = int_vector()
                                 for (i in 0 until numFiles) {
                                     if (i == largestFileIndex) {
@@ -119,13 +116,12 @@ object TorrentEngine {
                                     }
                                 }
                                 
-                                // FIX: Use prioritize_files if available, or file_priority overload
+                                // FIX: Use file_priority instead of prioritize_files
                                 try {
-                                    handle.prioritize_files(priorities)
+                                    handle.file_priority(priorities)
                                 } catch (e: Exception) {
-                                    // Fallback if prioritize_files is missing in this binding
-                                    // Some bindings map it as file_priority(vector)
-                                    // Or we ignore it if it fails (not critical, just optimization)
+                                    // Fallback/Ignore if method fails in specific binding version
+                                    Log.w(TAG, "Failed to set file priority: ${e.message}")
                                 }
                                 
                                 val filePath = File(downloadDir, files.file_path(largestFileIndex)).absolutePath
