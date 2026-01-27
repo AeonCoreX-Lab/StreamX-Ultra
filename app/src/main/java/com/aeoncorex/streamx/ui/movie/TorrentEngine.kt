@@ -82,25 +82,20 @@ object TorrentEngine {
                     val totalDone = status.total_done
                     
                     if (status.has_metadata) {
-                        // FIX: Use torrent_file_ptr() which is the standard SWIG mapping
-                        val torrentInfo: torrent_info? = try {
-                            handle.torrent_file_ptr() 
-                        } catch (e: Exception) {
-                            null 
-                        }
+                        // FIX: Simplified retrieval. If it fails, it throws or returns null implicitly handled.
+                        // We use the 'files()' method which returns file_storage.
+                        val torrentInfo = handle.torrent_file_ptr()
 
-                        if (torrentInfo != null) {
-                            // FIX: Access file_storage correctly. 
-                            // Using standard files() method which should exist on torrent_info.
-                            // If property access fails, ensure it's a method call.
-                            val files = torrentInfo.files() 
-                            val numFiles = files.num_files()
+                        if (torrentInfo != null && torrentInfo.is_valid) {
+                            val fs: file_storage = torrentInfo.files()
+                            val numFiles = fs.num_files()
+                            
                             var largestFileIndex = -1
                             var largestSize = 0L
 
                             // Find the largest file (The Movie)
                             for (i in 0 until numFiles) {
-                                val fileSize = files.file_size(i)
+                                val fileSize = fs.file_size(i)
                                 if (fileSize > largestSize) {
                                     largestSize = fileSize
                                     largestFileIndex = i
@@ -108,23 +103,14 @@ object TorrentEngine {
                             }
 
                             if (largestFileIndex != -1) {
-                                val priorities = int_vector()
+                                // FIX: Loop through files and set priority individually using 'file_priority(index, priority)'
+                                // This replaces the problematic 'prioritize_files(vector)' and works on all versions.
                                 for (i in 0 until numFiles) {
-                                    if (i == largestFileIndex) {
-                                        priorities.add(7) // Top Priority
-                                    } else {
-                                        priorities.add(0) // Do not download
-                                    }
+                                    val priority = if (i == largestFileIndex) 7 else 0
+                                    handle.file_priority(i, priority)
                                 }
                                 
-                                // FIX: Use prioritize_files instead of file_priority
-                                try {
-                                    handle.prioritize_files(priorities)
-                                } catch (e: Exception) {
-                                    Log.w(TAG, "Failed to set file priority: ${e.message}")
-                                }
-                                
-                                val filePath = File(downloadDir, files.file_path(largestFileIndex)).absolutePath
+                                val filePath = File(downloadDir, fs.file_path(largestFileIndex)).absolutePath
                                 
                                 // Buffer Check
                                 if (totalDone > MIN_BUFFER_SIZE || progress >= 1.0f) {
@@ -134,7 +120,6 @@ object TorrentEngine {
                                 }
                             }
                         } else {
-                             // Fallback if info is null despite metadata flag
                              trySend(StreamState.Buffering((progress * 100).toInt(), speed, seeds, peers))
                         }
                     } else {
