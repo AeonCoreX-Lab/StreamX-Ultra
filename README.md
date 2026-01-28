@@ -165,7 +165,7 @@ Contributions make the open-source community an amazing place to learn, inspire,
  
 
 ## 📄 License
-Distributed under the MIT License. See LICENSE for more information.
+Distributed under the AGPL-3.0 License. See LICENSE for more information.
 <div align="center">
 <p>Built with passion by <strong>AeonCoreX</strong></p>
 <img src="assets/aeoncorex-logo.png" width="80" alt="AeonCoreX">
