@@ -50,12 +50,13 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        // NewPipeExtractor v0.24+ requires Java 11 or higher
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
     }
 
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "11"
         freeCompilerArgs += listOf(
             "-opt-in=androidx.media3.common.util.UnstableApi",
             "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"
@@ -71,13 +72,12 @@ android {
         kotlinCompilerExtensionVersion = "1.5.10"
     }
 
-    // --- এই অংশটি Stripping Error সমাধান করবে ---
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/DEPENDENCIES"
         }
         jniLibs {
-             // এই অংশটি নিশ্চিত করবে যেন সঠিক .so ফাইলটি লোড হয়
             pickFirsts += "**/libtorrent_jni.so"
             pickFirsts += "**/libtorrent4j.so" 
             keepDebugSymbols += "**/libtorrent4j*.so"
@@ -98,19 +98,21 @@ dependencies {
     // Retrofit & Gson & XML
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("com.squareup.retrofit2:converter-scalars:2.9.0") // ADDED FOR NYAA RSS (XML)
+    implementation("com.squareup.retrofit2:converter-scalars:2.9.0") 
 
     // Jsoup for parsing HTML/XML
-    implementation("org.jsoup:jsoup:1.17.2") // ADDED FOR NYAA PARSING
+    implementation("org.jsoup:jsoup:1.17.2") 
     
-    // OkHttp (Required for Custom Downloader in NewPipe)
+    // OkHttp 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     
-     // --- NEWPIPE EXTRACTOR ---
-    // Latest stable version check: https://github.com/TeamNewPipe/NewPipeExtractor
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.24.3") 
-    // JSON Parser required by NewPipe
-    implementation("com.github.TeamNewPipe:nanojson:1d9e1aea85")
+    // --- NEWPIPE EXTRACTOR ---
+    // Using the version you specified
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.25.1") 
+    
+    // --- NANOJSON FIX ---
+    // Forces the official library instead of the broken JitPack commit hash
+    implementation("com.grack:nanojson:1.2")
 
     // Foundation & Navigation
     implementation("androidx.compose.foundation:foundation:1.6.7")
@@ -129,10 +131,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
 
-    // --- LIBTORRENT4J (Version 2.1.0-38) ---
-    // Core Library
+    // --- LIBTORRENT4J ---
     implementation("org.libtorrent4j:libtorrent4j:2.1.0-38")
-    // Native Libraries for all architectures
     implementation("org.libtorrent4j:libtorrent4j-android-arm:2.1.0-38")
     implementation("org.libtorrent4j:libtorrent4j-android-arm64:2.1.0-38")
     implementation("org.libtorrent4j:libtorrent4j-android-x86:2.1.0-38")
