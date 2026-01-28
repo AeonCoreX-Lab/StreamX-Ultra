@@ -76,7 +76,7 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/DEPENDENCIES"
-            excludes += "META-INF/INDEX.LIST" // Added common exclusion just in case
+            excludes += "META-INF/INDEX.LIST"
         }
         jniLibs {
             pickFirsts += "**/libtorrent_jni.so"
@@ -91,6 +91,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
     implementation(platform("androidx.compose:compose-bom:2024.02.02"))
+    
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -101,18 +102,19 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation("com.squareup.retrofit2:converter-scalars:2.9.0") 
 
-    // Jsoup for parsing HTML/XML
+    // Jsoup
     implementation("org.jsoup:jsoup:1.17.2") 
     
     // OkHttp 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     
-    // --- NEWPIPE EXTRACTOR ---
-    // Using the version you specified
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.25.1") 
+    // --- NEWPIPE EXTRACTOR (FIXED DUPLICATE CLASS) ---
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.25.1") {
+        // This excludes the internal nanojson from NewPipe so it uses the one below
+        exclude(group = "com.grack", module = "nanojson")
+    }
     
-    // --- NANOJSON FIX ---
-    // Forces the official library instead of the broken JitPack commit hash
+    // Explicit NanoJson
     implementation("com.grack:nanojson:1.2")
 
     // Foundation & Navigation
@@ -124,7 +126,6 @@ dependencies {
     implementation("com.google.firebase:firebase-auth-ktx")
     
     // --- FIREBASE FIX ---
-    // Excluding the conflicting protobuf module so it doesn't clash with protobuf-javalite:4.33.4
     implementation("com.google.firebase:firebase-firestore-ktx") {
         exclude(group = "com.google.firebase", module = "protolite-well-known-types")
         exclude(group = "com.google.protobuf", module = "protobuf-lite")

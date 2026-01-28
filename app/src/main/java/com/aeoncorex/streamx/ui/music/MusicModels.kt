@@ -12,7 +12,9 @@ import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.downloader.Response
 import org.schabi.newpipe.extractor.services.youtube.extractors.YoutubeMusicSearchExtractor
+import org.schabi.newpipe.extractor.stream.AudioStream
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import org.schabi.newpipe.extractor.MediaFormat
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.*
@@ -23,7 +25,7 @@ import java.util.concurrent.TimeUnit
 data class ApiResponse<T>(val success: Boolean, val data: T)
 data class SearchResult<T>(val results: List<T>)
 
-// --- DTOs: Saavn (No Change) ---
+// --- DTOs: Saavn ---
 data class SongDto(
     val id: String,
     val name: String,
@@ -41,7 +43,7 @@ data class ArtistMap(val primary: List<ArtistDto>?, val all: List<ArtistDto>?)
 data class ArtistDto(val id: String?, val name: String?)
 data class QualityUrl(val url: String)
 
-// --- DTOs: Lyrics (No Change) ---
+// --- DTOs: Lyrics ---
 data class LyricsDto(
     val id: Int?,
     val trackName: String?,
@@ -50,14 +52,14 @@ data class LyricsDto(
     val syncedLyrics: String?
 )
 
-// --- Internal App Models (No Change) ---
+// --- Internal App Models ---
 data class MusicTrack(
     val id: String,
     val title: String,
     val artist: String,
     val album: String = "Unknown Album",
     val coverUrl: String,
-    val streamUrl: String, // YT হলে এখানে URL থাকবে, পরে অডিও লিঙ্ক বের হবে
+    val streamUrl: String, // For YT, this is the video URL; audio extracted later
     val year: String = "",
     val albumName: String = "",
     val source: String = "Saavn" // "Saavn" or "YouTube"
@@ -107,7 +109,7 @@ interface LyricsApi {
     ): LyricsDto
 }
 
-// --- NEW: Custom Downloader for NewPipe (Uses OkHttp) ---
+// --- Custom Downloader for NewPipe (Uses OkHttp) ---
 class OkHttpDownloader : Downloader {
     private val client = OkHttpClient.Builder()
         .readTimeout(30, TimeUnit.SECONDS)
@@ -155,7 +157,6 @@ object MusicRepository {
     val lyricsApi: LyricsApi = lyricsRetrofit.create(LyricsApi::class.java)
 
     // --- NewPipe Helper ---
-    // MusicManager.initialize() এ এটি কল হবে
     fun getDownloader(): Downloader = OkHttpDownloader()
 
     private fun clean(text: String?) = Html.fromHtml(text ?: "", Html.FROM_HTML_MODE_LEGACY).toString()
@@ -176,25 +177,25 @@ object MusicRepository {
                         source = "Saavn"
                     )
                 }
-            } catch (e: Exception) { emptyList() }
+            } catch (e: Exception) { emptyList<MusicTrack>() }
         }
 
         // --- NewPipe YouTube Search ---
         val youtubeJob = async {
             try {
-                // আমরা YouTube Music Search ব্যবহার করবো কারণ রেজাল্ট ভালো আসে
+                // Using YouTube Music Search for better music results
                 val extractor = ServiceList.YouTube.getSearchExtractor(query) 
                 extractor.fetchPage()
                 
                 extractor.initialPage.items
-                    .filterIsInstance<StreamInfoItem>() // শুধু গান বা ভিডিও
+                    .filterIsInstance<StreamInfoItem>()
                     .map { item ->
                         MusicTrack(
-                            id = item.url, // URL কেই ID হিসেবে রাখলাম
+                            id = item.url, // Keep URL as ID
                             title = item.name,
                             artist = item.uploaderName,
-                            coverUrl = item.thumbnailUrl,
-                            streamUrl = item.url, // অরিজিনাল ভিডিও লিঙ্ক
+                            coverUrl = item.thumbnailUrl ?: "",
+                            streamUrl = item.url,
                             year = "",
                             albumName = "YouTube Music",
                             source = "YouTube"
@@ -202,14 +203,14 @@ object MusicRepository {
                     }
             } catch (e: Exception) { 
                 Log.e("NewPipe", "Error: ${e.message}")
-                emptyList() 
+                emptyList<MusicTrack>() 
             }
         }
 
         val saavnResults = saavnJob.await()
         val youtubeResults = youtubeJob.await()
         
-        // Saavn এর রেজাল্ট আগে দেখাবে, তারপর YouTube
+        // Combined results: Saavn first, then YouTube
         return@withContext saavnResults + youtubeResults
     }
 
@@ -219,12 +220,15 @@ object MusicRepository {
             val extractor = ServiceList.YouTube.getStreamExtractor(videoUrl)
             extractor.fetchPage()
             
-            // সবথেকে ভালো অডিও কোয়ালিটি (M4A ফরম্যাট) খোঁজা হচ্ছে
+            // Search for M4A format (usually better quality/compatible)
             val audioStream = extractor.audioStreams
-                .filter { it.format.name.lowercase() == "m4a" } 
+                .filter { 
+                    // FIX: Safe call because format can be null in some versions
+                    it.format?.name?.lowercase() == "m4a" 
+                } 
                 .maxByOrNull { it.bitrate }
                 
-            // যদি M4A না পায়, যেকোনো প্রথম অডিও লিঙ্ক নেবে
+            // Fallback to any available audio stream
             return@withContext audioStream?.content 
                 ?: extractor.audioStreams.firstOrNull()?.content 
                 ?: ""
@@ -235,7 +239,7 @@ object MusicRepository {
         }
     }
 
-    // --- Lyrics & Collections (No Change) ---
+    // --- Lyrics & Collections ---
     suspend fun getLyrics(trackName: String, artistName: String): LyricsDto? = withContext(Dispatchers.IO) {
         try {
             lyricsApi.getLyrics(trackName, artistName)
@@ -269,6 +273,8 @@ object MusicRepository {
                  )
              }
         } else {
+             // Logic placeholder: Saavn might treat Album lookup via search or different ID structure
+             // Calling search logic using the ID as a fallback mechanism
              searchSongs(id) 
         }
     } catch (e: Exception) { emptyList() }
