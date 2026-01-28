@@ -10,24 +10,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField // Added this import
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TileMode
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,12 +33,11 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// --- THEME CONSTANTS (Shared across package) ---
+// --- THEME CONSTANTS ---
 val NeonPurple = Color(0xFFBC13FE)
 val NeonCyan = Color(0xFF04D9FF)
 val DeepDark = Color(0xFF05050A)
 val SurfaceDark = Color(0xFF12121A)
-val GlassDark = Color(0xCC12121A)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,7 +47,7 @@ fun MusicScreen(navController: NavController) {
     
     // UI State
     var searchQuery by remember { mutableStateOf("") }
-    var activeFilter by remember { mutableStateOf("All") } // All, Songs, Albums, YouTube
+    var activeFilter by remember { mutableStateOf("All") }
     
     // Data State
     var songsList by remember { mutableStateOf<List<MusicTrack>>(emptyList()) }
@@ -62,7 +56,7 @@ fun MusicScreen(navController: NavController) {
     var isLoading by remember { mutableStateOf(false) }
     var hasSearched by remember { mutableStateOf(false) }
 
-    // Player State
+    // Player State (For List Items Visualizer)
     val currentSong by MusicManager.currentSong.collectAsState()
     val isPlaying by MusicManager.isPlaying.collectAsState()
 
@@ -74,7 +68,6 @@ fun MusicScreen(navController: NavController) {
             hasSearched = true
             songsList = emptyList()
             
-            // Unified Search
             val songs = MusicRepository.searchSongs(query)
             val albums = MusicRepository.searchAlbums(query)
             val playlists = MusicRepository.searchPlaylists(query)
@@ -86,7 +79,7 @@ fun MusicScreen(navController: NavController) {
         }
     }
 
-    // Auto search when query stops changing (Debounce)
+    // Debounce Search
     LaunchedEffect(searchQuery) {
         if (searchQuery.length > 2) {
             delay(800)
@@ -94,7 +87,6 @@ fun MusicScreen(navController: NavController) {
         }
     }
 
-    // Initial Load
     LaunchedEffect(Unit) { fetchData("Trending Global") }
 
     ModalNavigationDrawer(
@@ -102,10 +94,10 @@ fun MusicScreen(navController: NavController) {
         drawerContent = { MusicAppDrawer(navController) { scope.launch { drawerState.close() } } }
     ) {
         Box(modifier = Modifier.fillMaxSize().background(DeepDark)) {
-            // 1. Futuristic Background
+            // Background
             CyberMeshBackground()
 
-            // 2. Main Content
+            // Main Content
             Scaffold(
                 containerColor = Color.Transparent,
                 topBar = {
@@ -115,14 +107,13 @@ fun MusicScreen(navController: NavController) {
                             query = searchQuery, 
                             onQueryChange = { searchQuery = it }
                         )
-                        // Filter Chips (Spotify Style)
                         FilterRow(
                             selected = activeFilter, 
                             onSelect = { activeFilter = it }
                         )
                     }
                 },
-                bottomBar = { Spacer(Modifier.height(80.dp)) } // Space for MiniPlayer
+                // Removed bottomBar Spacer here because MainScreen handles padding
             ) { padding ->
                 
                 if (isLoading) {
@@ -132,14 +123,15 @@ fun MusicScreen(navController: NavController) {
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize().padding(padding),
-                        contentPadding = PaddingValues(bottom = 100.dp)
+                        // Add extra bottom padding so last item is not hidden behind MainScreen MiniPlayer
+                        contentPadding = PaddingValues(bottom = 120.dp) 
                     ) {
-                        // Hero Section (Only if not filtering specifically for songs/albums)
+                        // Hero Section
                         if (activeFilter == "All" && !hasSearched) {
                             item { TrendingHero() }
                         }
 
-                        // Albums Section
+                        // Albums
                         if ((activeFilter == "All" || activeFilter == "Albums") && albumsList.isNotEmpty()) {
                             item { SectionHeader("Top Albums") }
                             item {
@@ -149,7 +141,6 @@ fun MusicScreen(navController: NavController) {
                                 ) {
                                     items(albumsList) { album ->
                                         FuturisticCard(album) { 
-                                            // Play Album Logic
                                             scope.launch {
                                                 val tracks = MusicRepository.getCollectionTracks(album.id, album.type)
                                                 if (tracks.isNotEmpty()) MusicManager.playTrackList(tracks, 0)
@@ -160,7 +151,7 @@ fun MusicScreen(navController: NavController) {
                             }
                         }
 
-                        // Playlists Section
+                        // Playlists
                         if ((activeFilter == "All" || activeFilter == "Playlists") && playlistsList.isNotEmpty()) {
                             item { SectionHeader("Hot Playlists") }
                             item {
@@ -180,7 +171,7 @@ fun MusicScreen(navController: NavController) {
                             }
                         }
 
-                        // Songs List
+                        // Songs
                         if (activeFilter == "All" || activeFilter == "Songs" || activeFilter == "YouTube") {
                             item { SectionHeader("Tracks") }
                             
@@ -201,18 +192,9 @@ fun MusicScreen(navController: NavController) {
                     }
                 }
             }
-
-            // 3. Floating Glass Mini Player
-            if (currentSong != null) {
-                Box(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp, start = 8.dp, end = 8.dp)) {
-                    GlassMiniPlayer(
-                        track = currentSong!!,
-                        isPlaying = isPlaying,
-                        onClick = { navController.navigate("music_player") },
-                        onToggle = { MusicManager.togglePlayPause() }
-                    )
-                }
-            }
+            
+            // REMOVED LOCAL MINI PLAYER FROM HERE
+            // It will be handled by MainScreen globally
         }
     }
 }
@@ -231,7 +213,6 @@ fun MusicTopBar(drawerState: DrawerState, query: String, onQueryChange: (String)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Menu Button
         IconButton(
             onClick = { scope.launch { drawerState.open() } },
             modifier = Modifier.background(SurfaceDark, CircleShape).size(40.dp)
@@ -241,7 +222,6 @@ fun MusicTopBar(drawerState: DrawerState, query: String, onQueryChange: (String)
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        // Search Bar (Spotify Style)
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -311,7 +291,6 @@ fun TrendingHero() {
         elevation = CardDefaults.cardElevation(10.dp)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Placeholder Image - Replace with real trending data if available
             AsyncImage(
                 model = "https://images.unsplash.com/photo-1493225255756-d9584f8606e9?q=80&w=2070&auto=format&fit=crop",
                 contentDescription = null,
@@ -331,7 +310,6 @@ fun TrendingHero() {
                 Text("The hottest tracks right now.", color = Color.Gray, fontSize = 12.sp)
             }
             
-            // Play Button
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -398,7 +376,6 @@ fun TrackListItem(track: MusicTrack, isPlaying: Boolean, onClick: () -> Unit) {
                 contentScale = ContentScale.Crop
             )
             
-            // Visualizer Overlay if Playing
             if (isPlaying) {
                 Box(
                     modifier = Modifier
@@ -410,7 +387,6 @@ fun TrackListItem(track: MusicTrack, isPlaying: Boolean, onClick: () -> Unit) {
                 }
             }
             
-            // Source Badge
             if (track.source == "YouTube") {
                 Box(modifier = Modifier
                     .align(Alignment.TopStart)
@@ -462,76 +438,6 @@ fun AudioVisualizerAnim() {
 }
 
 @Composable
-fun GlassMiniPlayer(track: MusicTrack, isPlaying: Boolean, onClick: () -> Unit, onToggle: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(70.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .clickable { onClick() }
-    ) {
-        // Glass Effect Background
-        Box(modifier = Modifier.fillMaxSize().background(GlassDark))
-        
-        // Progress Indicator (Top Border)
-        val position by MusicManager.currentPosition.collectAsState()
-        val duration by MusicManager.duration.collectAsState()
-        val progress = if (duration > 0) position.toFloat() / duration else 0f
-        
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth().height(2.dp).align(Alignment.BottomCenter),
-            color = NeonPurple,
-            trackColor = Color.Transparent
-        )
-
-        Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Rotating Art if playing
-            val rotation = remember { Animatable(0f) }
-            LaunchedEffect(isPlaying) {
-                if(isPlaying) {
-                    rotation.animateTo(targetValue = 360f, animationSpec = infiniteRepeatable(tween(4000, easing = LinearEasing)))
-                } else {
-                    rotation.stop()
-                }
-            }
-
-            AsyncImage(
-                model = track.coverUrl,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .rotate(if(isPlaying) rotation.value else 0f), // Spin effect
-                contentScale = ContentScale.Crop
-            )
-            
-            Spacer(modifier = Modifier.width(12.dp))
-            
-            Column(modifier = Modifier.weight(1f)) {
-                Text(track.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                Text(track.artist, color = Color.Gray, fontSize = 12.sp, maxLines = 1)
-            }
-            
-            // Floating Action Button Style Play/Pause
-            IconButton(
-                onClick = onToggle,
-                modifier = Modifier.size(40.dp).background(Color.White, CircleShape)
-            ) {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 
-                    contentDescription = null, 
-                    tint = Color.Black
-                )
-            }
-        }
-    }
-}
-
-@Composable
 fun CyberLoader() {
     val infiniteTransition = rememberInfiniteTransition(label = "loader")
     val angle by infiniteTransition.animateFloat(0f, 360f, infiniteRepeatable(tween(1000, easing = LinearEasing)), label = "")
@@ -553,10 +459,7 @@ fun CyberMeshBackground() {
     )
     
     Canvas(modifier = Modifier.fillMaxSize().background(DeepDark)) {
-        // Deep Grid
         drawRect(brush = Brush.radialGradient(colors = listOf(Color(0xFF1A1A2E), DeepDark), center = center, radius = size.maxDimension))
-        
-        // Floating Orbs
         drawCircle(
             brush = Brush.radialGradient(listOf(NeonPurple.copy(0.1f), Color.Transparent)), 
             radius = size.minDimension * 0.5f, 
@@ -589,7 +492,7 @@ fun MusicAppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         val itemModifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
         NavigationDrawerItem(
-            label = { Text("DASHBORD") }, selected = true, onClick = onCloseDrawer,
+            label = { Text("DASHBOARD") }, selected = true, onClick = onCloseDrawer,
             icon = { Icon(Icons.Default.Home, null, tint = primaryColor) },
             colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = primaryColor.copy(0.1f), selectedTextColor = primaryColor, unselectedTextColor = Color.Gray),
             modifier = itemModifier
@@ -608,3 +511,4 @@ fun MusicAppDrawer(navController: NavController, onCloseDrawer: () -> Unit) {
         )
     }
 }
+

@@ -2,19 +2,23 @@ package com.aeoncorex.streamx.ui.main
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.rounded.Movie // Movie Icon
+import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,153 +30,221 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 import coil.compose.AsyncImage
-import com.aeoncorex.streamx.ui.account.AccountScreen
-import com.aeoncorex.streamx.ui.home.LiveTVScreen
-import com.aeoncorex.streamx.ui.movie.MovieScreen // New Import
 import com.aeoncorex.streamx.ui.music.MusicManager
-import com.aeoncorex.streamx.ui.music.MusicScreen
+import com.aeoncorex.streamx.ui.navigation.SetupNavGraph
+import kotlin.math.roundToInt
 
 @Composable
-fun MainScreen(navController: NavController) {
-    var selectedTab by remember { mutableIntStateOf(0) }
-    val primaryColor = MaterialTheme.colorScheme.primary
+fun MainScreen() {
+    val navController = rememberNavController()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
     val currentSong by MusicManager.currentSong.collectAsState()
-    val isPlaying by MusicManager.isPlaying.collectAsState()
 
     Scaffold(
-        containerColor = Color.Black,
         bottomBar = {
-            Column(
+            if (currentRoute != "music_player") {
+                Column {
+                    // --- GLOBAL MINI PLAYER (Spotify Style) ---
+                    AnimatedVisibility(
+                        visible = currentSong != null,
+                        enter = slideInVertically { it } + fadeIn(),
+                        exit = slideOutVertically { it } + fadeOut()
+                    ) {
+                        currentSong?.let { song ->
+                            SwipeableMiniPlayer(
+                                songTitle = song.title,
+                                artist = song.artist,
+                                coverUrl = song.coverUrl,
+                                isPlaying = MusicManager.isPlaying.collectAsState().value,
+                                onPlayPause = { MusicManager.togglePlayPause() },
+                                onClick = { navController.navigate("music_player") },
+                                onDismiss = { MusicManager.stopPlayer() }
+                            )
+                        }
+                    }
+
+                    // --- BOTTOM NAVIGATION BAR ---
+                    StreamXBottomNavBar(navController = navController, currentRoute = currentRoute)
+                }
+            }
+        },
+        content = { padding ->
+            Box(modifier = Modifier.padding(padding)) {
+                SetupNavGraph(navController = navController)
+            }
+        }
+    )
+}
+
+@Composable
+fun SwipeableMiniPlayer(
+    songTitle: String,
+    artist: String,
+    coverUrl: String,
+    isPlaying: Boolean,
+    onPlayPause: () -> Unit,
+    onClick: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    // Swipe Logic
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    val configuration = LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp.dp
+    val swipeThreshold = 150f
+
+    val draggableState = rememberDraggableState { delta ->
+        offsetX += delta
+    }
+
+    LaunchedEffect(offsetX) {
+        // If swiped enough, dismiss
+        if (androidx.compose.ui.unit.dp.times(offsetX).value > swipeThreshold || 
+            androidx.compose.ui.unit.dp.times(offsetX).value < -swipeThreshold) {
+            onDismiss()
+        }
+    }
+    
+    // Reset offset if released but not dismissed (snap back)
+    LaunchedEffect(key1 = isPlaying) { // Triggers reset if state changes or could handle "onDragStopped" logic with higher level api
+        if (offsetX != 0f && (offsetX < swipeThreshold && offsetX > -swipeThreshold)) {
+            offsetX = 0f
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .offset(x = offsetX.dp)
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .shadow(10.dp, RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1E1E1E)) // Spotify-like dark grey
+            .clickable { onClick() }
+            .draggable(
+                orientation = Orientation.Horizontal,
+                state = draggableState,
+                onDragStopped = { 
+                     if (kotlin.math.abs(offsetX) > swipeThreshold) {
+                         onDismiss()
+                     } else {
+                         offsetX = 0f // Snap back
+                     }
+                }
+            )
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(8.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Album Art
+            AsyncImage(
+                model = coverUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.Transparent)
-            ) {
-                // --- MINI PLAYER (Existing Logic) ---
-                AnimatedVisibility(
-                    visible = currentSong != null,
-                    enter = slideInVertically { it } + fadeIn(),
-                    exit = slideOutVertically { it } + fadeOut()
-                ) {
-                    currentSong?.let { song ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                        ) {
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(60.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .border(1.dp, primaryColor.copy(0.3f), RoundedCornerShape(16.dp))
-                                    .clickable { navController.navigate("music_player") },
-                                color = Color(0xFF1E1E1E).copy(0.9f),
-                                tonalElevation = 8.dp
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxSize().padding(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    AsyncImage(
-                                        model = song.coverUrl,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = song.title,
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = song.artist,
-                                            color = primaryColor.copy(0.8f),
-                                            fontSize = 11.sp,
-                                            maxLines = 1
-                                        )
-                                    }
-                                    IconButton(onClick = { MusicManager.togglePlayPause() }) {
-                                        Icon(
-                                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                            contentDescription = "Play/Pause",
-                                            tint = primaryColor
-                                        )
-                                    }
-                                }
-                            }
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.DarkGray)
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // Text Info
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = songTitle,
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = artist,
+                    color = Color.Gray,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Controls
+            IconButton(onClick = onPlayPause) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = "Play/Pause",
+                    tint = Color.White,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+        
+         Progress Indicator (Optional thin line at bottom)
+         val progress by MusicManager.currentPosition.collectAsState()
+         val duration by MusicManager.duration.collectAsState()
+         if(duration > 0) {
+            LinearProgressIndicator(
+                progress = { (progress.toFloat() / duration.toFloat()) },
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(2.dp),
+                color = MaterialTheme.colorScheme.primary,
+               trackColor = Color.Transparent
+            )
+         }
+    }
+}
+
+@Composable
+fun StreamXBottomNavBar(navController: NavController, currentRoute: String?) {
+    val items = listOf(
+        Triple("home", Icons.Rounded.Tv, "Home"),
+        Triple("movies", Icons.Rounded.Movie, "Movies"),
+        Triple("music", Icons.Filled.MusicNote, "Music"),
+        Triple("profile", Icons.Filled.Person, "Profile")
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black) // Pure black for immersive look
+            .padding(vertical = 12.dp, horizontal = 24.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        items.forEach { (route, icon, label) ->
+            val isSelected = currentRoute == route
+            BottomNavItem(
+                icon = icon,
+                label = label,
+                isSelected = isSelected,
+                primaryColor = MaterialTheme.colorScheme.primary,
+                onClick = {
+                    if (currentRoute != route) {
+                        navController.navigate(route) {
+                            popUpTo(navController.graph.startDestinationId) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
                         }
                     }
                 }
-
-                // --- NAVIGATION BAR (Updated with Movies) ---
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 24.dp, end = 24.dp, bottom = 24.dp, top = 8.dp)
-                        .height(70.dp)
-                        .shadow(20.dp, RoundedCornerShape(35.dp), spotColor = primaryColor.copy(0.5f))
-                        .clip(RoundedCornerShape(35.dp))
-                        .background(Color(0xFF0F0F0F).copy(alpha = 0.95f))
-                        .border(
-                            width = 1.dp,
-                            brush = Brush.horizontalGradient(
-                                listOf(primaryColor.copy(0.1f), primaryColor.copy(0.5f), primaryColor.copy(0.1f))
-                            ),
-                            shape = RoundedCornerShape(35.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        FuturisticNavItem(Icons.Rounded.Tv, "LIVE TV", selectedTab == 0, primaryColor) { selectedTab = 0 }
-                        
-                        // NEW MOVIE TAB
-                        FuturisticNavItem(Icons.Rounded.Movie, "MOVIES", selectedTab == 1, primaryColor) { selectedTab = 1 }
-                        
-                        FuturisticNavItem(Icons.Default.MusicNote, "MUSIC", selectedTab == 2, primaryColor) { selectedTab = 2 }
-                        
-                        FuturisticNavItem(Icons.Default.Person, "PROFILE", selectedTab == 3, primaryColor) { selectedTab = 3 }
-                    }
-                }
-            }
-        }
-    ) { paddingValues ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = paddingValues.calculateBottomPadding())
-        ) {
-            AnimatedContent(
-                targetState = selectedTab,
-                label = "TabAnimation"
-            ) { targetIndex ->
-                when (targetIndex) {
-                    0 -> LiveTVScreen(navController)
-                    1 -> MovieScreen(navController) // New Screen
-                    2 -> MusicScreen(navController)
-                    3 -> AccountScreen(navController)
-                }
-            }
+            )
         }
     }
 }
 
 @Composable
-fun FuturisticNavItem(
+fun BottomNavItem(
     icon: ImageVector,
     label: String,
     isSelected: Boolean,
@@ -180,37 +252,20 @@ fun FuturisticNavItem(
     onClick: () -> Unit
 ) {
     val scale by animateFloatAsState(targetValue = if (isSelected) 1.2f else 1.0f, label = "scale")
-    val glowAlpha by animateFloatAsState(targetValue = if (isSelected) 0.2f else 0f, label = "glow")
-
+    
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-        modifier = Modifier
-            .clip(CircleShape)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onClick() }
-            .padding(8.dp)
+        modifier = Modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null
+        ) { onClick() }
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(
-                        brush = Brush.radialGradient(
-                            colors = listOf(primaryColor.copy(glowAlpha), Color.Transparent)
-                        ),
-                        shape = CircleShape
-                    )
-            )
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = if (isSelected) primaryColor else Color.Gray,
-                modifier = Modifier.size(26.dp * scale)
-            )
-        }
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = if (isSelected) primaryColor else Color.Gray,
+            modifier = Modifier.size(26.dp).scale(scale)
+        )
         Spacer(modifier = Modifier.height(4.dp))
         if (isSelected) {
             Box(

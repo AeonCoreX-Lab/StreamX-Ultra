@@ -102,6 +102,15 @@ dependencies {
 
     // Jsoup for parsing HTML/XML
     implementation("org.jsoup:jsoup:1.17.2") // ADDED FOR NYAA PARSING
+    
+    // OkHttp (Required for Custom Downloader in NewPipe)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    
+     // --- NEWPIPE EXTRACTOR ---
+    // Latest stable version check: https://github.com/TeamNewPipe/NewPipeExtractor
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.24.3") 
+    // JSON Parser required by NewPipe
+    implementation("com.github.TeamNewPipe:nanojson:1d9e1aea85")
 
     // Foundation & Navigation
     implementation("androidx.compose.foundation:foundation:1.6.7")

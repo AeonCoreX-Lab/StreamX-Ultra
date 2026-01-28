@@ -10,6 +10,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.schabi.newpipe.extractor.NewPipe // Import NewPipe
 
 object MusicManager {
     private var exoPlayer: ExoPlayer? = null
@@ -32,16 +33,20 @@ object MusicManager {
     private val _duration = MutableStateFlow(0L)
     val duration = _duration.asStateFlow()
 
-    // --- NEW: Lyrics State ---
     private val _lyrics = MutableStateFlow<String>("Loading Lyrics...")
     val lyrics = _lyrics.asStateFlow()
     
-    // --- NEW: Queue State (To show in player) ---
     private val _queue = MutableStateFlow<List<MusicTrack>>(emptyList())
     val queue = _queue.asStateFlow()
 
     fun initialize(context: Context) {
+        // --- NEWPIPE INITIALIZATION ---
+        // অ্যাপ স্টার্ট হওয়ার সময় একবার কল হবে
         if (exoPlayer == null) {
+            // NewPipe Setup
+            NewPipe.init(MusicRepository.getDownloader()) 
+            
+            // ExoPlayer Setup (Same as before)
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -53,7 +58,6 @@ object MusicManager {
                     override fun onPlaybackStateChanged(state: Int) {
                         if (state == Player.STATE_READY) {
                             _duration.value = duration
-                            // Song loaded successfully
                         }
                         if (state == Player.STATE_ENDED) {
                             playNext()
@@ -67,21 +71,17 @@ object MusicManager {
                     
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                         Log.e("MusicManager", "Error: ${error.message}")
-                        playNext() // Auto skip on error
+                        playNext()
                     }
                 })
             }
         }
     }
 
-    // --- NEW: Handle Collection Click (Album/Playlist) ---
     fun playCollection(collectionId: String, type: CollectionType) {
         scope.launch {
-            // Stop current playback
             exoPlayer?.stop()
             _isPlaying.value = false
-            
-            // Fetch tracks
             val tracks = MusicRepository.getCollectionTracks(collectionId, type)
             if (tracks.isNotEmpty()) {
                 playTrackList(tracks, 0)
@@ -89,7 +89,6 @@ object MusicManager {
         }
     }
 
-    // --- Play a specific list of tracks (used by search results) ---
     fun playTrackList(tracks: List<MusicTrack>, startIndex: Int) {
         playlist = tracks
         _queue.value = tracks
@@ -99,13 +98,11 @@ object MusicManager {
         }
     }
 
-    // --- Explicit Pause (used by Video Player) ---
     fun pause() {
         exoPlayer?.pause()
         _isPlaying.value = false
     }
 
-    // --- NEW: Release Resources ---
     fun release() {
         exoPlayer?.release()
         exoPlayer = null
@@ -119,12 +116,11 @@ object MusicManager {
         _currentPosition.value = 0
         _duration.value = 0
         
-        // Load Lyrics for new song
         fetchLyrics(track)
 
         scope.launch {
             try {
-                // If streamUrl is just an ID (YouTube), resolve it
+                // If streamUrl is just an ID or URL (YouTube), resolve it using NewPipe
                 val finalUrl = if (track.source == "YouTube") {
                      MusicRepository.getYouTubeAudioUrl(track.streamUrl)
                 } else {
@@ -147,7 +143,6 @@ object MusicManager {
         }
     }
 
-    // --- NEW: Fetch Lyrics Logic ---
     private fun fetchLyrics(track: MusicTrack) {
         _lyrics.value = "Searching lyrics for ${track.title}..."
         scope.launch {
@@ -187,6 +182,15 @@ object MusicManager {
 
     fun seekTo(position: Long) {
         exoPlayer?.seekTo(position)
+    }
+    
+    // --- NEW: Stop Player Completely (For Swipe to Remove) ---
+    fun stopPlayer() {
+        exoPlayer?.stop()
+        exoPlayer?.clearMediaItems()
+        _currentSong.value = null
+        _isPlaying.value = false
+        stopProgressUpdater()
     }
 
     private fun startProgressUpdater() {
