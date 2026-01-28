@@ -76,6 +76,7 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/DEPENDENCIES"
+            excludes += "META-INF/INDEX.LIST" // Added common exclusion just in case
         }
         jniLibs {
             pickFirsts += "**/libtorrent_jni.so"
@@ -121,7 +122,14 @@ dependencies {
     // Firebase
     implementation(platform("com.google.firebase:firebase-bom:32.7.4"))
     implementation("com.google.firebase:firebase-auth-ktx")
-    implementation("com.google.firebase:firebase-firestore-ktx")
+    
+    // --- FIREBASE FIX ---
+    // Excluding the conflicting protobuf module so it doesn't clash with protobuf-javalite:4.33.4
+    implementation("com.google.firebase:firebase-firestore-ktx") {
+        exclude(group = "com.google.firebase", module = "protolite-well-known-types")
+        exclude(group = "com.google.protobuf", module = "protobuf-lite")
+    }
+    
     implementation("com.google.android.gms:play-services-auth:21.0.0")
     implementation("com.facebook.android:facebook-login:16.3.0")
 
