@@ -110,7 +110,8 @@ interface LyricsApi {
 }
 
 // --- Custom Downloader for NewPipe (Uses OkHttp) ---
-class OkHttpDownloader : Downloader {
+// FIX 1: Downloader is an abstract class, so we must call its constructor ()
+class OkHttpDownloader : Downloader() {
     private val client = OkHttpClient.Builder()
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
@@ -177,7 +178,10 @@ object MusicRepository {
                         source = "Saavn"
                     )
                 }
-            } catch (e: Exception) { emptyList<MusicTrack>() }
+            } catch (e: Exception) { 
+                Log.e("MusicRepo", "Saavn Error: ${e.message}")
+                emptyList<MusicTrack>() 
+            }
         }
 
         // --- NewPipe YouTube Search ---
@@ -190,11 +194,14 @@ object MusicRepository {
                 extractor.initialPage.items
                     .filterIsInstance<StreamInfoItem>()
                     .map { item ->
+                        // FIX 2: Use item.thumbnails?.firstOrNull()?.url as thumbnailUrl is unresolved
+                        val thumb = item.thumbnails?.firstOrNull()?.url ?: ""
+                        
                         MusicTrack(
                             id = item.url, // Keep URL as ID
                             title = item.name,
                             artist = item.uploaderName,
-                            coverUrl = item.thumbnailUrl ?: "",
+                            coverUrl = thumb,
                             streamUrl = item.url,
                             year = "",
                             albumName = "YouTube Music",
@@ -223,7 +230,6 @@ object MusicRepository {
             // Search for M4A format (usually better quality/compatible)
             val audioStream = extractor.audioStreams
                 .filter { 
-                    // FIX: Safe call because format can be null in some versions
                     it.format?.name?.lowercase() == "m4a" 
                 } 
                 .maxByOrNull { it.bitrate }
@@ -250,7 +256,7 @@ object MusicRepository {
 
     suspend fun searchAlbums(q: String): List<MusicCollection> = try {
         saavnApi.searchAlbums(q).data.results.map {
-            MusicCollection(it.id, clean(it.name), it.year ?: "Album", it.image?.lastOrNull()?.url ?: "", CollectionType.ALBUM)
+            MusicCollection(it.id, clean(it.name), it.year?.toString() ?: "Album", it.image?.lastOrNull()?.url ?: "", CollectionType.ALBUM)
         }
     } catch (e: Exception) { emptyList() }
 
