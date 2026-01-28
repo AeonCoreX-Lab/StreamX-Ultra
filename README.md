@@ -19,8 +19,9 @@
     </a>
     <img src="https://img.shields.io/badge/Platform-Android-2ea44f?style=flat-square&logo=android&logoColor=white" alt="Platform">
     <a href="https://github.com/cybernahid-dev/StreamX-Ultra/blob/main/LICENSE">
-      <img src="https://img.shields.io/github/license/cybernahid-dev/StreamX-Ultra?style=flat-square&color=blue" alt="License">
-    </a>
+  <img src="https://img.shields.io/github/license/cybernahid-dev/StreamX-Ultra?style=flat-square&color=blue&label=license&logo=gnu" alt="License">
+</a>
+
   </p>
 
 <p align="center">
