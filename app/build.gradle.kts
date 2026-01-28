@@ -109,9 +109,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     
     // --- NEWPIPE EXTRACTOR (FIXED DUPLICATE CLASS) ---
+    // The conflict was with 'com.github.TeamNewPipe:nanojson', not 'com.grack'
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.25.1") {
-        // This excludes the internal nanojson from NewPipe so it uses the one below
-        exclude(group = "com.grack", module = "nanojson")
+        exclude(group = "com.github.TeamNewPipe", module = "nanojson")
     }
     
     // Explicit NanoJson
