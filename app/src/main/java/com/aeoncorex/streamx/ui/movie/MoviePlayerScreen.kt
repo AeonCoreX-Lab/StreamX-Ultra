@@ -5,18 +5,13 @@ import android.content.Context
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.net.Uri
-import android.provider.Settings
 import android.view.ViewGroup
 import android.view.WindowManager
-import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.*
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,12 +22,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -40,7 +33,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.media3.common.C
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -50,11 +43,10 @@ import androidx.media3.ui.PlayerView
 import androidx.navigation.NavController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import java.io.File
 import java.net.URLDecoder
-import java.util.concurrent.TimeUnit
 import kotlin.math.max
-import kotlin.math.min
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -62,6 +54,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     val context = LocalContext.current
     val activity = context as? Activity
     val decodedUrl = remember { try { URLDecoder.decode(encodedUrl, "UTF-8") } catch (e: Exception) { encodedUrl } }
+    
+    // Coroutine scope for gesture handlers
+    val scope = rememberCoroutineScope()
 
     // --- State Management ---
     var videoPath by remember { mutableStateOf<String?>(null) }
@@ -102,9 +97,13 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     DisposableEffect(Unit) {
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        val controller = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
+        
+        val window = activity?.window
+        val controller = if (window != null) WindowCompat.getInsetsController(window, window.decorView) else null
+        
         controller?.hide(WindowInsetsCompat.Type.systemBars())
-        controller?.systemBarsBehavior = WindowInsetsCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        // FIX: Use WindowInsetsControllerCompat constant
+        controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         
         onDispose {
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -153,9 +152,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { isControlsVisible = !isControlsVisible },
-                    onDoubleTap = { offset ->
-                        // Will be handled by ExoPlayer logic below, but kept here for structure
-                    }
+                    onDoubleTap = { /* Handled by inner logic */ }
                 )
             }
     ) {
@@ -181,21 +178,17 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                     }
                 }
                 exoPlayer.addListener(listener)
-                
-                // Update progress loop
-                val interval = 1000L
-                val scope = CoroutineScope(Dispatchers.Main)
-                val job = scope.launch {
-                    while (true) {
-                        currentTime = exoPlayer.currentPosition
-                        delay(interval)
-                    }
-                }
-                
                 onDispose {
                     exoPlayer.removeListener(listener)
                     exoPlayer.release()
-                    job.cancel()
+                }
+            }
+
+            // FIX: Use LaunchedEffect for the progress loop instead of manual CoroutineScope inside DisposableEffect
+            LaunchedEffect(exoPlayer) {
+                while (isActive) {
+                    currentTime = exoPlayer.currentPosition
+                    delay(1000)
                 }
             }
 
@@ -263,8 +256,8 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 gestureIcon = if (isForward) Icons.Rounded.Forward10 else Icons.Rounded.Replay10
                                 gestureText = if (isForward) "+10s" else "-10s"
                                 
-                                // Auto hide overlay
-                                CoroutineScope(Dispatchers.Main).launch {
+                                // FIX: Use 'scope' created via rememberCoroutineScope
+                                scope.launch {
                                     delay(600)
                                     showGestureOverlay = false
                                 }
