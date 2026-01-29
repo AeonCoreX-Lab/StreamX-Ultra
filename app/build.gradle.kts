@@ -26,23 +26,27 @@ android {
             cmake {
                 cppFlags("-std=c++17")
 
-                // এনভায়রনমেন্ট থেকে পাথ নেওয়া (GitHub Actions এর জন্য)
+                // এনভায়রনমেন্ট থেকে পাথ নেওয়া (FIXED LOGIC)
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
-                val ndkPath = System.getenv("ANDROID_NDK_LATEST_HOME") ?: (android.ndkDirectory?.absolutePath ?: "")
+                
+                // FIX: আমরা প্রজেক্টের নির্দিষ্ট NDK-কেই প্রাধান্য দেব, সিস্টেমের লেটেস্ট NDK কে নয়।
+                val ndkPath = android.ndkDirectory?.absolutePath ?: System.getenv("ANDROID_NDK_LATEST_HOME") ?: ""
 
                 arguments(
                     "-DANDROID_STL=c++_shared",
                     "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake",
                     "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ndkPath/build/cmake/android.toolchain.cmake",
                     "-DVCPKG_TARGET_TRIPLET=arm64-android",
-                    "-DANDROID_ABI=arm64-v8a"
+                    "-DANDROID_ABI=arm64-v8a",
+                    // FIX: লাইব্রেরিগুলো যেন minSdk 24 এর জন্য বিল্ড হয়
+                    "-DANDROID_PLATFORM=android-24" 
                 )
 
                 abiFilters("arm64-v8a")
             }
         }
 
-        // API Key Injection (এটি defaultConfig এর ভেতরে থাকতে হবে)
+        // API Key Injection
         val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\""
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
     }
