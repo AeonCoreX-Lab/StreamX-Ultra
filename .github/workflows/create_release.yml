@@ -35,7 +35,7 @@ jobs:
         with:
           ndk-version: '25.2.9519653'
           
-      # --- ফিক্স করা অংশ: Indentation ঠিক করা হয়েছে ---
+      # ক্যাশ রিস্টোর করা
       - name: Restore vcpkg artifacts
         uses: actions/cache@v3
         with:
@@ -46,11 +46,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-vcpkg-
 
+      # --- ফিক্স করা অংশ: vcpkg সেটআপ ---
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: ${{ github.workspace }}/vcpkg
           vcpkgJsonGlob: 'app/src/main/cpp/vcpkg.json'
+          vcpkgGitURL: https://github.com/microsoft/vcpkg.git
+          doNotUpdateVcpkg: false # এটি false করা হয়েছে
 
       # --- ধাপ ৩: GitHub Secrets থেকে Keystore ডিকোড করা ---
       - name: Decode Keystore
