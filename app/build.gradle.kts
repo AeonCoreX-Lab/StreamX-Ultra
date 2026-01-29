@@ -7,24 +7,25 @@ plugins {
 android {
     namespace = "com.aeoncorex.streamx"
     compileSdk = 34
-    ndkVersion = "25.2.9519653" 
+    ndkVersion = "25.2.9519653"
+
     defaultConfig {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 24
         targetSdk = 34
         versionCode = 4
-        versionName = "1.2.1" // Updated Version
+        versionName = "1.2.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         vectorDrawables {
             useSupportLibrary = true
         }
 
-                // --- C++ NATIVE CONFIG ---
+        // --- C++ NATIVE CONFIG ---
         externalNativeBuild {
             cmake {
                 cppFlags("-std=c++17")
-                
+
                 // এনভায়রনমেন্ট থেকে পাথ নেওয়া (GitHub Actions এর জন্য)
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
                 val ndkPath = System.getenv("ANDROID_NDK_LATEST_HOME") ?: (android.ndkDirectory?.absolutePath ?: "")
@@ -35,19 +36,13 @@ android {
                     "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ndkPath/build/cmake/android.toolchain.cmake",
                     "-DVCPKG_TARGET_TRIPLET=arm64-android",
                     "-DANDROID_ABI=arm64-v8a"
-                ) // arguments এখানে শেষ হবে
-                
-                // abiFilters এখানে থাকবে (arguments এর বাইরে)
+                )
+
                 abiFilters("arm64-v8a")
             }
         }
-    } // defaultConfig শেষ
 
-
-
-
-
-        // API Key Injection
+        // API Key Injection (এটি defaultConfig এর ভেতরে থাকতে হবে)
         val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\""
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
     }
@@ -78,7 +73,7 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true // Production optimization
+            isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }
@@ -120,7 +115,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
     implementation(platform("androidx.compose:compose-bom:2024.02.02"))
-    
+
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -132,7 +127,7 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-scalars:2.9.0")
     implementation("org.jsoup:jsoup:1.17.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    
+
     // NewPipe Extractor
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.25.1") {
         exclude(group = "com.github.TeamNewPipe", module = "nanojson")
@@ -156,8 +151,6 @@ dependencies {
     implementation("androidx.media3:media3-common:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
-
-    // NOTE: Libtorrent4j removed because we are using custom C++ Native Engine
 
     // UI Utilities
     implementation("io.coil-kt:coil-compose:2.6.0")
