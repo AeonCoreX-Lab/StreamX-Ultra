@@ -33,7 +33,7 @@ fun MovieLinkSelectionScreen(
     season: Int,
     episode: Int
 ) {
-      // FIX: remember(title) ensures updates if title changes
+    // FIX: remember(title) ensures updates if title changes
     val decodedTitle = remember(title) { try { URLDecoder.decode(title, "UTF-8") } catch(e: Exception) { title } }
     
     // States
@@ -92,7 +92,8 @@ fun MovieLinkSelectionScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.Cyan)
+                        // FIX: Changed Icons.AutoMirrored.Filled.ArrowBack to Icons.Default.ArrowBack
+                        Icon(Icons.Default.ArrowBack, "Back", tint = Color.Cyan)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0F0F15))
