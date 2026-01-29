@@ -20,15 +20,24 @@ android {
             useSupportLibrary = true
         }
 
-        // --- C++ NATIVE CONFIG ---
+                // --- C++ NATIVE CONFIG ---
         externalNativeBuild {
             cmake {
                 cppFlags("-std=c++17")
-        arguments("-DANDROID_STL=c++_shared")
-        // GitHub Actions এ vcpkg ব্যবহারের জন্য এটি যোগ করা ভালো
-              abiFilters("arm64-v8a", "armeabi-v7a")
-    }
-}
+                
+                // Vcpkg Toolchain পাথ সেটআপ (GitHub Actions এবং লোকাল বিল্ডের জন্য)
+                val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: file("${project.rootDir}/../vcpkg").absolutePath
+                
+                arguments(
+                    "-DANDROID_STL=c++_shared",
+                    "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake"
+                )
+                
+                // আপনার আর্কিটেকচার ফিল্টার
+                abiFilters("arm64-v8a", "armeabi-v7a")
+            }
+        }
+
 
         // API Key Injection
         val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\""
