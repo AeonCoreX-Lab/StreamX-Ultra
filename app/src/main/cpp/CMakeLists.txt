@@ -1,16 +1,17 @@
 cmake_minimum_required(VERSION 3.22.1)
 
-# প্রজেক্টের নাম পরিবর্তন করা হয়েছে
+# প্রজেক্টের নাম
 project("streamx-native")
 
 set(CMAKE_CXX_STANDARD 17)
 
-# ১. লাইব্রেরির নাম 'streamx-native' করা হলো (Kotlin কোড অনুযায়ী)
+# FIX: সোর্স ফাইলের পাথ থেকে 'src/main/cpp/' সরিয়ে ফেলা হয়েছে
+# কারণ CMakeLists.txt নিজেই ওই ফোল্ডারে আছে।
 add_library(
         streamx-native
         SHARED
-        src/main/cpp/native-lib.cpp
-        src/main/cpp/torrent-engine.cpp
+        native-lib.cpp
+        torrent-engine.cpp
 )
 
 find_library(
