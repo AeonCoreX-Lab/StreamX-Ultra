@@ -97,7 +97,13 @@ void TorrentSystem::updateLoop() {
                     }
                     
                     std::string relPath = info->files().file_path(largestFileIdx);
-                    finalFilePath = handle.save_path() + "/" + relPath;
+                    
+                    // --- FIX START ---
+                    // পুরাতন কোড: finalFilePath = handle.save_path() + "/" + relPath;
+                    // নতুন কোড: s.save_path ব্যবহার করা হয়েছে
+                    finalFilePath = s.save_path + "/" + relPath;
+                    // --- FIX END ---
+                    
                     strncpy(currentStatus.videoPath, finalFilePath.c_str(), 511);
                     LOGD("Video File Path Identified: %s", finalFilePath.c_str());
                     
