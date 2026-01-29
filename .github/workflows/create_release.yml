@@ -46,14 +46,25 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-vcpkg-
 
-      # --- ফিক্স করা অংশ: vcpkg সেটআপ ---
+          # ধাপ: vcpkg এর লেটেস্ট Commit ID খুঁজে বের করা
+      - name: Get latest vcpkg commit ID
+        id: vcpkg-git
+        run: |
+        # vcpkg এর অফিসিয়াল রেপো থেকে লেটেস্ট মাস্টার ব্রাঞ্চের আইডি আনা
+          LATEST_ID=$(git ls-remote https://github.com/microsoft/vcpkg.git HEAD | awk '{ print $1 }')
+          echo "commit_id=$LATEST_ID" >> $GITHUB_OUTPUT
+          echo "Latest vcpkg ID: $LATEST_ID"
+
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: ${{ github.workspace }}/vcpkg
           vcpkgJsonGlob: 'app/src/main/cpp/vcpkg.json'
           vcpkgGitURL: https://github.com/microsoft/vcpkg.git
-          doNotUpdateVcpkg: false # এটি false করা হয়েছে
+          # এখানে অটোমেটিক আইডি ব্যবহার করা হচ্ছে
+          vcpkgGitCommitId: ${{ steps.vcpkg-git.outputs.commit_id }}
+          doNotUpdateVcpkg: false
+
 
       # --- ধাপ ৩: GitHub Secrets থেকে Keystore ডিকোড করা ---
       - name: Decode Keystore
