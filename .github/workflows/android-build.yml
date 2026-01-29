@@ -23,7 +23,7 @@ jobs:
           distribution: 'temurin'
           cache: gradle
           
-      # NDK সেটআপ করা (Native Engine বিল্ড করার জন্য জরুরি)
+      # NDK সেটআপ করা
       - name: Setup Android NDK
         uses: android-actions/setup-android@v3
         with:
@@ -40,13 +40,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-vcpkg-
 
-            
-            
-          # ধাপ: vcpkg এর লেটেস্ট Commit ID খুঁজে বের করা
+      # ধাপ: vcpkg এর লেটেস্ট Commit ID খুঁজে বের করা (ফিক্সড)
       - name: Get latest vcpkg commit ID
         id: vcpkg-git
         run: |
-       # vcpkg এর অফিসিয়াল রেপো থেকে লেটেস্ট মাস্টার ব্রাঞ্চের আইডি আনা
+          # vcpkg এর অফিসিয়াল রেপো থেকে লেটেস্ট মাস্টার ব্রাঞ্চের আইডি আনা
           LATEST_ID=$(git ls-remote https://github.com/microsoft/vcpkg.git HEAD | awk '{ print $1 }')
           echo "commit_id=$LATEST_ID" >> $GITHUB_OUTPUT
           echo "Latest vcpkg ID: $LATEST_ID"
@@ -57,13 +55,8 @@ jobs:
           vcpkgDirectory: ${{ github.workspace }}/vcpkg
           vcpkgJsonGlob: 'app/src/main/cpp/vcpkg.json'
           vcpkgGitURL: https://github.com/microsoft/vcpkg.git
-          # এখানে অটোমেটিক আইডি ব্যবহার করা হচ্ছে
           vcpkgGitCommitId: ${{ steps.vcpkg-git.outputs.commit_id }}
           doNotUpdateVcpkg: false
-
-         
-         
-          # এটি false করা হয়েছে যাতে bootstrap স্ক্রিপ্ট ডাউনলোড হয়
 
       # ধাপ ৩: google-services.json তৈরি করা
       - name: Create google-services.json
