@@ -31,20 +31,19 @@ jobs:
         with:
           ndk-version: '25.2.9519653'
 
-      # FIX: Force ANDROID_NDK_HOME
       - name: Set NDK Env
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
           
-      # FIX: Cache key updated to 'v2'
+      # FIX: Updated cache key to 'v3'
       - name: Restore vcpkg artifacts
         uses: actions/cache@v3
         with:
           path: |
             ~/.cache/vcpkg/archives
             vcpkg_installed
-          key: ${{ runner.os }}-vcpkg-v2-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
+          key: ${{ runner.os }}-vcpkg-v3-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
           restore-keys: |
-            ${{ runner.os }}-vcpkg-v2-
+            ${{ runner.os }}-vcpkg-v3-
 
       - name: Get latest vcpkg commit ID
         id: vcpkg-git

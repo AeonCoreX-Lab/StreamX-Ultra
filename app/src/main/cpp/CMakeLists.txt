@@ -6,8 +6,8 @@ project("streamx-native")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# FIX: Removed manual _FORTIFY_SOURCE definition to avoid conflicts with NDK toolchain
-# add_compile_definitions(_FORTIFY_SOURCE=2)
+# FIX: Force disable FORTIFY_SOURCE to resolve __sendto_chk undefined symbol error
+add_compile_definitions(_FORTIFY_SOURCE=0)
 
 add_library(
         streamx-native

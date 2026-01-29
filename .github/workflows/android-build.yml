@@ -21,26 +21,24 @@ jobs:
           distribution: 'temurin'
           cache: gradle
           
-      # FIX: Install specific NDK version
       - name: Setup Android NDK
         uses: android-actions/setup-android@v3
         with:
           ndk-version: '25.2.9519653'
 
-      # FIX: Force ANDROID_NDK_HOME to use the installed version
       - name: Set NDK Env
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
           
-      # FIX: Changed cache key to 'v2' to invalidate old NDK 27 builds
+      # FIX: Updated cache key to 'v3' to force clean vcpkg build with new cmake flags
       - name: Restore vcpkg artifacts
         uses: actions/cache@v3
         with:
           path: |
             ~/.cache/vcpkg/archives
             vcpkg_installed
-          key: ${{ runner.os }}-vcpkg-v2-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
+          key: ${{ runner.os }}-vcpkg-v3-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
           restore-keys: |
-            ${{ runner.os }}-vcpkg-v2-
+            ${{ runner.os }}-vcpkg-v3-
 
       - name: Get latest vcpkg commit ID
         id: vcpkg-git

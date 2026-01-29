@@ -24,7 +24,8 @@ android {
         // --- C++ NATIVE CONFIG ---
         externalNativeBuild {
             cmake {
-                cppFlags("-std=c++17")
+                // FIX: Force disable FORTIFY_SOURCE to prevent __sendto_chk linker errors
+                cppFlags("-std=c++17", "-D_FORTIFY_SOURCE=0")
 
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
                 
@@ -40,7 +41,9 @@ android {
                     "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ndkPath/build/cmake/android.toolchain.cmake",
                     "-DVCPKG_TARGET_TRIPLET=arm64-android",
                     "-DANDROID_ABI=arm64-v8a",
-                    "-DANDROID_PLATFORM=android-24"
+                    "-DANDROID_PLATFORM=android-24",
+                    // FIX: Explicitly disable fortification in CMake arguments
+                    "-D_FORTIFY_SOURCE=0"
                 )
 
                 abiFilters("arm64-v8a")
