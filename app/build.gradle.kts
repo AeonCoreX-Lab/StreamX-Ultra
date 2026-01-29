@@ -132,7 +132,7 @@ dependencies {
     implementation("com.grack:nanojson:1.2")
 
     // Navigation & Firebase
-    implementation("androidx.compose.foundation:foundation:1.6.7")
+    implementation("androidx.compose.foundation:foundation:1.10.2")
     implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation(platform("com.google.firebase:firebase-bom:32.7.4"))
     implementation("com.google.firebase:firebase-auth-ktx")
