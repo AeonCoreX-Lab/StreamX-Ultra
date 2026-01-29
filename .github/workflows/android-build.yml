@@ -11,11 +11,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ধাপ ১: রিপোজিটরির কোড আনা
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ধাপ ২: JDK 17 সেটআপ করা
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -23,13 +21,12 @@ jobs:
           distribution: 'temurin'
           cache: gradle
           
-      # NDK সেটআপ করা
+      # NDK সেটআপ (Ensure version matches build.gradle)
       - name: Setup Android NDK
         uses: android-actions/setup-android@v3
         with:
           ndk-version: '25.2.9519653'
           
-      # ক্যাশ রিস্টোর করা
       - name: Restore vcpkg artifacts
         uses: actions/cache@v3
         with:
@@ -40,11 +37,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-vcpkg-
 
-      # ধাপ: vcpkg এর লেটেস্ট Commit ID খুঁজে বের করা (ফিক্সড)
       - name: Get latest vcpkg commit ID
         id: vcpkg-git
         run: |
-          # vcpkg এর অফিসিয়াল রেপো থেকে লেটেস্ট মাস্টার ব্রাঞ্চের আইডি আনা
           LATEST_ID=$(git ls-remote https://github.com/microsoft/vcpkg.git HEAD | awk '{ print $1 }')
           echo "commit_id=$LATEST_ID" >> $GITHUB_OUTPUT
           echo "Latest vcpkg ID: $LATEST_ID"
@@ -58,24 +53,22 @@ jobs:
           vcpkgGitCommitId: ${{ steps.vcpkg-git.outputs.commit_id }}
           doNotUpdateVcpkg: false
 
-      # ধাপ ৩: google-services.json তৈরি করা
       - name: Create google-services.json
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           echo $GOOGLE_SERVICES_JSON | base64 -d > app/google-services.json
 
-      # ধাপ ৪: Gradle Wrapper-কে এক্সিকিউট করার অনুমতি দেওয়া
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # ধাপ ৫: Gradle ব্যবহার করে ডিবাগ APK বিল্ড করা
+      # FIX: ANDROID_NDK_HOME স্পষ্টভাবে পাস করা হচ্ছে
       - name: Build Debug APK
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: ./gradlew assembleDebug
 
-      # ধাপ ৬: কী (SHA-1, SHA-256) প্রিন্ট করা
       - name: Generate and Print Signing Keys
         run: |
           echo "===================================================================="
@@ -84,7 +77,6 @@ jobs:
           ./gradlew signingReport
           echo "===================================================================="
 
-      # ধাপ ৭: APK ফাইল আপলোড করা
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
