@@ -26,15 +26,12 @@ android {
             cmake {
                 cppFlags("-std=c++17")
 
-                // এনভায়রনমেন্ট থেকে পাথ নেওয়া
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
                 
-                // FIX: NDK পাথ লজিক আপডেট।
-                // আগে এটি Empty String নিচ্ছিল, এখন takeIf দিয়ে চেক করা হচ্ছে।
+                // Ensure correct NDK path is used for vcpkg toolchain
                 val envNdk = System.getenv("ANDROID_NDK_HOME")
                 val ndkPath = if (!envNdk.isNullOrBlank()) envNdk else android.ndkDirectory.absolutePath
 
-                // ডিবাগিং এর জন্য কনসোলে প্রিন্ট হবে
                 println("StreamX Build: Using NDK Path -> $ndkPath")
 
                 arguments(

@@ -21,21 +21,26 @@ jobs:
           distribution: 'temurin'
           cache: gradle
           
-      # NDK সেটআপ (Ensure version matches build.gradle)
+      # FIX: Install specific NDK version
       - name: Setup Android NDK
         uses: android-actions/setup-android@v3
         with:
           ndk-version: '25.2.9519653'
+
+      # FIX: Force ANDROID_NDK_HOME to use the installed version
+      - name: Set NDK Env
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
           
+      # FIX: Changed cache key to 'v2' to invalidate old NDK 27 builds
       - name: Restore vcpkg artifacts
         uses: actions/cache@v3
         with:
           path: |
             ~/.cache/vcpkg/archives
             vcpkg_installed
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
+          key: ${{ runner.os }}-vcpkg-v2-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
           restore-keys: |
-            ${{ runner.os }}-vcpkg-
+            ${{ runner.os }}-vcpkg-v2-
 
       - name: Get latest vcpkg commit ID
         id: vcpkg-git
@@ -62,7 +67,6 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # FIX: Removed manual override of ANDROID_NDK_HOME which was causing empty string
       - name: Build Debug APK
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}

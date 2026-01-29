@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - 'v*.*'
-  # ম্যানুয়ালি রিলিজ রান করার অপশন
   workflow_dispatch:
 
 jobs:
@@ -16,41 +15,40 @@ jobs:
       issues: read
 
     steps:
-      # --- ধাপ ১: রিপোজিটরির কোড আনা ---
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0 
 
-      # --- ধাপ ২: JDK 17 সেটআপ করা ---
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
       
-      # NDK সেটআপ
       - name: Setup Android NDK
         uses: android-actions/setup-android@v3
         with:
           ndk-version: '25.2.9519653'
+
+      # FIX: Force ANDROID_NDK_HOME
+      - name: Set NDK Env
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
           
-      # ক্যাশ রিস্টোর করা
+      # FIX: Cache key updated to 'v2'
       - name: Restore vcpkg artifacts
         uses: actions/cache@v3
         with:
           path: |
             ~/.cache/vcpkg/archives
             vcpkg_installed
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
+          key: ${{ runner.os }}-vcpkg-v2-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
           restore-keys: |
-            ${{ runner.os }}-vcpkg-
+            ${{ runner.os }}-vcpkg-v2-
 
-      # ধাপ: vcpkg এর লেটেস্ট Commit ID খুঁজে বের করা (ফিক্সড)
       - name: Get latest vcpkg commit ID
         id: vcpkg-git
         run: |
-          # vcpkg এর অফিসিয়াল রেপো থেকে লেটেস্ট মাস্টার ব্রাঞ্চের আইডি আনা
           LATEST_ID=$(git ls-remote https://github.com/microsoft/vcpkg.git HEAD | awk '{ print $1 }')
           echo "commit_id=$LATEST_ID" >> $GITHUB_OUTPUT
           echo "Latest vcpkg ID: $LATEST_ID"
@@ -64,23 +62,19 @@ jobs:
           vcpkgGitCommitId: ${{ steps.vcpkg-git.outputs.commit_id }}
           doNotUpdateVcpkg: false
 
-      # --- ধাপ ৩: GitHub Secrets থেকে Keystore ডিকোড করা ---
       - name: Decode Keystore
         run: |
           echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > ${{ github.workspace }}/release.keystore
 
-      # --- ধাপ ৪: google-services.json তৈরি করা ---
       - name: Create google-services.json
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           echo $GOOGLE_SERVICES_JSON | base64 -d > app/google-services.json
 
-      # --- ধাপ ৫: gradlew পারমিশন ---
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # --- ধাপ ৬: সাইন করা রিলিজ APK তৈরি করা ---
       - name: Build Signed Release APK
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
@@ -95,14 +89,12 @@ jobs:
             -PRELEASE_KEY_ALIAS=${{ env.RELEASE_KEY_ALIAS }} \
             -PRELEASE_KEY_PASSWORD=${{ env.RELEASE_KEY_PASSWORD }}
 
-      # --- ধাপ ৭: APK Artifact আপলোড ---
       - name: Upload Release APK as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: StreamX-Ultra-Release-APK
           path: app/build/outputs/apk/release/*.apk
 
-      # --- ধাপ ৮: StreamX Bot - অটোমেটিক রিলিজ নোট জেনারেট করা ---
       - name: "StreamX Bot: Generate Release Notes"
         id: build_changelog
         uses: mikepenz/release-changelog-builder-action@v4
@@ -135,7 +127,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
 
-      # --- ধাপ ৯: GitHub রিলিজ তৈরি করা ---
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
