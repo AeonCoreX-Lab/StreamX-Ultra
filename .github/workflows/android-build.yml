@@ -62,11 +62,10 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # FIX: ANDROID_NDK_HOME স্পষ্টভাবে পাস করা হচ্ছে
+      # FIX: Removed manual override of ANDROID_NDK_HOME which was causing empty string
       - name: Build Debug APK
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: ./gradlew assembleDebug
 
       - name: Generate and Print Signing Keys

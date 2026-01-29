@@ -29,10 +29,13 @@ android {
                 // এনভায়রনমেন্ট থেকে পাথ নেওয়া
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
                 
-                // FIX: প্রথমে এনভায়রনমেন্ট ভেরিয়েবল চেক করুন। এটি CI-তে ক্র্যাশ এড়াবে।
-                // android.ndkDirectory এক্সেস করলে Gradle NDK চেক ট্রিগার করে যা মাঝে মাঝে ফেইল হয়।
-                val ndkPath = System.getenv("ANDROID_NDK_HOME") 
-                              ?: android.ndkDirectory.absolutePath
+                // FIX: NDK পাথ লজিক আপডেট।
+                // আগে এটি Empty String নিচ্ছিল, এখন takeIf দিয়ে চেক করা হচ্ছে।
+                val envNdk = System.getenv("ANDROID_NDK_HOME")
+                val ndkPath = if (!envNdk.isNullOrBlank()) envNdk else android.ndkDirectory.absolutePath
+
+                // ডিবাগিং এর জন্য কনসোলে প্রিন্ট হবে
+                println("StreamX Build: Using NDK Path -> $ndkPath")
 
                 arguments(
                     "-DANDROID_STL=c++_shared",
