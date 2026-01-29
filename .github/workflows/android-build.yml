@@ -29,21 +29,22 @@ jobs:
         with:
           ndk-version: '25.2.9519653'
           
+      # --- ফিক্স করা অংশ: Indentation ঠিক করা হয়েছে ---
       - name: Restore vcpkg artifacts
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cache/vcpkg/archives
-          vcpkg_installed
-        key: ${{ runner.os }}-vcpkg-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
-        restore-keys: |
-          ${{ runner.os }}-vcpkg-
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/vcpkg/archives
+            vcpkg_installed
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-
 
       - name: Setup vcpkg
-      uses: lukka/run-vcpkg@v11
-      with:
-        vcpkgDirectory: ${{ github.workspace }}/vcpkg
-        vcpkgJsonGlob: 'app/src/main/cpp/vcpkg.json'
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
+          vcpkgJsonGlob: 'app/src/main/cpp/vcpkg.json'
 
       # --- নতুন ধাপ: google-services.json তৈরি করা ---
       - name: Create google-services.json

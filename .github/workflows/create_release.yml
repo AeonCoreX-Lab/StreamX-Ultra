@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*.*'
+  # ম্যানুয়ালি রিলিজ রান করার অপশন যোগ করা হলো
+  workflow_dispatch:
 
 jobs:
   build-and-release:
@@ -33,21 +35,22 @@ jobs:
         with:
           ndk-version: '25.2.9519653'
           
+      # --- ফিক্স করা অংশ: Indentation ঠিক করা হয়েছে ---
       - name: Restore vcpkg artifacts
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cache/vcpkg/archives
-          vcpkg_installed
-        key: ${{ runner.os }}-vcpkg-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
-        restore-keys: |
-          ${{ runner.os }}-vcpkg-
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/vcpkg/archives
+            vcpkg_installed
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-
 
       - name: Setup vcpkg
-      uses: lukka/run-vcpkg@v11
-      with:
-        vcpkgDirectory: ${{ github.workspace }}/vcpkg
-        vcpkgJsonGlob: 'app/src/main/cpp/vcpkg.json'
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
+          vcpkgJsonGlob: 'app/src/main/cpp/vcpkg.json'
 
       # --- ধাপ ৩: GitHub Secrets থেকে Keystore ডিকোড করা ---
       - name: Decode Keystore
@@ -119,7 +122,7 @@ jobs:
               "sort": "label"
             }
         env:
-          GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }} # আপনার সেট করা টোকেন ব্যবহার করা হচ্ছে
+          GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
 
       # --- ধাপ ৯: GitHub রিলিজ তৈরি করা ---
       - name: Create GitHub Release
@@ -128,7 +131,6 @@ jobs:
           files: app/build/outputs/apk/release/*.apk
           name: "StreamX Ultra ${{ github.ref_name }}"
           tag_name: ${{ github.ref_name }}
-          # Bot এর তৈরি করা নোট এখানে সেট করা হলো
           body: ${{ steps.build_changelog.outputs.changelog }}
         env:
           GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
