@@ -45,6 +45,7 @@ jobs:
         with:
           vcpkgDirectory: ${{ github.workspace }}/vcpkg
           vcpkgJsonGlob: 'app/src/main/cpp/vcpkg.json'
+          doNotUpdateVcpkg: true
 
       # --- নতুন ধাপ: google-services.json তৈরি করা ---
       - name: Create google-services.json

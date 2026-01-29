@@ -14,7 +14,8 @@ add_library(
 )
 
 # Libtorrent এবং ডিপেনডেন্সি খোঁজা (vcpkg অটোমেটিক প্রোভাইড করবে)
-find_package(Libtorrent RASERBAR REQUIRED)
+# ফিক্স: RASERBAR -> RASTERBAR অথবা সঠিক কনফিগ নাম ব্যবহার
+find_package(LibtorrentRasterbar CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
 
@@ -22,7 +23,7 @@ find_package(Boost REQUIRED COMPONENTS system)
 target_link_libraries(
         streamx-native
         PRIVATE
-        Libtorrent::torrent-rasterbar
+        LibtorrentRasterbar::torrent-rasterbar
         OpenSSL::SSL
         OpenSSL::Crypto
         Boost::system
