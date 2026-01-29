@@ -1,0 +1,11 @@
+{
+  "name": "streamx-native",
+  "version-string": "1.0.0",
+  "dependencies": [
+    "libtorrent",
+    "boost-system",
+    "boost-date-time",
+    "boost-random",
+    "openssl"
+  ]
+}

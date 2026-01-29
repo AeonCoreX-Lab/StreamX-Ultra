@@ -4,16 +4,21 @@
 #include <string>
 #include <atomic>
 #include <thread>
-#include <vector>
 #include <mutex>
+#include <vector>
 
-// ইঞ্জিনের বর্তমান অবস্থা
+// Libtorrent Headers
+#include <libtorrent/session.hpp>
+#include <libtorrent/torrent_handle.hpp>
+#include <libtorrent/magnet_uri.hpp>
+#include <libtorrent/alert_types.hpp>
+
 struct EngineStatus {
     int progress;
-    long speed;       // bytes per second
+    long speed;       
     int seeds;
     int peers;
-    int state;        // 0=Idle, 1=Prep, 2=Downloading, 3=Ready, 4=Error
+    int state;        // 0=Idle, 1=Prep, 2=Downloading, 3=Ready/Playing
     char videoPath[512]; 
 };
 
@@ -22,22 +27,24 @@ public:
     TorrentSystem();
     ~TorrentSystem();
 
-    // মেইন কমান্ডস
     void start(const std::string& magnet, const std::string& saveDir);
     void stop();
     EngineStatus getStatus();
+    std::string getFilePath();
 
 private:
     std::atomic<bool> isRunning;
     std::thread workerThread;
-    std::mutex statusMutex; // মাল্টি-থ্রেডিং সেফটির জন্য
+    std::mutex statusMutex;
+    
+    // Libtorrent Core
+    lt::session* ses;
+    lt::torrent_handle handle;
     
     EngineStatus currentStatus;
-    std::string currentSaveDir;
+    std::string finalFilePath;
 
-    void loop();
-    void runSimulation(); 
-    void updateState(int state, int progress = -1);
+    void updateLoop();
 };
 
-#endif //TORRENT_SYSTEM_H
+#endif

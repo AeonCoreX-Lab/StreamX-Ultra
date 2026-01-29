@@ -12,8 +12,8 @@ android {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 24
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.2.2" // Updated Version
+        versionCode = 4
+        versionName = "1.2.1" // Updated Version
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         vectorDrawables {
@@ -24,10 +24,11 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags("-std=c++17")
-                // এই নামটি CMakeLists.txt এর প্রজেক্ট নামের সাথে মিল থাকতে হবে
-                arguments("-DANDROID_STL=c++_shared")
-            }
-        }
+        arguments("-DANDROID_STL=c++_shared")
+        // GitHub Actions এ vcpkg ব্যবহারের জন্য এটি যোগ করা ভালো
+              abiFilters("arm64-v8a", "armeabi-v7a")
+    }
+}
 
         // API Key Injection
         val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\""

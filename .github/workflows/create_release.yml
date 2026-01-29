@@ -32,6 +32,22 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           ndk-version: '25.2.9519653'
+          
+      - name: Restore vcpkg artifacts
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/vcpkg/archives
+          vcpkg_installed
+        key: ${{ runner.os }}-vcpkg-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
+        restore-keys: |
+          ${{ runner.os }}-vcpkg-
+
+      - name: Setup vcpkg
+      uses: lukka/run-vcpkg@v11
+      with:
+        vcpkgDirectory: ${{ github.workspace }}/vcpkg
+        vcpkgJsonGlob: 'app/src/main/cpp/vcpkg.json'
 
       # --- ধাপ ৩: GitHub Secrets থেকে Keystore ডিকোড করা ---
       - name: Decode Keystore

@@ -1,12 +1,11 @@
 cmake_minimum_required(VERSION 3.22.1)
 
-# প্রজেক্টের নাম
 project("streamx-native")
 
+# C++17 বা তার বেশি প্রয়োজন Libtorrent 2.0+ এর জন্য
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# FIX: সোর্স ফাইলের পাথ থেকে 'src/main/cpp/' সরিয়ে ফেলা হয়েছে
-# কারণ CMakeLists.txt নিজেই ওই ফোল্ডারে আছে।
 add_library(
         streamx-native
         SHARED
@@ -14,12 +13,18 @@ add_library(
         torrent-engine.cpp
 )
 
-find_library(
-        log-lib
-        log
-)
+# Libtorrent এবং ডিপেনডেন্সি খোঁজা (vcpkg অটোমেটিক প্রোভাইড করবে)
+find_package(Libtorrent RASERBAR REQUIRED)
+find_package(OpenSSL REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system)
 
+# লাইব্রেরি লিঙ্ক করা
 target_link_libraries(
         streamx-native
-        ${log-lib}
+        PRIVATE
+        Libtorrent::torrent-rasterbar
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        Boost::system
+        log
 )

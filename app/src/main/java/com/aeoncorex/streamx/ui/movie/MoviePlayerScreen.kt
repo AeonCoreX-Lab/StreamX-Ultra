@@ -34,59 +34,56 @@ import java.net.URLDecoder
 @Composable
 fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     val context = LocalContext.current
+    val activity = context as? Activity
     val decodedUrl = remember { try { URLDecoder.decode(encodedUrl, "UTF-8") } catch(e: Exception) { encodedUrl } }
     
-    // Engine States
+    // --- Engine States ---
     var videoPath by remember { mutableStateOf<String?>(null) }
-    var statusMsg by remember { mutableStateOf("Starting Engine...") }
+    var statusMsg by remember { mutableStateOf("Initializing Engine...") }
     var bufferProgress by remember { mutableIntStateOf(0) }
     var downloadSpeed by remember { mutableStateOf("0 KB/s") }
     var seeds by remember { mutableIntStateOf(0) }
     var showError by remember { mutableStateOf(false) }
 
-    // ১. ফুলস্ক্রিন ও ওরিয়েন্টেশন লজিক
+    // ১. ওরিয়েন্টেশন এবং ফুলস্ক্রিন সেটআপ
     DisposableEffect(Unit) {
-        val activity = context as? Activity
-        val window = activity?.window
-        
-        // Force Landscape & Hide Bars
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        if (window != null) {
-            WindowCompat.getInsetsController(window, window.decorView).apply {
-                hide(WindowInsetsCompat.Type.systemBars())
-                systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
+        activity?.apply {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-
-        onDispose {
-            // Restore Portrait and System Bars
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            if (window != null) {
-                WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            WindowCompat.getInsetsController(window, window.decorView).apply {
+                hide(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
             }
-            // ইঞ্জিন বন্ধ করা (User যখন স্ক্রিন থেকে বের হবে)
-            TorrentEngine.stop()
+        }
+        onDispose {
+            activity?.apply {
+                requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                WindowCompat.getInsetsController(window, window.decorView).apply {
+                    show(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
+                }
+            }
+            TorrentEngine.stop() // প্লেয়ার বন্ধ হলে ইঞ্জিনও বন্ধ
         }
     }
 
-    // ২. ইঞ্জিন স্টার্ট করা
+    // ২. ইঞ্জিন স্টার্ট এবং লোকাল পাথ লিসেনিং
     LaunchedEffect(decodedUrl) {
         if (decodedUrl.startsWith("magnet:?")) {
             TorrentEngine.start(context, decodedUrl).collect { state ->
                 when(state) {
-                    is StreamState.Preparing -> statusMsg = state.message
+                    is StreamState.Preparing -> {
+                        statusMsg = state.message
+                    }
                     is StreamState.Buffering -> {
                         bufferProgress = state.progress
-                        downloadSpeed = "${state.speed} KB/s"
+                        downloadSpeed = "${state.speed / 1024} KB/s" // Bytes to KB
                         seeds = state.seeds
-                        statusMsg = "Buffering... $bufferProgress%"
+                        statusMsg = "Buffering Pieces: $bufferProgress%"
                     }
                     is StreamState.Ready -> {
-                        // শুধুমাত্র পাথ চেঞ্জ হলেই আপডেট হবে
+                        // ইঞ্জিন যখন কনফার্ম করবে ফাইলটি প্লে করার জন্য যথেষ্ট ডাউনলোড হয়েছে
                         if (videoPath != state.filePath) {
-                            Log.d("Player", "Ready to play: ${state.filePath}")
+                            Log.d("StreamX_Player", "Setting Path: ${state.filePath}")
                             videoPath = state.filePath
                         }
                         statusMsg = "" 
@@ -98,32 +95,28 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 }
             }
         } else {
-            // ডাইরেক্ট লিঙ্ক (Web Server)
+            // যদি এটি সরাসরি কোনো ওয়েব লিঙ্ক হয় (Direct Link)
             videoPath = decodedUrl
             statusMsg = ""
         }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        // ৩. ভিডিও প্লেয়ার (ExoPlayer)
-        if (videoPath != null) {
-            val exoPlayer = remember(videoPath) {
+        
+        // ৩. ExoPlayer ইমপ্লিমেন্টেশন
+        videoPath?.let { path ->
+            val exoPlayer = remember(path) {
                 ExoPlayer.Builder(context).build().apply {
-                    try {
-                        val uri = if (videoPath!!.startsWith("http")) 
-                            Uri.parse(videoPath)
-                        else 
-                            Uri.parse("file://${videoPath!!}") // Safe local file URI
-
-                        val mediaItem = MediaItem.fromUri(uri)
-                        setMediaItem(mediaItem)
-                        prepare()
-                        playWhenReady = true
-                    } catch (e: Exception) {
-                        Log.e("Player", "Error loading media: ${e.message}")
-                        statusMsg = "Player Error: ${e.message}"
-                        showError = true
+                    val uri = if (path.startsWith("http")) {
+                        Uri.parse(path)
+                    } else {
+                        // লোকাল ফাইলের জন্য সঠিক URI ফরম্যাট
+                        Uri.fromFile(File(path))
                     }
+                    
+                    setMediaItem(MediaItem.fromUri(uri))
+                    prepare()
+                    playWhenReady = true
                 }
             }
             
@@ -136,8 +129,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                     PlayerView(ctx).apply {
                         player = exoPlayer
                         useController = true
-                        setShowNextButton(false)
-                        setShowPreviousButton(false)
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT, 
                             ViewGroup.LayoutParams.MATCH_PARENT
@@ -148,42 +139,61 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             )
         }
 
-        // ৪. লোডিং বা স্ট্যাটাস ওভারলে
-        if (videoPath == null || (decodedUrl.startsWith("magnet") && bufferProgress < 100)) {
-            // ব্লকিং লোডার (যদি ভিডিও এখনো রেডি না হয়)
-            if (videoPath == null) {
-                Column(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    CircularProgressIndicator(color = Color.Cyan)
+        // ৪. ইউজার ইন্টারফেস ওভারলে (Loading & Stats)
+        
+        // ক) যখন মুভি এখনো শুরু হয়নি (Loading Screen)
+        if (videoPath == null) {
+            Column(
+                modifier = Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                CircularProgressIndicator(color = Color.Cyan, strokeWidth = 4.dp)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = statusMsg, 
+                    color = Color.White, 
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+                
+                if (showError) {
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text(statusMsg, color = Color.White, fontWeight = FontWeight.Bold)
-                    
-                    if(showError) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(
-                            onClick = { navController.popBackStack() },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-                        ) { Text("Go Back") }
-                    }
-                }
-            } 
-            // মিনিমাল ওভারলে (ভিডিও চলাকালীন ডাউনলোড ইনফো)
-            else if (!showError) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 24.dp, end = 24.dp) // Avoid overlap with close button
-                        .background(Color.Black.copy(0.6f), RoundedCornerShape(8.dp))
-                        .padding(8.dp)
-                ) {
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("▼ $downloadSpeed", color = Color.Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text("S:$seeds | P:$bufferProgress%", color = Color.Yellow, fontSize = 10.sp)
+                    Button(
+                        onClick = { navController.popBackStack() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                    ) {
+                        Text("Go Back")
                     }
                 }
             }
+        } 
+        
+        // খ) মুভি চলাকালীন ছোট স্ট্যাটাস ওভারলে (ডাউনলোড স্পিড দেখার জন্য)
+        else if (decodedUrl.startsWith("magnet") && !showError) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+                    .background(Color.Black.copy(0.6f), RoundedCornerShape(8.dp))
+                    .padding(8.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("▼ $downloadSpeed", color = Color.Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Seeds: $seeds | Progress: $bufferProgress%", color = Color.Yellow, fontSize = 10.sp)
+                }
+            }
+        }
+        
+        // গ) ব্যাক বাটন (ফ্লোটিং)
+        IconButton(
+            onClick = { navController.popBackStack() },
+            modifier = Modifier.padding(16.dp).align(Alignment.TopStart)
+        ) {
+            Icon(
+                imageVector = androidx.compose.material.icons.Icons.Default.Close,
+                contentDescription = "Close",
+                tint = Color.White.copy(0.7f)
+            )
         }
     }
 }
