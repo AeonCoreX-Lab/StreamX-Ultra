@@ -119,7 +119,7 @@ dependencies {
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.25.1") {
         exclude(group = "com.github.TeamNewPipe", module = "nanojson")
     }
-    implementation("com.grack:nanojson:1.2")
+    implementation("com.grack:nanojson:1.10")
 
     // Navigation & Firebase
     implementation("androidx.compose.foundation:foundation:1.6.7")
