@@ -22,6 +22,12 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
           cache: gradle
+          
+      # NDK সেটআপ করা (Native Engine বিল্ড করার জন্য জরুরি)
+      - name: Setup Android NDK
+        uses: android-actions/setup-android@v3
+        with:
+          ndk-version: '25.2.9519653'
 
       # --- নতুন ধাপ: google-services.json তৈরি করা ---
       - name: Create google-services.json

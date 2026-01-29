@@ -22,9 +22,6 @@ data class YtsTorrent(
     val size: String
 )
 
-// Note: StreamLink is now defined in MovieModels.kt
-
-// --- API INTERFACE (Dynamic URL) ---
 interface YtsApi {
     @GET
     suspend fun listMovies(
@@ -34,17 +31,15 @@ interface YtsApi {
     ): YtsResponse
 }
 
-// --- REPOSITORY ---
 object TorrentRepository {
     private val YTS_MIRRORS = listOf(
         "https://yts.mx/api/v2/list_movies.json",
         "https://yts.lt/api/v2/list_movies.json",
-        "https://yts.rs/api/v2/list_movies.json",
-        "https://yts.bz/api/v2/list_movies.json"
+        "https://yts.rs/api/v2/list_movies.json"
     )
 
     private val api = Retrofit.Builder()
-        .baseUrl("https://yts.bz/")
+        .baseUrl("https://yts.lt/")
         .addConverterFactory(GsonConverterFactory.create())
         .build()
         .create(YtsApi::class.java)
@@ -55,8 +50,6 @@ object TorrentRepository {
         "udp://tracker.coppersurfer.tk:6969",
         "udp://glotorrents.pw:6969/announce",
         "udp://tracker.opentrackr.org:1337/announce",
-        "udp://p4p.arenabg.com:1337",
-        "udp://tracker.leechers-paradise.org:6969",
         "udp://9.rarbg.to:2710"
     )
 
@@ -76,18 +69,14 @@ object TorrentRepository {
             // 1. Anime (NYAA)
             if (isAnime) {
                 jobs.add(async {
-                    try { TorrentProviders.fetchAnime(title, episode).map {
-                        StreamLink(it.title, it.magnet, "HD", it.seeds, it.peers, it.size, "NYAA")
-                    }} catch (e: Exception) { emptyList() }
+                    try { TorrentProviders.fetchAnime(title, episode) } catch (e: Exception) { emptyList() }
                 })
             }
 
             // 2. Series (EZTV)
             if (type == MovieType.SERIES && imdbId != null) {
                 jobs.add(async {
-                    try { TorrentProviders.fetchSeries(imdbId, season, episode).map {
-                        StreamLink(it.title, it.magnet, "HD", it.seeds, it.peers, it.size, "EZTV")
-                    }} catch (e: Exception) { emptyList() }
+                    try { TorrentProviders.fetchSeries(imdbId, season, episode) } catch (e: Exception) { emptyList() }
                 })
             }
 
@@ -96,12 +85,15 @@ object TorrentRepository {
                 jobs.add(async { fetchYtsWithMirrors(imdbId, title) })
             }
 
-            // 4. Backup (Consumet)
+            // 4. BitSearch (Backup for all) - Replaced Consumet
             jobs.add(async {
                 try {
-                    val searchTitle = if(type == MovieType.SERIES) "$title season $season" else title
-                    ConsumetProvider.getStreamLinks(searchTitle, type.toString())
-                } catch (e: Exception) { emptyList() }
+                    val searchTitle = if(type == MovieType.SERIES) "$title S${String.format("%02d", season)}E${String.format("%02d", episode)}" else title
+                    TorrentProviders.fetchBitSearch(searchTitle)
+                } catch (e: Exception) { 
+                    Log.e("BitSearch", "Error: ${e.message}")
+                    emptyList() 
+                }
             })
 
             jobs.awaitAll().forEach { allLinks.addAll(it) }
@@ -118,7 +110,6 @@ object TorrentRepository {
                 val links = fetchYtsInternal(url, imdbId, title)
                 if (links.isNotEmpty()) return links 
             } catch (e: Exception) {
-                Log.e("TorrentRepo", "Mirror failed: $url, trying next...")
                 continue
             }
         }

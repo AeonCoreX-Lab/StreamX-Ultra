@@ -12,17 +12,34 @@ android {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.2.1"
+        versionCode = 5
+        versionName = "1.2.2" // Updated Version
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         vectorDrawables {
             useSupportLibrary = true
         }
 
-        // --- SECURE API KEY INJECTION ---
+        // --- C++ NATIVE CONFIG ---
+        externalNativeBuild {
+            cmake {
+                cppFlags("-std=c++17")
+                // এই নামটি CMakeLists.txt এর প্রজেক্ট নামের সাথে মিল থাকতে হবে
+                arguments("-DANDROID_STL=c++_shared")
+            }
+        }
+
+        // API Key Injection
         val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\""
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
+    }
+
+    // --- C++ CMAKE LINKING ---
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     signingConfigs {
@@ -43,14 +60,13 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true // Production optimization
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }
     }
 
     compileOptions {
-        // NewPipeExtractor v0.24+ requires Java 11 or higher
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
@@ -78,11 +94,6 @@ android {
             excludes += "META-INF/DEPENDENCIES"
             excludes += "META-INF/INDEX.LIST"
         }
-        jniLibs {
-            pickFirsts += "**/libtorrent_jni.so"
-            pickFirsts += "**/libtorrent4j.so" 
-            keepDebugSymbols += "**/libtorrent4j*.so"
-        }
     }
 }
 
@@ -97,40 +108,28 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
 
-    // Retrofit & Gson & XML
+    // Networking
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("com.squareup.retrofit2:converter-scalars:2.9.0") 
-
-    // Jsoup
-    implementation("org.jsoup:jsoup:1.17.2") 
-    
-    // OkHttp 
+    implementation("com.squareup.retrofit2:converter-scalars:2.9.0")
+    implementation("org.jsoup:jsoup:1.17.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     
-    // --- NEWPIPE EXTRACTOR (FIXED DUPLICATE CLASS) ---
-    // The conflict was with 'com.github.TeamNewPipe:nanojson', not 'com.grack'
+    // NewPipe Extractor
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.25.1") {
         exclude(group = "com.github.TeamNewPipe", module = "nanojson")
     }
-    
-    // Explicit NanoJson
     implementation("com.grack:nanojson:1.2")
 
-    // Foundation & Navigation
+    // Navigation & Firebase
     implementation("androidx.compose.foundation:foundation:1.6.7")
     implementation("androidx.navigation:navigation-compose:2.7.7")
-
-    // Firebase
     implementation(platform("com.google.firebase:firebase-bom:32.7.4"))
     implementation("com.google.firebase:firebase-auth-ktx")
-    
-    // --- FIREBASE FIX ---
     implementation("com.google.firebase:firebase-firestore-ktx") {
         exclude(group = "com.google.firebase", module = "protolite-well-known-types")
         exclude(group = "com.google.protobuf", module = "protobuf-lite")
     }
-    
     implementation("com.google.android.gms:play-services-auth:21.0.0")
     implementation("com.facebook.android:facebook-login:16.3.0")
 
@@ -140,21 +139,12 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
 
-    // --- LIBTORRENT4J ---
-    implementation("org.libtorrent4j:libtorrent4j:2.1.0-38")
-    implementation("org.libtorrent4j:libtorrent4j-android-arm:2.1.0-38")
-    implementation("org.libtorrent4j:libtorrent4j-android-arm64:2.1.0-38")
-    implementation("org.libtorrent4j:libtorrent4j-android-x86:2.1.0-38")
-    implementation("org.libtorrent4j:libtorrent4j-android-x86_64:2.1.0-38")
+    // NOTE: Libtorrent4j removed because we are using custom C++ Native Engine
 
-    // Coil (Image Loading)
+    // UI Utilities
     implementation("io.coil-kt:coil-compose:2.6.0")
-
-    // DataStore & Lifecycle
     implementation("androidx.datastore:datastore-preferences:1.0.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
-
-    // Shimmer & Icons
     implementation("com.valentinilk.shimmer:compose-shimmer:1.2.0")
     implementation("androidx.compose.material:material-icons-extended:1.6.7")
 }

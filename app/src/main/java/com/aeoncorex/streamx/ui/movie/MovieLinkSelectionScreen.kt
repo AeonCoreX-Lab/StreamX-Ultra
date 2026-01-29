@@ -33,7 +33,8 @@ fun MovieLinkSelectionScreen(
     season: Int,
     episode: Int
 ) {
-    val decodedTitle = remember { try { URLDecoder.decode(title, "UTF-8") } catch(e: Exception) { title } }
+      // FIX: remember(title) ensures updates if title changes
+    val decodedTitle = remember(title) { try { URLDecoder.decode(title, "UTF-8") } catch(e: Exception) { title } }
     
     // States
     var torrentLinks by remember { mutableStateOf<List<StreamLink>>(emptyList()) }
@@ -52,10 +53,16 @@ fun MovieLinkSelectionScreen(
     }
 
     // Fetch Torrents
-    LaunchedEffect(Unit) {
+    LaunchedEffect(decodedTitle, season, episode) {
+        isLoading = true
+        errorMessage = null
         try {
-            val movieType = if (type == "MOVIE" || type == "movie") MovieType.MOVIE else MovieType.SERIES
-            val isAnime = decodedTitle.contains("Naruto", true) || decodedTitle.contains("One Piece", true)
+            val movieType = if (type.equals("MOVIE", true)) MovieType.MOVIE else MovieType.SERIES
+            val isAnime = decodedTitle.contains("Naruto", true) || 
+                          decodedTitle.contains("One Piece", true) || 
+                          decodedTitle.contains("Demon Slayer", true) ||
+                          decodedTitle.contains("Jujutsu", true)
+
             val validImdb = if (imdbId != "null" && imdbId.isNotEmpty()) imdbId else null
 
             val links = TorrentRepository.getStreamLinks(
@@ -68,7 +75,7 @@ fun MovieLinkSelectionScreen(
             )
             torrentLinks = links
         } catch (e: Exception) {
-            errorMessage = "Torrent Error: ${e.localizedMessage}"
+            errorMessage = "Search Error: ${e.localizedMessage}"
         } finally {
             isLoading = false
         }
@@ -80,12 +87,12 @@ fun MovieLinkSelectionScreen(
                 title = { 
                     Column {
                         Text("SELECT SOURCE", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        Text(if(season > 0) "$decodedTitle (S$season E$episode)" else decodedTitle, color = Color.Gray, fontSize = 12.sp)
+                        Text(if(season > 0) "$decodedTitle (S$season E$episode)" else decodedTitle, color = Color.Gray, fontSize = 12.sp, maxLines = 1)
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Default.ArrowBack, "Back", tint = Color.Cyan)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.Cyan)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0F0F15))
@@ -123,7 +130,7 @@ fun MovieLinkSelectionScreen(
                     Spacer(Modifier.height(20.dp))
                 }
 
-                // --- SECTION 2: TORRENTS ---
+                   // --- SECTION 2: TORRENTS ---
                 item {
                     Text("💎 4K/1080p TORRENTS (NATIVE PLAYER)", color = Color.Cyan, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
                 }
@@ -133,15 +140,18 @@ fun MovieLinkSelectionScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Cyan, strokeWidth = 2.dp)
                             Spacer(Modifier.width(10.dp))
-                            Text("Searching P2P Networks...", color = Color.Gray, fontSize = 12.sp)
+                            Text("Scanning P2P Networks...", color = Color.Gray, fontSize = 12.sp)
                         }
                     }
+                } else if (errorMessage != null) {
+                    item { Text("Error: $errorMessage", color = Color.Red, fontSize = 12.sp) }
                 } else if (torrentLinks.isEmpty()) {
-                    item { Text("No torrents found. Please use Server 1 or 2 above.", color = Color.Gray) }
+                    item { Text("No torrents found. Try Cloud Servers.", color = Color.Gray) }
                 } else {
                     items(torrentLinks) { link ->
                         StreamLinkCard(link) {
                             val encodedUrl = URLEncoder.encode(link.magnet, "UTF-8")
+                            // Pass to the Native Player Screen we updated earlier
                             navController.navigate("movie_player/$encodedUrl")
                         }
                     }

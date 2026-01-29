@@ -26,6 +26,12 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+      
+      # Native Engine কম্পাইল করার জন্য NDK
+      - name: Setup Android NDK
+        uses: android-actions/setup-android@v3
+        with:
+          ndk-version: '25.2.9519653'
 
       # --- ধাপ ৩: GitHub Secrets থেকে Keystore ডিকোড করা ---
       - name: Decode Keystore

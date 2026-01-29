@@ -2,175 +2,111 @@ package com.aeoncorex.streamx.ui.movie
 
 import android.content.Context
 import android.util.Log
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.withContext
-import org.libtorrent4j.Priority
-import org.libtorrent4j.SessionManager
-import org.libtorrent4j.SettingsPack
-import org.libtorrent4j.TorrentInfo
-import org.libtorrent4j.swig.settings_pack
+import kotlinx.coroutines.flow.flow
 import java.io.File
 
 object TorrentEngine {
-    private var session: SessionManager? = null
-    private const val TAG = "TorrentEngine"
-    
-    // Reduced buffer to 10MB for faster start (Telegram style)
-    private const val MIN_BUFFER_SIZE = 10L * 1024 * 1024 
+    private const val TAG = "StreamX_JNI"
 
-    fun start(context: Context, magnetLink: String): Flow<StreamState> = callbackFlow {
+    // --- NATIVE FUNCTIONS ---
+    private external fun initNative()
+    private external fun startNative(magnet: String, savePath: String)
+    private external fun stopNative()
+    private external fun getStatusNative(): LongArray? 
+    private external fun getFilePathNative(): String
+
+    // লাইব্রেরি লোড করা
+    init {
         try {
-            // 1. Setup Cache Directory
-            val rootDir = context.externalCacheDir ?: context.cacheDir
-            val downloadDir = File(rootDir, "StreamX_Temp")
-            if (!downloadDir.exists()) downloadDir.mkdirs()
-
-            // 2. Initialize Session
-            if (session == null) {
-                session = SessionManager()
-                val settings = SettingsPack()
-                settings.setInteger(settings_pack.int_types.active_downloads.swigValue(), 4)
-                settings.setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
-                settings.setInteger(settings_pack.int_types.connections_limit.swigValue(), 200)
-                
-                // Optimize for streaming (Unlimited speed)
-                settings.setInteger(settings_pack.int_types.download_rate_limit.swigValue(), 0)
-                settings.setInteger(settings_pack.int_types.upload_rate_limit.swigValue(), 0)
-                
-                session?.applySettings(settings)
-                session?.start()
-                Log.d(TAG, "Torrent Session Started")
-            }
-
-            trySend(StreamState.Preparing("Fetching Metadata..."))
-
-            // 3. Fetch Metadata
-            val torrentData: ByteArray? = withContext(Dispatchers.IO) {
-                session?.fetchMagnet(magnetLink, 30, downloadDir)
-            }
-
-            if (torrentData == null) {
-                trySend(StreamState.Error("Failed to fetch metadata. No peers found."))
-                close()
-                return@callbackFlow
-            }
-
-            // 4. Create TorrentInfo
-            val tempFile = File(downloadDir, "meta_${System.currentTimeMillis()}.torrent")
-            tempFile.writeBytes(torrentData)
-            val torrentInfo = TorrentInfo(tempFile)
-            
-            // 5. Start Download
-            session?.download(torrentInfo, downloadDir)
-            
-            val infoHash = torrentInfo.infoHash()
-            Log.d(TAG, "Download started. Hash: $infoHash")
-
-            trySend(StreamState.Preparing("Starting Engine..."))
-
-            // 6. Monitoring Loop
-            var isPlaying = false
-            var fileSelected = false
-            var largestFileIndex = -1
-
-            while (isActive) {
-                val handle = session?.find(infoHash)
-
-                if (handle != null && handle.isValid) {
-                    val status = handle.status()
-
-                    // --- A. SMART SEQUENTIAL LOGIC (THE FIX) ---
-                    if (!fileSelected) {
-                        var maxFileSize = 0L
-                        for (i in 0 until torrentInfo.numFiles()) {
-                            val fileSize = torrentInfo.files().fileSize(i)
-                            if (fileSize > maxFileSize) {
-                                maxFileSize = fileSize
-                                largestFileIndex = i
-                            }
-                        }
-
-                        if (largestFileIndex != -1) {
-                            // 1. Prioritize ONLY the movie file (Ignore others to save bandwidth)
-                            val priorities = Array(torrentInfo.numFiles()) { Priority.IGNORE }
-                            priorities[largestFileIndex] = Priority.DEFAULT
-                            handle.prioritizeFiles(priorities)
-                            
-                            // 2. CRITICAL: Force High Priority
-                            // We removed 'setSequentialDownload(true)' because it caused a compilation error.
-                            // Setting 'TOP_PRIORITY' achieves a similar effect by requesting pieces ASAP.
-                            handle.filePriority(largestFileIndex, Priority.TOP_PRIORITY)
-                            
-                            fileSelected = true
-                            Log.d(TAG, "Streaming Mode Active: File Priority Set to TOP")
-                        }
-                    }
-
-                    // --- B. Stream Status ---
-                    val progress = (status.progress() * 100).toInt()
-                    val speed = status.downloadPayloadRate() / 1024 // KB/s
-                    val seeds = status.numSeeds()
-                    val peers = status.numPeers()
-                    
-                    // Check actual bytes downloaded
-                    val bytesDownloaded = handle.status().totalDone() 
-
-                    if (!isPlaying && fileSelected) {
-                        // Logic: If we have the first 2MB (Header), start playing.
-                        if (bytesDownloaded > MIN_BUFFER_SIZE) {
-                            val fileName = torrentInfo.files().filePath(largestFileIndex)
-                            val videoFile = File(downloadDir, fileName)
-                            
-                            // Verify file exists on disk
-                            if (videoFile.exists()) {
-                                isPlaying = true
-                                Log.d(TAG, "Buffer Filled. Starting Playback.")
-                                trySend(StreamState.Ready(videoFile.absolutePath))
-                            }
-                        } else {
-                            trySend(StreamState.Buffering(progress, speed.toLong(), seeds, peers))
-                        }
-                    } else if (isPlaying) {
-                        // Continue updating UI stats while playing
-                        trySend(StreamState.Buffering(progress, speed.toLong(), seeds, peers))
-                    } else {
-                        trySend(StreamState.Preparing("Buffering... S:$seeds"))
-                    }
-                } else {
-                    trySend(StreamState.Preparing("Connecting to peers..."))
-                }
-                delay(1000)
-            }
-
+            // FIXME: Ensure this matches the name in CMakeLists.txt -> "streamx-native"
+            System.loadLibrary("streamx-native") 
+            initNative()
+        } catch (e: UnsatisfiedLinkError) {
+            Log.e(TAG, "Native Library Load Failed: ${e.message}")
+            // Fallback logic could go here if needed
         } catch (e: Exception) {
-            Log.e(TAG, "Error: ${e.message}")
-            trySend(StreamState.Error("Stream Failed: ${e.message}"))
+            Log.e(TAG, "Engine Init Failed: ${e.message}")
+        }
+    }
+
+    // --- MAIN LOGIC ---
+    fun start(context: Context, magnetLink: String): Flow<StreamState> = flow {
+        // ১. ক্যাশ ফোল্ডার সেটআপ
+        val rootDir = context.externalCacheDir ?: context.cacheDir
+        val downloadDir = File(rootDir, "StreamX_Video")
+        if (!downloadDir.exists()) downloadDir.mkdirs()
+
+        Log.d(TAG, "Starting Native Engine for: $magnetLink")
+        
+        try {
+            startNative(magnetLink, downloadDir.absolutePath)
+            emit(StreamState.Preparing("Initializing Core Engine..."))
+        } catch (e: UnsatisfiedLinkError) {
+            emit(StreamState.Error("Core Engine Missing! Check APK split."))
+            return@flow
         }
 
-        awaitClose {
-            Log.d(TAG, "Stream Closed")
+        // ২. মনিটরিং লুপ
+        var isPlaying = false
+        
+        while (true) {
+            val status = getStatusNative()
+            
+            if (status != null && status.size == 5) {
+                val progress = status[0].toInt()
+                val speed = status[1]
+                val seeds = status[2].toInt()
+                val peers = status[3].toInt()
+                val state = status[4].toInt()
+
+                val speedKB = speed / 1024
+
+                when (state) {
+                    0 -> emit(StreamState.Preparing("Idle"))
+                    1 -> emit(StreamState.Preparing("Metadata: S:$seeds"))
+                    2, 3 -> {
+                        // 2 = Downloading, 3 = Ready/Playing
+                        if (state == 3 && !isPlaying) {
+                            val path = getFilePathNative()
+                            if (path.isNotEmpty()) {
+                                emit(StreamState.Ready(path))
+                                isPlaying = true
+                            }
+                        }
+                        // Always emit buffering update for UI stats
+                        emit(StreamState.Buffering(progress, speedKB, seeds, peers))
+                    }
+                    4 -> emit(StreamState.Error("Engine Error occurred"))
+                }
+            } else {
+                // If native returns null abruptly
+                Log.w(TAG, "Native status unavailable")
+            }
+            
+            delay(500)
         }
     }
 
     fun stop() {
-        // Keeping session alive helps DHT, but pausing is an option if needed
-        // session?.pause()
+        Log.d(TAG, "Stopping Native Engine")
+        try {
+            stopNative()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping engine: ${e.message}")
+        }
     }
-    
+
     fun clearCache(context: Context) {
         try {
             val rootDir = context.externalCacheDir ?: context.cacheDir
-            val downloadDir = File(rootDir, "StreamX_Temp")
+            val downloadDir = File(rootDir, "StreamX_Video")
             if (downloadDir.exists()) {
                 downloadDir.deleteRecursively()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to clear cache")
+            Log.e(TAG, "Cache clear failed")
         }
     }
 }
