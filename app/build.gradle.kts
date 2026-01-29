@@ -7,7 +7,7 @@ plugins {
 android {
     namespace = "com.aeoncorex.streamx"
     compileSdk = 34
-
+    ndkVersion = "25.2.9519653" 
     defaultConfig {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 24
@@ -20,32 +20,31 @@ android {
             useSupportLibrary = true
         }
 
-                // ... আগের কোড ...
-
-        // --- C++ NATIVE CONFIG ---
+                // --- C++ NATIVE CONFIG ---
         externalNativeBuild {
             cmake {
                 cppFlags("-std=c++17")
                 
+                // এনভায়রনমেন্ট থেকে পাথ নেওয়া (GitHub Actions এর জন্য)
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
-                // অ্যান্ড্রয়েড এনডিকে পাথ খুঁজে বের করা
-                val ndkPath = android.ndkDirectory.absolutePath
+                val ndkPath = System.getenv("ANDROID_NDK_LATEST_HOME") ?: (android.ndkDirectory?.absolutePath ?: "")
 
                 arguments(
                     "-DANDROID_STL=c++_shared",
-                    // ১. vcpkg টুলচেইন সেট করা
                     "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake",
-                    // ২. অ্যান্ড্রয়েড টুলচেইনকে চেনলোড (Chainload) করা যাতে 'sysroot' এরর না আসে
                     "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ndkPath/build/cmake/android.toolchain.cmake",
-                    // ৩. সঠিক আর্কিটেকচার সেট করা (vcpkg এর জন্য)
-                    "-DVCPKG_TARGET_TRIPLET=arm64-android", 
-                    "-DANDROID_ABI=arm64-v8a",
-                    "-DANDROID_PLATFORM=android-24"
-                )
+                    "-DVCPKG_TARGET_TRIPLET=arm64-android",
+                    "-DANDROID_ABI=arm64-v8a"
+                ) // arguments এখানে শেষ হবে
                 
-                abiFilters("arm64-v8a") // আপাতত শুধু arm64 বিল্ড করুন স্পিড বাড়ানোর জন্য
+                // abiFilters এখানে থাকবে (arguments এর বাইরে)
+                abiFilters("arm64-v8a")
             }
         }
+    } // defaultConfig শেষ
+
+
+
 
 
         // API Key Injection
