@@ -3,7 +3,7 @@
 #include <sys/types.h>
 #include <android/log.h>
 #include "torrent_system.hpp"
-#include "ai_engine.hpp" // Ensure you have created this file as per previous instructions
+#include "ai_engine.hpp" 
 
 #define TAG "StreamX_JNI"
 
@@ -60,7 +60,7 @@ Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_stopNative(JNIEnv* env, jobjec
 }
 
 // =============================================================================================
-[span_0](start_span)// SECTION 2: AI ENGINE JNI (Whisper)[span_0](end_span)
+// SECTION 2: AI ENGINE JNI (Whisper)
 // =============================================================================================
 
 extern "C" JNIEXPORT jboolean JNICALL
