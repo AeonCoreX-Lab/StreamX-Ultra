@@ -28,7 +28,7 @@ jobs:
 
       - name: Set NDK Env and vcpkg chainload
         run: |
-          # Set the NDK root used by vcpkg and CMake
+          # Set the NDK root used by vcpkg and CMake (persist to job env)
           echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/25.2.9519653" >> $GITHUB_ENV
           echo "VCPKG_CHAINLOAD_TOOLCHAIN_FILE=/usr/local/lib/android/sdk/ndk/25.2.9519653/build/cmake/android.toolchain.cmake" >> $GITHUB_ENV
           # Optional default triplet; CMakeLists already sets VCPKG_TARGET_TRIPLET per-ABI
@@ -39,14 +39,14 @@ jobs:
           echo "VCPKG_DEFAULT_TRIPLET=$VCPKG_DEFAULT_TRIPLET"
           env | grep -E 'ANDROID_NDK_HOME|VCPKG|ANDROID_HOME' || true
           
-      # FIX: Cache key bumped to 'v5' to clear old mismatch artifacts
+      # FIX: Cache key bumped to 'v6' to clear old mismatch artifacts
       - name: Restore vcpkg artifacts
         uses: actions/cache@v3
         with:
           path: |
             ~/.cache/vcpkg/archives
             vcpkg_installed
-          key: ${{ runner.os }}-vcpkg-v5-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
+          key: ${{ runner.os }}-vcpkg-v6-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
           restore-keys: |
             ${{ runner.os }}-vcpkg-v5-
 
@@ -65,6 +65,11 @@ jobs:
           vcpkgGitURL: https://github.com/microsoft/vcpkg.git
           vcpkgGitCommitId: ${{ steps.vcpkg-git.outputs.commit_id }}
           doNotUpdateVcpkg: false
+
+      - name: Export VCPKG_ROOT for subsequent CMake/Gradle runs
+        run: |
+          echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" >> $GITHUB_ENV
+          echo "VCPKG_ROOT set to $VCPKG_ROOT"
 
       - name: Create google-services.json
         env:

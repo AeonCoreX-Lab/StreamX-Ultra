@@ -1,19 +1,31 @@
 cmake_minimum_required(VERSION 3.22.1)
 
-# --- FIX: Vcpkg Triplet Selection based on Android ABI ---
-if(ANDROID_ABI STREQUAL "arm64-v8a")
-    set(VCPKG_TARGET_TRIPLET "arm64-android" CACHE STRING "" FORCE)
-elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
-    set(VCPKG_TARGET_TRIPLET "arm-android" CACHE STRING "" FORCE)
-elseif(ANDROID_ABI STREQUAL "x86_64")
-    set(VCPKG_TARGET_TRIPLET "x64-android" CACHE STRING "" FORCE)
+# Ensure Android NDK toolchain and vcpkg chainload are set before project().
+# This helps vcpkg detect the Android compiler correctly during manifest install.
+if(DEFINED ENV{ANDROID_NDK_HOME})
+    set(_ndk_toolchain_file "$ENV{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake")
+    if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+        set(CMAKE_TOOLCHAIN_FILE "${_ndk_toolchain_file}" CACHE STRING "Android toolchain file" FORCE)
+    endif()
+    if(NOT DEFINED VCPKG_CHAINLOAD_TOOLCHAIN_FILE)
+        set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "${_ndk_toolchain_file}" CACHE STRING "vcpkg chainload toolchain file" FORCE)
+    endif()
+endif()
+
+# --- Vcpkg Triplet Selection based on Android ABI ---
+# Set VCPKG_TARGET_TRIPLET as a CACHE variable so vcpkg's detection uses it.
+if(DEFINED ANDROID_ABI)
+    if(ANDROID_ABI STREQUAL "arm64-v8a")
+        set(VCPKG_TARGET_TRIPLET "arm64-android" CACHE STRING "vcpkg triplet" FORCE)
+    elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
+        set(VCPKG_TARGET_TRIPLET "arm-android" CACHE STRING "vcpkg triplet" FORCE)
+    elseif(ANDROID_ABI STREQUAL "x86_64")
+        set(VCPKG_TARGET_TRIPLET "x64-android" CACHE STRING "vcpkg triplet" FORCE)
+    elseif(ANDROID_ABI STREQUAL "x86")
+        set(VCPKG_TARGET_TRIPLET "x86-android" CACHE STRING "vcpkg triplet" FORCE)
+    endif()
 endif()
 # ---------------------------------------------------------
-
-# Ensure vcpkg will chainload the Android toolchain if ANDROID_NDK_HOME is set in the environment.
-if(DEFINED ENV{ANDROID_NDK_HOME} AND NOT DEFINED VCPKG_CHAINLOAD_TOOLCHAIN_FILE)
-    set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "$ENV{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" CACHE STRING "" FORCE)
-endif()
 
 project("streamx-native")
 
@@ -29,6 +41,7 @@ add_library(
         torrent-engine.cpp
 )
 
+# Use config packages provided by vcpkg
 find_package(LibtorrentRasterbar CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
