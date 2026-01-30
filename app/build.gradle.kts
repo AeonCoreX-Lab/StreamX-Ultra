@@ -13,8 +13,8 @@ android {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.2.1"
+        versionCode = 5 // ভার্সন কোড বাড়ানো হয়েছে
+        versionName = "1.2.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         vectorDrawables {
@@ -24,12 +24,10 @@ android {
         // --- C++ NATIVE CONFIG ---
         externalNativeBuild {
             cmake {
-                // FIX: Force disable FORTIFY_SOURCE to prevent __sendto_chk linker errors
-                cppFlags("-std=c++17", "-D_FORTIFY_SOURCE=0")
+                // FIX: প্রথমে Undefine (-U) করে তারপর Define (-D) করা হয়েছে যাতে ওয়ার্নিং না আসে
+                cppFlags("-std=c++17", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0")
 
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
-                
-                // Ensure correct NDK path is used for vcpkg toolchain
                 val envNdk = System.getenv("ANDROID_NDK_HOME")
                 val ndkPath = if (!envNdk.isNullOrBlank()) envNdk else android.ndkDirectory.absolutePath
 
@@ -42,7 +40,7 @@ android {
                     "-DVCPKG_TARGET_TRIPLET=arm64-android",
                     "-DANDROID_ABI=arm64-v8a",
                     "-DANDROID_PLATFORM=android-24",
-                    // FIX: Explicitly disable fortification in CMake arguments
+                    // লিঙ্কার ফ্ল্যাগ ফিক্স
                     "-D_FORTIFY_SOURCE=0"
                 )
 
@@ -50,12 +48,10 @@ android {
             }
         }
 
-        // API Key Injection
         val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\""
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
     }
 
-    // --- C++ CMAKE LINKING ---
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")

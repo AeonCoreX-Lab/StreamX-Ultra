@@ -2,12 +2,11 @@ cmake_minimum_required(VERSION 3.22.1)
 
 project("streamx-native")
 
-# C++17 required for Libtorrent 2.0+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# FIX: Force disable FORTIFY_SOURCE to resolve __sendto_chk undefined symbol error
-add_compile_definitions(_FORTIFY_SOURCE=0)
+# ওয়ার্নিং বন্ধ করার জন্য ফ্ল্যাগ
+add_compile_options(-Wno-macro-redefined)
 
 add_library(
         streamx-native
@@ -16,12 +15,10 @@ add_library(
         torrent-engine.cpp
 )
 
-# Find Libtorrent and dependencies
 find_package(LibtorrentRasterbar CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
 
-# Link Libraries
 target_link_libraries(
         streamx-native
         PRIVATE
