@@ -50,6 +50,7 @@ import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import androidx.navigation.NavController
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -92,7 +93,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 
     // Player States
     var isPlaying by remember { mutableStateOf(true) }
-    var isBuffering by remember { mutableStateOf(true) }
+    var isBuffering by remember { mutableStateOf(true) } // Initially true until player is ready
     var currentTime by remember { mutableLongStateOf(0L) }
     var totalDuration by remember { mutableLongStateOf(0L) }
     var isControlsVisible by remember { mutableStateOf(true) }
@@ -113,13 +114,16 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var gestureIcon by remember { mutableStateOf<ImageVector?>(null) }
     var gestureText by remember { mutableStateOf("") }
     var showGestureOverlay by remember { mutableStateOf(false) }
+    
+    // Coroutine Job for hiding gestures (prevents flickering)
+    var gestureHideJob by remember { mutableStateOf<Job?>(null) }
 
     // Animation States
     var forwardAnimAlpha by remember { mutableFloatStateOf(0f) }
     var rewindAnimAlpha by remember { mutableFloatStateOf(0f) }
 
     // Torrent Info
-    var statusMsg by remember { mutableStateOf("Initializing Core...") }
+    var statusMsg by remember { mutableStateOf("Initializing...") }
     var downloadSpeed by remember { mutableStateOf("0 KB/s") }
     var seeds by remember { mutableIntStateOf(0) }
 
@@ -153,7 +157,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // --- AI Initialization ---
+    // --- AI Logic ---
     LaunchedEffect(isAiEnabled) {
         if (isAiEnabled) {
             withContext(Dispatchers.IO) {
@@ -167,7 +171,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 }
                 isAiModelLoaded = if (modelFile.exists()) initAINative(modelFile.absolutePath) else false
             }
-            if (!isAiModelLoaded) aiSubtitleText = "AI Init Failed"
         } else {
             stopAINative()
             aiSubtitleText = ""
@@ -178,7 +181,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         while (isAiEnabled && isAiModelLoaded) {
             val sub = getSubtitleNative()
             if (sub.isNotEmpty()) aiSubtitleText = sub
-            delay(100) // Slightly faster polling
+            delay(100)
         }
     }
 
@@ -189,18 +192,17 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 when (state) {
                     is StreamState.Preparing -> statusMsg = state.message
                     is StreamState.Buffering -> {
-                        isBuffering = true
+                        // FIX: Do NOT force isBuffering = true here. 
+                        // Let ExoPlayer decide if it needs to buffer. Only update text.
                         statusMsg = "Buffering ${state.progress}%"
                         downloadSpeed = "${state.speed / 1024} KB/s"
                         seeds = state.seeds
                     }
                     is StreamState.Ready -> {
-                        // Only update path if it changes to avoid player reset
                         if (videoPath != state.filePath) {
                             videoPath = state.filePath
                         }
                         statusMsg = ""
-                        // Don't set isBuffering = false here, let Player handle it
                     }
                     is StreamState.Error -> statusMsg = "Error: ${state.message}"
                 }
@@ -212,33 +214,26 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // --- RENDERER FACTORY (Fix for Audio Sink) ---
+    // --- RENDERER FACTORY ---
     val renderersFactory = remember {
         object : DefaultRenderersFactory(context) {
             override fun buildAudioSink(c: Context, enableFloat: Boolean, enableParams: Boolean): AudioSink? {
-                // Force PCM 16-bit processing if needed, but usually default is fine.
-                // We wrap it to intercept data for AI.
                 val defaultSink = DefaultAudioSink.Builder(c).build()
                 return object : ForwardingAudioSink(defaultSink) {
                     override fun handleBuffer(buffer: ByteBuffer, timeUs: Long, count: Int): Boolean {
                         if (isAiEnabled && isAiModelLoaded) {
                             try {
                                 val bufferCopy = buffer.duplicate()
-                                bufferCopy.order(ByteOrder.LITTLE_ENDIAN) // Crucial for Android Audio
-                                
-                                // Check remaining shorts
+                                bufferCopy.order(ByteOrder.LITTLE_ENDIAN)
                                 val remainingShorts = bufferCopy.remaining() / 2
                                 if (remainingShorts > 0) {
                                     val floats = FloatArray(remainingShorts)
                                     for (i in 0 until remainingShorts) {
-                                        // Convert Short (-32768 to 32767) to Float (-1.0 to 1.0)
                                         floats[i] = bufferCopy.short / 32768f
                                     }
                                     pushAudioNative(floats, floats.size)
                                 }
-                            } catch (e: Exception) {
-                                // Prevent crash on audio glitch
-                            }
+                            } catch (e: Exception) { }
                         }
                         return super.handleBuffer(buffer, timeUs, count)
                     }
@@ -247,7 +242,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // --- EXO PLAYER INITIALIZATION ---
+    // --- EXO PLAYER ---
     DisposableEffect(videoPath) {
         if (videoPath == null) return@DisposableEffect onDispose {}
 
@@ -270,9 +265,14 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 }
             }
             override fun onPlaybackStateChanged(state: Int) {
-                isBuffering = state == Player.STATE_BUFFERING
-                if (state == Player.STATE_ENDED) isControlsVisible = true
-                if (state == Player.STATE_READY) isBuffering = false
+                // FIX: This is the ONLY place that should control the buffering spinner
+                if (state == Player.STATE_BUFFERING) {
+                    isBuffering = true
+                } else if (state == Player.STATE_READY) {
+                    isBuffering = false
+                } else if (state == Player.STATE_ENDED) {
+                    isControlsVisible = true
+                }
             }
             override fun onEvents(p: Player, e: Player.Events) {
                 currentTime = p.currentPosition
@@ -288,7 +288,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // Polling UI Time
     LaunchedEffect(Unit) {
         while (true) {
             exoPlayer?.let { 
@@ -299,7 +298,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     }
 
     // ================= UI LAYOUT =================
-    // We use Box to stack layers: Video -> Touch Layer -> Subtitles -> Controls
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -312,27 +310,14 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                     PlayerView(ctx).apply {
                         player = exoPlayer
                         useController = false
-                        // FIX: Use SurfaceView inside Compose often causes black screen issues with overlaps
-                        // Switching to TextureView can fix glitches, but try keeping SurfaceView first with correct z-ordering
-                        // If black screen persists, add: setSurfaceType(SurfaceView.SURFACE_TYPE_TEXTURE_VIEW) (requires custom XML or reflection, 
-                        // but PlayerView defaults usually work if no other SurfaceView is present).
-                        
-                        // Essential for black screen fix:
                         setKeepContentOnPlayerReset(true)
-                        
                         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                     }
                 },
                 update = { view ->
-                    // Only update player if it changed to avoid flickering
-                    if (view.player != exoPlayer) {
-                        view.player = exoPlayer
-                    }
+                    if (view.player != exoPlayer) view.player = exoPlayer
                     view.resizeMode = resizeMode
-                    
-                    // Hide default subs if AI is on
                     view.subtitleView?.visibility = if (isAiEnabled) android.view.View.GONE else android.view.View.VISIBLE
-                    
                     if (!isAiEnabled) {
                         view.subtitleView?.setStyle(
                              CaptionStyleCompat(
@@ -347,19 +332,31 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             )
         }
 
-        // LAYER 2: TRANSPARENT GESTURE DETECTOR (Fixes Gesture Issues)
-        // This box sits ON TOP of the video but is invisible. It catches all touches.
+        // LAYER 2: TRANSPARENT GESTURE DETECTOR
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
                     detectVerticalDragGestures(
-                        onDragStart = { showGestureOverlay = true },
-                        onDragEnd = { scope.launch { delay(500); showGestureOverlay = false } }
+                        onDragStart = { 
+                            // Cancel any pending hide job to keep overlay visible while dragging
+                            gestureHideJob?.cancel()
+                            showGestureOverlay = true 
+                        },
+                        onDragEnd = { 
+                            gestureHideJob = scope.launch { 
+                                delay(500) 
+                                showGestureOverlay = false 
+                            } 
+                        }
                     ) { change, dragAmount ->
                         if (isLocked) return@detectVerticalDragGestures
+                        
+                        // FIX: Ensure overlay is visible during drag updates
+                        showGestureOverlay = true
+                        
                         val isLeft = change.position.x < size.width / 2
-                        val delta = -dragAmount / (size.height / 2)
+                        val delta = -dragAmount / (size.height / 2) // Sensitivity
 
                         if (isLeft) {
                             brightnessLevel = (brightnessLevel + delta).coerceIn(0f, 1f)
@@ -400,57 +397,32 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 }
         )
 
-        // LAYER 3: DOUBLE TAP ANIMATIONS
-        // Rewind
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = 50.dp)
-                .alpha(rewindAnimAlpha)
-                .background(Color.Black.copy(0.5f), CircleShape)
-                .padding(16.dp)
-        ) {
+        // LAYER 3: ANIMATIONS (Rewind/Forward)
+        Box(modifier = Modifier.align(Alignment.CenterStart).padding(start = 50.dp).alpha(rewindAnimAlpha)
+            .background(Color.Black.copy(0.5f), CircleShape).padding(16.dp)) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(Icons.Rounded.FastRewind, null, tint = Color.White, modifier = Modifier.size(40.dp))
-                Text("-10s", color = Color.White, fontWeight = FontWeight.Bold)
+                Text("-10s", color = Color.White)
             }
         }
-        // Forward
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 50.dp)
-                .alpha(forwardAnimAlpha)
-                .background(Color.Black.copy(0.5f), CircleShape)
-                .padding(16.dp)
-        ) {
+        Box(modifier = Modifier.align(Alignment.CenterEnd).padding(end = 50.dp).alpha(forwardAnimAlpha)
+            .background(Color.Black.copy(0.5f), CircleShape).padding(16.dp)) {
              Column(horizontalAlignment = Alignment.CenterHorizontally) {
                  Icon(Icons.Rounded.FastForward, null, tint = Color.White, modifier = Modifier.size(40.dp))
-                 Text("+10s", color = Color.White, fontWeight = FontWeight.Bold)
+                 Text("+10s", color = Color.White)
              }
         }
 
         // LAYER 4: AI SUBTITLES
         if (isAiEnabled && aiSubtitleText.isNotEmpty()) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = if (isControlsVisible) 100.dp else 40.dp)
-                    .padding(horizontal = 32.dp)
-                    .background(Color.Black.copy(0.6f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text(
-                    text = aiSubtitleText,
-                    color = subtitleColor,
-                    fontSize = subtitleFontSize.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
+            Box(modifier = Modifier.align(Alignment.BottomCenter)
+                .padding(bottom = if (isControlsVisible) 100.dp else 40.dp)
+                .background(Color.Black.copy(0.6f), RoundedCornerShape(8.dp)).padding(8.dp)) {
+                Text(aiSubtitleText, color = subtitleColor, fontSize = subtitleFontSize.sp, textAlign = TextAlign.Center)
             }
         }
 
-        // LAYER 5: GESTURE FEEDBACK OVERLAY
+        // LAYER 5: GESTURE OVERLAY (Volume/Brightness)
         if (showGestureOverlay) {
             Box(
                 modifier = Modifier.align(Alignment.Center)
@@ -464,112 +436,87 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
 
-        // LAYER 6: MAIN CONTROLS (Only visible if not generic buffering state)
-        // If system is buffering, show loader
+        // LAYER 6: CONTROLS
+        // Only show full black screen loader if video path is NOT set yet.
         if (isBuffering && videoPath == null) {
              Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = Color.Cyan)
-                    Spacer(Modifier.height(16.dp))
-                    Text(statusMsg, color = Color.White)
-                }
-                IconButton(
-                    onClick = { navController.popBackStack() },
-                    modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
-                ) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }
+                CircularProgressIndicator(color = Color.Cyan)
              }
-        } else {
-            // Actual Controls
-            AnimatedVisibility(
-                visible = isControlsVisible || isBuffering, // Keep controls visible if buffering mid-stream
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))) {
-                    
-                    // Buffering Indicator (Center)
+        } 
+        
+        // Main Controls UI
+        AnimatedVisibility(
+            visible = isControlsVisible,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))) {
+                
+                // Top Bar
+                Row(Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopStart),
+                    horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { navController.popBackStack() }) { 
+                        Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) 
+                    }
+                    // Stats
+                    if (decodedUrl.startsWith("magnet")) {
+                        Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 12.dp)) {
+                            Text("▼ $downloadSpeed", color = Color.Green, fontSize = 12.sp)
+                            Text("S: $seeds", color = Color.LightGray, fontSize = 10.sp)
+                        }
+                    }
+                    // Buttons
+                    Row {
+                         Button(onClick = { isAiEnabled = !isAiEnabled },
+                            colors = ButtonDefaults.buttonColors(containerColor = if(isAiEnabled) Color.Green else Color.DarkGray),
+                            modifier = Modifier.height(35.dp)) { Text("AI", color = Color.Black, fontSize = 12.sp) }
+                         IconButton(onClick = { showSubtitleSettings = true }) { Icon(Icons.Rounded.Palette, null, tint = Color.White) }
+                         IconButton(onClick = {
+                            resizeMode = if (resizeMode == AspectRatioFrameLayout.RESIZE_MODE_FIT) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        }) { Icon(Icons.Rounded.AspectRatio, null, tint = Color.White) }
+                    }
+                }
+
+                // Center Area (Play/Pause & Buffer)
+                Box(Modifier.align(Alignment.Center)) {
+                    // Show Buffering Spinner if buffering, BUT allow controls to be seen underneath or allow interaction
                     if (isBuffering) {
-                        CircularProgressIndicator(
-                            color = Color.White, 
-                            modifier = Modifier.align(Alignment.Center).size(50.dp)
-                        )
-                    }
-
-                    // Top Bar
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopStart),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = { navController.popBackStack() }) { 
-                            Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) 
-                        }
-                        
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (decodedUrl.startsWith("magnet")) {
-                                Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 12.dp)) {
-                                    Text("▼ $downloadSpeed", color = Color.Green, fontSize = 12.sp)
-                                    Text("S: $seeds", color = Color.LightGray, fontSize = 10.sp)
-                                }
-                            }
-                            Button(
-                                onClick = { isAiEnabled = !isAiEnabled },
-                                colors = ButtonDefaults.buttonColors(containerColor = if(isAiEnabled) Color.Green else Color.DarkGray),
-                                contentPadding = PaddingValues(horizontal = 10.dp),
-                                modifier = Modifier.height(35.dp)
-                            ) { Text("AI", color = Color.Black, fontSize = 12.sp) }
-                            
-                            IconButton(onClick = { showSubtitleSettings = true }) {
-                                Icon(Icons.Rounded.Palette, "Style", tint = Color.White)
-                            }
-                            IconButton(onClick = {
-                                resizeMode = if (resizeMode == AspectRatioFrameLayout.RESIZE_MODE_FIT) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
-                            }) { Icon(Icons.Rounded.AspectRatio, "Resize", tint = Color.White) }
-                        }
-                    }
-
-                    // Center Play/Pause
-                    if (!isLocked && !isBuffering) {
-                        Row(modifier = Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(50.dp)) {
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(50.dp))
+                    } else if (!isLocked) {
+                        // Play/Pause only if NOT buffering (or you can choose to show both)
+                        Row(horizontalArrangement = Arrangement.spacedBy(50.dp)) {
                             IconButton(onClick = { exoPlayer?.seekTo((exoPlayer?.currentPosition ?: 0) - 10000) }) {
-                                Icon(Icons.Rounded.Replay10, "Rewind", tint = Color.White, modifier = Modifier.size(48.dp))
+                                Icon(Icons.Rounded.Replay10, null, tint = Color.White, modifier = Modifier.size(48.dp))
                             }
                             IconButton(onClick = { if (isPlaying) exoPlayer?.pause() else exoPlayer?.play() }) {
-                                Icon(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(64.dp))
+                                Icon(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(64.dp))
                             }
                             IconButton(onClick = { exoPlayer?.seekTo((exoPlayer?.currentPosition ?: 0) + 10000) }) {
-                                Icon(Icons.Rounded.Forward10, "Forward", tint = Color.White, modifier = Modifier.size(48.dp))
+                                Icon(Icons.Rounded.Forward10, null, tint = Color.White, modifier = Modifier.size(48.dp))
                             }
                         }
                     }
+                }
 
-                    // Lock Button
-                    IconButton(
-                        onClick = { isLocked = !isLocked },
-                        modifier = Modifier.align(Alignment.CenterEnd).padding(32.dp)
-                    ) { 
-                        Icon(
-                            if (isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, 
-                            "Lock", 
-                            tint = if (isLocked) Color.Red else Color.White
-                        ) 
-                    }
+                // Lock Button
+                IconButton(onClick = { isLocked = !isLocked }, modifier = Modifier.align(Alignment.CenterEnd).padding(32.dp)) { 
+                    Icon(if (isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, null, tint = if (isLocked) Color.Red else Color.White) 
+                }
 
-                    // Bottom Seekbar
-                    if (!isLocked) {
-                        Column(modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(16.dp)) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(formatTime(currentTime), color = Color.White, fontSize = 12.sp)
-                                Text(formatTime(totalDuration), color = Color.White, fontSize = 12.sp)
-                            }
-                            Slider(
-                                value = currentTime.toFloat(),
-                                onValueChange = { exoPlayer?.seekTo(it.toLong()) },
-                                valueRange = 0f..max(1f, totalDuration.toFloat()),
-                                colors = SliderDefaults.colors(thumbColor = Color.Cyan, activeTrackColor = Color.Cyan)
-                            )
+                // Bottom Seekbar
+                if (!isLocked) {
+                    Column(modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(16.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(formatTime(currentTime), color = Color.White, fontSize = 12.sp)
+                            Text(formatTime(totalDuration), color = Color.White, fontSize = 12.sp)
                         }
+                        Slider(
+                            value = currentTime.toFloat(),
+                            onValueChange = { exoPlayer?.seekTo(it.toLong()) },
+                            valueRange = 0f..max(1f, totalDuration.toFloat()),
+                            colors = SliderDefaults.colors(thumbColor = Color.Cyan, activeTrackColor = Color.Cyan)
+                        )
                     }
                 }
             }
