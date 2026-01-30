@@ -31,7 +31,7 @@ jobs:
           
       # UPDATE: Cache key bumped to 'v5' for clean AI library build
       - name: Restore vcpkg artifacts
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/vcpkg/archives
