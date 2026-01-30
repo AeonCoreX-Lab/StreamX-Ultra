@@ -1,11 +1,20 @@
 cmake_minimum_required(VERSION 3.22.1)
 
+# --- FIX: Vcpkg Triplet Selection based on Android ABI ---
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    set(VCPKG_TARGET_TRIPLET "arm64-android" CACHE STRING "" FORCE)
+elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
+    set(VCPKG_TARGET_TRIPLET "arm-android" CACHE STRING "" FORCE)
+elseif(ANDROID_ABI STREQUAL "x86_64")
+    set(VCPKG_TARGET_TRIPLET "x64-android" CACHE STRING "" FORCE)
+endif()
+# ---------------------------------------------------------
+
 project("streamx-native")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ওয়ার্নিং বন্ধ করার জন্য ফ্ল্যাগ
 add_compile_options(-Wno-macro-redefined)
 
 add_library(
