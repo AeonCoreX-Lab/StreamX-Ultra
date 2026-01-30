@@ -10,6 +10,11 @@ elseif(ANDROID_ABI STREQUAL "x86_64")
 endif()
 # ---------------------------------------------------------
 
+# Ensure vcpkg will chainload the Android toolchain if ANDROID_NDK_HOME is set in the environment.
+if(DEFINED ENV{ANDROID_NDK_HOME} AND NOT DEFINED VCPKG_CHAINLOAD_TOOLCHAIN_FILE)
+    set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "$ENV{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" CACHE STRING "" FORCE)
+endif()
+
 project("streamx-native")
 
 set(CMAKE_CXX_STANDARD 17)
