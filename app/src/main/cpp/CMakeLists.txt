@@ -5,20 +5,31 @@ project("streamx-native")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ওয়ার্নিং বন্ধ করার জন্য ফ্ল্যাগ
+# --- 1. Fetch Whisper.cpp (AI Engine) ---
+include(FetchContent)
+FetchContent_Declare(
+    whisper_cpp
+    GIT_REPOSITORY https://github.com/ggerganov/whisper.cpp.git
+    GIT_TAG master
+)
+FetchContent_MakeAvailable(whisper_cpp)
+
 add_compile_options(-Wno-macro-redefined)
 
+# --- 2. Define Libraries ---
 add_library(
         streamx-native
         SHARED
         native-lib.cpp
         torrent-engine.cpp
+        ai_engine.cpp  # নতুন AI ইঞ্জিন ফাইল
 )
 
 find_package(LibtorrentRasterbar CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
 
+# --- 3. Link Libraries ---
 target_link_libraries(
         streamx-native
         PRIVATE
@@ -26,6 +37,7 @@ target_link_libraries(
         OpenSSL::SSL
         OpenSSL::Crypto
         Boost::system
+        whisper # Whisper লাইব্রেরি লিঙ্ক করা হলো
         log
         atomic
 )

@@ -13,8 +13,9 @@ android {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 24
         targetSdk = 34
-        versionCode = 5 // ভার্সন কোড বাড়ানো হয়েছে
-        versionName = "1.2.2"
+        versionCode = 4 
+        versionName = "1.2.1"
+        
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         vectorDrawables {
@@ -24,7 +25,7 @@ android {
         // --- C++ NATIVE CONFIG ---
         externalNativeBuild {
             cmake {
-                // FIX: প্রথমে Undefine (-U) করে তারপর Define (-D) করা হয়েছে যাতে ওয়ার্নিং না আসে
+                // লিঙ্কার ওয়ার্নিং ফিক্স এবং C++17 স্ট্যান্ডার্ড
                 cppFlags("-std=c++17", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0")
 
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
@@ -40,8 +41,9 @@ android {
                     "-DVCPKG_TARGET_TRIPLET=arm64-android",
                     "-DANDROID_ABI=arm64-v8a",
                     "-DANDROID_PLATFORM=android-24",
-                    // লিঙ্কার ফ্ল্যাগ ফিক্স
-                    "-D_FORTIFY_SOURCE=0"
+                    "-D_FORTIFY_SOURCE=0",
+                    // Whisper AI Optimization Flag
+                    "-DWHISPER_NO_AVX=ON"
                 )
 
                 abiFilters("arm64-v8a")
@@ -57,6 +59,12 @@ android {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
         }
+    }
+
+    // --- AI MODEL PROTECTION ---
+    // মডেল ফাইল কম্প্রেস না করার নির্দেশ, যাতে C++ ইঞ্জিন এটি লোড করতে পারে
+    aaptOptions {
+        noCompress("bin")
     }
 
     signingConfigs {
@@ -110,6 +118,8 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/DEPENDENCIES"
             excludes += "META-INF/INDEX.LIST"
+            // লিঙ্কার কনফ্লিক্ট ফিক্স: shared library ডুপ্লিকেশন এড়াতে
+            pickFirsts += "lib/**/libc++_shared.so"
         }
     }
 }

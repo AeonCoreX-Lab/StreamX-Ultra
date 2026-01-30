@@ -1,22 +1,26 @@
 package com.aeoncorex.streamx.ui.movie
 
 import android.app.Activity
+import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
+import android.util.Rational
 import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.annotation.OptIn
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,29 +28,50 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import androidx.navigation.NavController
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URLDecoder
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.max
+
+[span_1](start_span)// --- NATIVE AI METHODS DECLARATION[span_1](end_span) ---
+private external fun initAINative(modelPath: String): Boolean
+private external fun pushAudioNative(data: FloatArray, size: Int)
+private external fun getSubtitleNative(): String
+private external fun stopAINative()
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -54,46 +79,85 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     val context = LocalContext.current
     val activity = context as? Activity
     val decodedUrl = remember { try { URLDecoder.decode(encodedUrl, "UTF-8") } catch (e: Exception) { encodedUrl } }
-    
-    // Coroutine scope for gesture handlers
     val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     // --- State Management ---
     var videoPath by remember { mutableStateOf<String?>(null) }
+    var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
+    
+    // AI & Subtitle States
+    var isAiEnabled by remember { mutableStateOf(false) }
+    var aiSubtitleText by remember { mutableStateOf("") }
+    var isAiModelLoaded by remember { mutableStateOf(false) }
+    var subtitleColor by remember { mutableStateOf(Color.Yellow) }
+    var subtitleFontSize by remember { mutableFloatStateOf(20f) }
+    var showSubtitleSettings by remember { mutableStateOf(false) }
+
+    // Player UI States
     var isPlaying by remember { mutableStateOf(true) }
     var currentTime by remember { mutableLongStateOf(0L) }
     var totalDuration by remember { mutableLongStateOf(0L) }
-    var bufferedPercentage by remember { mutableIntStateOf(0) }
     var isControlsVisible by remember { mutableStateOf(true) }
     var resizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var isLocked by remember { mutableStateOf(false) }
+    var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
     
-    // Gesture Feedback States
+    // Gesture & Feedback States
     var volumeLevel by remember { mutableFloatStateOf(0.5f) }
     var brightnessLevel by remember { mutableFloatStateOf(0.5f) }
     var gestureIcon by remember { mutableStateOf<ImageVector?>(null) }
     var gestureText by remember { mutableStateOf("") }
     var showGestureOverlay by remember { mutableStateOf(false) }
+    var showForwardAnim by remember { mutableStateOf(false) }
+    var showRewindAnim by remember { mutableStateOf(false) }
 
     // Torrent States
     var statusMsg by remember { mutableStateOf("Initializing Core...") }
     var downloadSpeed by remember { mutableStateOf("0 KB/s") }
     var seeds by remember { mutableIntStateOf(0) }
 
-    // Audio Manager Setup
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
 
-    // Initialize Brightness & Volume
-    LaunchedEffect(Unit) {
-        val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        volumeLevel = currentVol.toFloat() / maxVolume.toFloat()
-        activity?.window?.attributes?.screenBrightness?.let {
-            brightnessLevel = if (it < 0) 0.5f else it
+    // --- AI Engine Initialization Logic ---
+    LaunchedEffect(isAiEnabled) {
+        if (isAiEnabled) {
+            val modelFile = File(context.filesDir, "ggml-tiny.bin")
+            if (!modelFile.exists()) {
+                // Copy model from assets if not present
+                try {
+                    context.assets.open("ggml-tiny.bin").use { input ->
+                        modelFile.outputStream().use { output -> input.copyTo(output) }
+                    }
+                } catch (e: Exception) {
+                    aiSubtitleText = "Error: Model not found!"
+                    isAiEnabled = false
+                }
+            }
+            
+            if (modelFile.exists()) {
+                withContext(Dispatchers.IO) {
+                    isAiModelLoaded = initAINative(modelFile.absolutePath)
+                }
+                if (!isAiModelLoaded) aiSubtitleText = "AI Init Failed"
+            }
+        } else {
+            stopAINative()
+            aiSubtitleText = ""
+            isAiModelLoaded = false
         }
     }
 
-    // --- System UI & Orientation Setup ---
+    // --- AI Subtitle Polling Loop ---
+    LaunchedEffect(isAiEnabled, isAiModelLoaded) {
+        while (isAiEnabled && isAiModelLoaded) {
+            aiSubtitleText = getSubtitleNative()
+            delay(200) // Fast update for real-time feel
+        }
+    }
+
+    // --- SYSTEM UI SETUP ---
     DisposableEffect(Unit) {
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -102,7 +166,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         val controller = if (window != null) WindowCompat.getInsetsController(window, window.decorView) else null
         
         controller?.hide(WindowInsetsCompat.Type.systemBars())
-        // FIX: Use WindowInsetsControllerCompat constant
         controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         
         onDispose {
@@ -110,7 +173,17 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             controller?.show(WindowInsetsCompat.Type.systemBars())
             TorrentEngine.stop()
+            stopAINative() // Ensure AI stops
         }
+    }
+
+    // --- PiP Mode Setup ---
+    val isInPipMode = remember { mutableStateOf(false) }
+    val configuration = LocalConfiguration.current
+    LaunchedEffect(configuration) {
+        isInPipMode.value = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            activity?.isInPictureInPictureMode == true
+        } else false
     }
 
     // --- Torrent Engine Logic ---
@@ -149,314 +222,309 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { isControlsVisible = !isControlsVisible },
-                    onDoubleTap = { /* Handled by inner logic */ }
-                )
-            }
     ) {
-        // 1. ExoPlayer
         videoPath?.let { path ->
-            val exoPlayer = remember(context) {
-                ExoPlayer.Builder(context).build().apply {
+            // --- CUSTOM AUDIO SINK FOR AI ---
+            val renderersFactory = remember {
+                object : androidx.media3.exoplayer.DefaultRenderersFactory(context) {
+                    override fun buildAudioSink(
+                        context: Context, 
+                        enableFloatOutput: Boolean, 
+                        enableAudioTrackPlaybackParams: Boolean, 
+                        enableOffload: Boolean
+                    ): AudioSink? {
+                        val defaultSink = DefaultAudioSink.Builder(context).build()
+                        return object : ForwardingAudioSink(defaultSink) {
+                            override fun handleBuffer(buffer: ByteBuffer, presentationTimeUs: Long, encodedAccessUnitsCount: Int): Boolean {
+                                if (isAiEnabled && isAiModelLoaded) {
+                                    val bufferCopy = buffer.duplicate()
+                                    bufferCopy.order(ByteOrder.LITTLE_ENDIAN)
+                                    // PCM 16-bit to Float conversion
+                                    val floats = FloatArray(bufferCopy.remaining() / 2)
+                                    for (i in floats.indices) {
+                                        floats[i] = bufferCopy.short / 32768f
+                                    }
+                                    pushAudioNative(floats, floats.size)
+                                }
+                                return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitsCount)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Init Player
+            if (exoPlayer == null) {
+                val player = ExoPlayer.Builder(context, renderersFactory).build().apply {
                     val uri = if (path.startsWith("http")) Uri.parse(path) else Uri.fromFile(File(path))
                     setMediaItem(MediaItem.fromUri(uri))
                     prepare()
                     playWhenReady = true
                 }
+                exoPlayer = player
             }
 
-            // Sync Player State
+            // Player Listeners
             DisposableEffect(exoPlayer) {
                 val listener = object : Player.Listener {
                     override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
                     override fun onEvents(player: Player, events: Player.Events) {
                         currentTime = player.currentPosition
                         totalDuration = player.duration
-                        bufferedPercentage = player.bufferedPercentage
+                    }
+                    override fun onPlaybackStateChanged(state: Int) {
+                        if (state == Player.STATE_ENDED) isControlsVisible = true
                     }
                 }
-                exoPlayer.addListener(listener)
+                exoPlayer?.addListener(listener)
                 onDispose {
-                    exoPlayer.removeListener(listener)
-                    exoPlayer.release()
+                    exoPlayer?.removeListener(listener)
+                    exoPlayer?.release()
+                    exoPlayer = null
                 }
             }
-
-            // FIX: Use LaunchedEffect for the progress loop instead of manual CoroutineScope inside DisposableEffect
-            LaunchedEffect(exoPlayer) {
-                while (isActive) {
-                    currentTime = exoPlayer.currentPosition
+            
+            // Progress Update
+            LaunchedEffect(Unit) {
+                while (true) {
+                    exoPlayer?.let { currentTime = it.currentPosition }
                     delay(1000)
                 }
             }
 
+            // --- VIDEO VIEW (Layer 1) ---
             AndroidView(
                 factory = { ctx ->
                     PlayerView(ctx).apply {
                         player = exoPlayer
-                        useController = false // We use custom UI
-                        resizeMode = resizeMode
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
+                        useController = false
+                        this.resizeMode = resizeMode
+                        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                        
+                        // Hide default subtitle view if AI is on
+                        subtitleView?.visibility = if (isAiEnabled) android.view.View.GONE else android.view.View.VISIBLE
                     }
                 },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        // --- ADVANCED GESTURE LOGIC ---
-                        detectVerticalDragGestures(
-                            onDragStart = { showGestureOverlay = true },
-                            onDragEnd = { 
-                                showGestureOverlay = false 
-                                gestureIcon = null
-                            }
-                        ) { change, dragAmount ->
-                            if (isLocked) return@detectVerticalDragGestures
-                            
-                            val width = size.width
-                            val xPos = change.position.x
-                            val isLeft = xPos < width / 2
-                            
-                            if (isLeft) {
-                                // Brightness Control
-                                val delta = -dragAmount / 500f // Invert & Scale
-                                brightnessLevel = (brightnessLevel + delta).coerceIn(0f, 1f)
-                                activity?.window?.attributes = activity?.window?.attributes?.apply {
-                                    screenBrightness = brightnessLevel
-                                }
-                                gestureIcon = Icons.Rounded.BrightnessMedium
-                                gestureText = "${(brightnessLevel * 100).toInt()}%"
-                            } else {
-                                // Volume Control
-                                val delta = -dragAmount / 50f
-                                val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                                val newVol = (currentVol + delta.toInt()).coerceIn(0, maxVolume)
-                                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
-                                volumeLevel = newVol.toFloat() / maxVolume
-                                gestureIcon = if (volumeLevel == 0f) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp
-                                gestureText = "${(volumeLevel * 100).toInt()}%"
-                            }
+                update = { view ->
+                    view.resizeMode = resizeMode
+                    view.subtitleView?.visibility = if (isAiEnabled) android.view.View.GONE else android.view.View.VISIBLE
+                    
+                    // Update standard subtitle style
+                    if (!isAiEnabled) {
+                        view.subtitleView?.apply {
+                             val style = CaptionStyleCompat(
+                                subtitleColor.toArgb(),
+                                Color.Transparent.toArgb(),
+                                Color.Transparent.toArgb(),
+                                CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW,
+                                Color.Black.toArgb(),
+                                null
+                            )
+                            setStyle(style)
+                            setFixedTextSize(2, subtitleFontSize)
                         }
                     }
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onDoubleTap = { offset ->
-                                if (isLocked) return@detectTapGestures
-                                val width = size.width
-                                val isForward = offset.x > width / 2
-                                val seekTime = if (isForward) 10000L else -10000L
-                                exoPlayer.seekTo(exoPlayer.currentPosition + seekTime)
-                                
-                                // Visual Feedback
-                                showGestureOverlay = true
-                                gestureIcon = if (isForward) Icons.Rounded.Forward10 else Icons.Rounded.Replay10
-                                gestureText = if (isForward) "+10s" else "-10s"
-                                
-                                // FIX: Use 'scope' created via rememberCoroutineScope
-                                scope.launch {
-                                    delay(600)
-                                    showGestureOverlay = false
-                                }
-                            },
-                            onTap = { isControlsVisible = !isControlsVisible },
-                            onLongPress = {
-                                // Future: Implement 2x Speed
-                            }
-                        )
-                    }
+                },
+                modifier = Modifier.fillMaxSize()
             )
+        }
 
-            // 2. Custom Controls UI Overlay
-            AnimatedVisibility(
-                visible = isControlsVisible,
-                enter = fadeIn(),
-                exit = fadeOut()
+        // --- AI SUBTITLE OVERLAY (Layer 2 - The "Magic" Layer) ---
+        if (isAiEnabled && aiSubtitleText.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 85.dp) // Above Seekbar
+                    .padding(horizontal = 32.dp)
+                    .background(Color.Black.copy(0.6f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f))
-                ) {
+                Text(
+                    text = aiSubtitleText,
+                    color = subtitleColor,
+                    fontSize = subtitleFontSize.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    lineHeight = (subtitleFontSize * 1.3).sp
+                )
+            }
+        }
+
+        // --- GESTURE DETECTOR (Layer 3) ---
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragStart = { showGestureOverlay = true },
+                        onDragEnd = { scope.launch { delay(500); showGestureOverlay = false } }
+                    ) { change, dragAmount ->
+                        if (isLocked) return@detectVerticalDragGestures
+                        val isLeft = change.position.x < size.width / 2
+                        val delta = -dragAmount / (size.height / 2)
+                        
+                        if (isLeft) {
+                            brightnessLevel = (brightnessLevel + delta).coerceIn(0f, 1f)
+                            activity?.window?.attributes = activity?.window?.attributes?.apply { screenBrightness = brightnessLevel }
+                            gestureIcon = Icons.Rounded.BrightnessMedium
+                            gestureText = "${(brightnessLevel * 100).toInt()}%"
+                        } else {
+                            val volDelta = (delta * maxVolume).toInt()
+                            val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                            val newVol = (currentVol + volDelta).coerceIn(0, maxVolume)
+                            if (newVol != currentVol) {
+                                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
+                                volumeLevel = newVol.toFloat() / maxVolume
+                            }
+                            gestureIcon = Icons.Rounded.VolumeUp
+                            gestureText = "${(volumeLevel * 100).toInt()}%"
+                        }
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { isControlsVisible = !isControlsVisible },
+                        onDoubleTap = { offset ->
+                            if (isLocked) return@detectTapGestures
+                            val isForward = offset.x > size.width / 2
+                            exoPlayer?.let { player ->
+                                player.seekTo(player.currentPosition + if (isForward) 10000L else -10000L)
+                                if (isForward) { showForwardAnim = true; scope.launch { delay(600); showForwardAnim = false } }
+                                else { showRewindAnim = true; scope.launch { delay(600); showRewindAnim = false } }
+                            }
+                        }
+                    )
+                }
+        )
+
+        // --- GESTURE & ANIMATION FEEDBACK (Layer 4) ---
+        AnimatedVisibility(visible = showGestureOverlay, modifier = Modifier.align(Alignment.Center)) {
+            Box(modifier = Modifier.background(Color.Black.copy(0.7f), RoundedCornerShape(16.dp)).padding(24.dp)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    gestureIcon?.let { Icon(it, null, tint = Color.Cyan, modifier = Modifier.size(48.dp)) }
+                    Text(gestureText, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                }
+            }
+        }
+        
+        // --- CONTROLS UI (Layer 5) ---
+        if (!isInPipMode.value) {
+            AnimatedVisibility(visible = isControlsVisible, enter = fadeIn(), exit = fadeOut()) {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))) {
                     // Top Bar
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp)
-                            .align(Alignment.TopStart),
+                        modifier = Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopStart),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = { navController.popBackStack() }) {
-                            Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
-                        }
+                        IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }
                         
-                        Text(
-                            text = File(decodedUrl).nameWithoutExtension.take(30),
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Row {
-                            // Download Speed Stats
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             if (decodedUrl.startsWith("magnet")) {
-                                Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 16.dp)) {
+                                Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 12.dp)) {
                                     Text("▼ $downloadSpeed", color = Color.Green, fontSize = 12.sp)
-                                    Text("S: $seeds", color = Color.Gray, fontSize = 10.sp)
+                                    Text("S: $seeds", color = Color.LightGray, fontSize = 10.sp)
                                 }
                             }
                             
-                            // Aspect Ratio Button
-                            IconButton(onClick = { 
-                                resizeMode = when(resizeMode) {
-                                    AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                                    AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-                                    else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
-                                }
-                            }) {
-                                Icon(Icons.Rounded.AspectRatio, "Resize", tint = Color.White)
+                            // AI Toggle Button
+                            FilledTonalButton(
+                                onClick = { isAiEnabled = !isAiEnabled },
+                                colors = ButtonDefaults.filledTonalButtonColors(containerColor = if(isAiEnabled) Color.Green else Color.Gray)
+                            ) {
+                                Text("AI Subs", color = Color.Black, fontWeight = FontWeight.Bold)
                             }
+                            
+                            // Style Button
+                            IconButton(onClick = { showSubtitleSettings = true }) {
+                                Icon(Icons.Rounded.Palette, "Style", tint = Color.White)
+                            }
+                            
+                            // Resize Button
+                            IconButton(onClick = {
+                                resizeMode = if (resizeMode == AspectRatioFrameLayout.RESIZE_MODE_FIT) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+                            }) { Icon(Icons.Rounded.AspectRatio, "Resize", tint = Color.White) }
                         }
                     }
 
-                    // Center Controls (Play/Pause)
+                    // Center Controls
                     if (!isLocked) {
-                        Row(
-                            modifier = Modifier.align(Alignment.Center),
-                            horizontalArrangement = Arrangement.spacedBy(40.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(
-                                onClick = { exoPlayer.seekTo(exoPlayer.currentPosition - 10000) },
-                                modifier = Modifier.size(50.dp)
-                            ) {
-                                Icon(Icons.Rounded.Replay10, "Rewind", tint = Color.White, modifier = Modifier.fillMaxSize())
+                        Row(modifier = Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(50.dp)) {
+                            IconButton(onClick = { exoPlayer?.seekTo((exoPlayer?.currentPosition ?: 0) - 10000) }) {
+                                Icon(Icons.Rounded.Replay10, "Rewind", tint = Color.White, modifier = Modifier.size(48.dp))
                             }
-
-                            IconButton(
-                                onClick = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
-                                modifier = Modifier
-                                    .size(70.dp)
-                                    .background(Color.White.copy(0.2f), CircleShape)
-                            ) {
-                                Icon(
-                                    if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                    "Play/Pause",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(40.dp)
-                                )
+                            IconButton(onClick = { if (isPlaying) exoPlayer?.pause() else exoPlayer?.play() }) {
+                                Icon(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(64.dp))
                             }
-
-                            IconButton(
-                                onClick = { exoPlayer.seekTo(exoPlayer.currentPosition + 10000) },
-                                modifier = Modifier.size(50.dp)
-                            ) {
-                                Icon(Icons.Rounded.Forward10, "Forward", tint = Color.White, modifier = Modifier.fillMaxSize())
+                            IconButton(onClick = { exoPlayer?.seekTo((exoPlayer?.currentPosition ?: 0) + 10000) }) {
+                                Icon(Icons.Rounded.Forward10, "Forward", tint = Color.White, modifier = Modifier.size(48.dp))
                             }
                         }
                     }
 
-                    // Lock Button (Always visible logic)
+                    // Lock Button
                     IconButton(
                         onClick = { isLocked = !isLocked },
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 30.dp)
-                    ) {
-                        Icon(
-                            if (isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
-                            contentDescription = "Lock",
-                            tint = if (isLocked) Color.Red else Color.White
-                        )
-                    }
+                        modifier = Modifier.align(Alignment.CenterEnd).padding(32.dp)
+                    ) { Icon(if (isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, "Lock", tint = if (isLocked) Color.Red else Color.White) }
 
-                    // Bottom Seekbar Section
+                    // Bottom Seekbar
                     if (!isLocked) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .align(Alignment.BottomCenter)
-                                .background(
-                                    Brush.verticalGradient(
-                                        colors = listOf(Color.Transparent, Color.Black.copy(0.9f))
-                                    )
-                                )
-                                .padding(16.dp)
-                        ) {
-                            Text(
-                                text = "${formatTime(currentTime)} / ${formatTime(totalDuration)}",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(start = 8.dp)
-                            )
-                            
+                        Column(modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(16.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(formatTime(currentTime), color = Color.White, fontSize = 12.sp)
+                                Text(formatTime(totalDuration), color = Color.White, fontSize = 12.sp)
+                            }
                             Slider(
                                 value = currentTime.toFloat(),
-                                onValueChange = { exoPlayer.seekTo(it.toLong()) },
+                                onValueChange = { exoPlayer?.seekTo(it.toLong()) },
                                 valueRange = 0f..max(1f, totalDuration.toFloat()),
-                                colors = SliderDefaults.colors(
-                                    thumbColor = Color.Cyan,
-                                    activeTrackColor = Color.Cyan,
-                                    inactiveTrackColor = Color.White.copy(0.3f)
-                                ),
-                                modifier = Modifier.height(20.dp)
+                                colors = SliderDefaults.colors(thumbColor = Color.Cyan, activeTrackColor = Color.Cyan)
                             )
                         }
                     }
                 }
             }
         }
-
-        // 3. Central Gesture Feedback Overlay (Volume/Brightness/Seek)
-        if (showGestureOverlay) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .background(Color.Black.copy(0.7f), RoundedCornerShape(16.dp))
-                    .padding(24.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    gestureIcon?.let {
-                        Icon(it, null, tint = Color.Cyan, modifier = Modifier.size(48.dp))
+        
+        // --- DIALOGS ---
+        if (showSubtitleSettings) {
+            AlertDialog(
+                onDismissRequest = { showSubtitleSettings = false },
+                title = { Text("Subtitle Settings") },
+                text = {
+                    Column {
+                        Text("Color:")
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            listOf(Color.White, Color.Yellow, Color.Cyan, Color.Green).forEach { c ->
+                                Box(Modifier.size(30.dp).background(c, CircleShape).clickable { subtitleColor = c })
+                            }
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        Text("Size: ${subtitleFontSize.toInt()}")
+                        Slider(value = subtitleFontSize, onValueChange = { subtitleFontSize = it }, valueRange = 12f..36f)
                     }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = gestureText,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp
-                    )
-                }
-            }
+                },
+                confirmButton = { TextButton(onClick = { showSubtitleSettings = false }) { Text("Close") } }
+            )
         }
 
-        // 4. Loading Indicator (Initial)
+        // Loading Indicator
         if (videoPath == null) {
-            Column(
-                modifier = Modifier.align(Alignment.Center),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                CircularProgressIndicator(color = Color.Cyan)
-                Spacer(Modifier.height(16.dp))
-                Text(statusMsg, color = Color.White)
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = Color.Cyan)
+                    Text(statusMsg, color = Color.White, modifier = Modifier.padding(top = 8.dp))
+                }
             }
         }
     }
 }
 
-// Utility to format milliseconds to MM:SS or HH:MM:SS
 fun formatTime(ms: Long): String {
-    val totalSeconds = ms / 1000
-    val hours = totalSeconds / 3600
-    val minutes = (totalSeconds % 3600) / 60
-    val seconds = totalSeconds % 60
-    
-    return if (hours > 0) {
-        String.format("%02d:%02d:%02d", hours, minutes, seconds)
-    } else {
-        String.format("%02d:%02d", minutes, seconds)
-    }
+    val totalSeconds = max(0, ms) / 1000
+    val m = (totalSeconds / 60) % 60
+    val s = totalSeconds % 60
+    val h = totalSeconds / 3600
+    return if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
 }
