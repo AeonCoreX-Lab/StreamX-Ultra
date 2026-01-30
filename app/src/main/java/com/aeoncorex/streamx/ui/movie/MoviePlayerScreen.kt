@@ -1,13 +1,11 @@
 package com.aeoncorex.streamx.ui.movie
 
 import android.app.Activity
-import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
-import android.util.Rational
 import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.annotation.OptIn
@@ -26,7 +24,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -42,20 +39,17 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
-import androidx.media3.ui.SubtitleView
 import androidx.navigation.NavController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -67,15 +61,31 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.max
 
-[span_1](start_span)// --- NATIVE AI METHODS DECLARATION[span_1](end_span) ---
+// --- NATIVE AI METHODS DECLARATION (Top Level) ---
+// These match the C++ signature: Java_com_aeoncorex_streamx_ui_movie_MoviePlayerScreenKt_...
 private external fun initAINative(modelPath: String): Boolean
 private external fun pushAudioNative(data: FloatArray, size: Int)
 private external fun getSubtitleNative(): String
 private external fun stopAINative()
 
+// Helper to load library only once
+private object NativeLoader {
+    init {
+        try {
+            System.loadLibrary("streamx-native")
+        } catch (e: UnsatisfiedLinkError) {
+            e.printStackTrace()
+        }
+    }
+    fun load() {} // Call to trigger init
+}
+
 @OptIn(UnstableApi::class)
 @Composable
 fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
+    // Ensure Library is Loaded
+    NativeLoader.load()
+
     val context = LocalContext.current
     val activity = context as? Activity
     val decodedUrl = remember { try { URLDecoder.decode(encodedUrl, "UTF-8") } catch (e: Exception) { encodedUrl } }
@@ -101,7 +111,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var isControlsVisible by remember { mutableStateOf(true) }
     var resizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var isLocked by remember { mutableStateOf(false) }
-    var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
     
     // Gesture & Feedback States
     var volumeLevel by remember { mutableFloatStateOf(0.5f) }
@@ -152,7 +161,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     // --- AI Subtitle Polling Loop ---
     LaunchedEffect(isAiEnabled, isAiModelLoaded) {
         while (isAiEnabled && isAiModelLoaded) {
-            aiSubtitleText = getSubtitleNative()
+            val sub = getSubtitleNative()
+            if (sub.isNotEmpty()) {
+                aiSubtitleText = sub
+            }
             delay(200) // Fast update for real-time feel
         }
     }
@@ -225,13 +237,13 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     ) {
         videoPath?.let { path ->
             // --- CUSTOM AUDIO SINK FOR AI ---
+            // Fix: Override ONLY arguments available in Media3 1.3.1
             val renderersFactory = remember {
-                object : androidx.media3.exoplayer.DefaultRenderersFactory(context) {
+                object : DefaultRenderersFactory(context) {
                     override fun buildAudioSink(
                         context: Context, 
                         enableFloatOutput: Boolean, 
-                        enableAudioTrackPlaybackParams: Boolean, 
-                        enableOffload: Boolean
+                        enableAudioTrackPlaybackParams: Boolean
                     ): AudioSink? {
                         val defaultSink = DefaultAudioSink.Builder(context).build()
                         return object : ForwardingAudioSink(defaultSink) {
