@@ -50,7 +50,6 @@ import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import androidx.navigation.NavController
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -93,7 +92,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 
     // Player States
     var isPlaying by remember { mutableStateOf(true) }
-    var isBuffering by remember { mutableStateOf(true) } // Initially true until player is ready
+    var isBuffering by remember { mutableStateOf(true) }
     var currentTime by remember { mutableLongStateOf(0L) }
     var totalDuration by remember { mutableLongStateOf(0L) }
     var isControlsVisible by remember { mutableStateOf(true) }
@@ -114,16 +113,13 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var gestureIcon by remember { mutableStateOf<ImageVector?>(null) }
     var gestureText by remember { mutableStateOf("") }
     var showGestureOverlay by remember { mutableStateOf(false) }
-    
-    // Coroutine Job for hiding gestures (prevents flickering)
-    var gestureHideJob by remember { mutableStateOf<Job?>(null) }
 
     // Animation States
     var forwardAnimAlpha by remember { mutableFloatStateOf(0f) }
     var rewindAnimAlpha by remember { mutableFloatStateOf(0f) }
 
     // Torrent Info
-    var statusMsg by remember { mutableStateOf("Initializing...") }
+    var statusMsg by remember { mutableStateOf("Initializing Core...") }
     var downloadSpeed by remember { mutableStateOf("0 KB/s") }
     var seeds by remember { mutableIntStateOf(0) }
 
@@ -157,7 +153,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // --- AI Logic ---
+    // --- AI Initialization ---
     LaunchedEffect(isAiEnabled) {
         if (isAiEnabled) {
             withContext(Dispatchers.IO) {
@@ -171,6 +167,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 }
                 isAiModelLoaded = if (modelFile.exists()) initAINative(modelFile.absolutePath) else false
             }
+            if (!isAiModelLoaded) aiSubtitleText = "AI Init Failed"
         } else {
             stopAINative()
             aiSubtitleText = ""
@@ -192,8 +189,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 when (state) {
                     is StreamState.Preparing -> statusMsg = state.message
                     is StreamState.Buffering -> {
-                        // FIX: Do NOT force isBuffering = true here. 
-                        // Let ExoPlayer decide if it needs to buffer. Only update text.
+                        // FIX: ভিডিও প্লে হতে থাকলে আর বাফারিং দেখাব না
+                        if (!isPlaying) {
+                            isBuffering = true
+                        }
                         statusMsg = "Buffering ${state.progress}%"
                         downloadSpeed = "${state.speed / 1024} KB/s"
                         seeds = state.seeds
@@ -203,6 +202,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             videoPath = state.filePath
                         }
                         statusMsg = ""
+                        // Player will handle buffering state from here
                     }
                     is StreamState.Error -> statusMsg = "Error: ${state.message}"
                 }
@@ -214,7 +214,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // --- RENDERER FACTORY ---
     val renderersFactory = remember {
         object : DefaultRenderersFactory(context) {
             override fun buildAudioSink(c: Context, enableFloat: Boolean, enableParams: Boolean): AudioSink? {
@@ -233,7 +232,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                     }
                                     pushAudioNative(floats, floats.size)
                                 }
-                            } catch (e: Exception) { }
+                            } catch (e: Exception) {}
                         }
                         return super.handleBuffer(buffer, timeUs, count)
                     }
@@ -242,7 +241,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // --- EXO PLAYER ---
+    // --- EXO PLAYER INITIALIZATION ---
     DisposableEffect(videoPath) {
         if (videoPath == null) return@DisposableEffect onDispose {}
 
@@ -258,6 +257,8 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
                 if (playing) {
+                    // FIX: প্লে শুরু হলেই লোডিং/বাফারিং বন্ধ
+                    isBuffering = false 
                     scope.launch {
                         delay(3000)
                         if (isPlaying) isControlsVisible = false
@@ -265,7 +266,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 }
             }
             override fun onPlaybackStateChanged(state: Int) {
-                // FIX: This is the ONLY place that should control the buffering spinner
                 if (state == Player.STATE_BUFFERING) {
                     isBuffering = true
                 } else if (state == Player.STATE_READY) {
@@ -291,7 +291,11 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     LaunchedEffect(Unit) {
         while (true) {
             exoPlayer?.let { 
-                if (it.isPlaying) currentTime = it.currentPosition 
+                if (it.isPlaying) {
+                    currentTime = it.currentPosition
+                    // Safety check: ভিডিও চললে বাফারিং ফলস করে দাও
+                    if (isBuffering) isBuffering = false
+                }
             }
             delay(500)
         }
@@ -315,9 +319,12 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                     }
                 },
                 update = { view ->
-                    if (view.player != exoPlayer) view.player = exoPlayer
+                    if (view.player != exoPlayer) {
+                        view.player = exoPlayer
+                    }
                     view.resizeMode = resizeMode
                     view.subtitleView?.visibility = if (isAiEnabled) android.view.View.GONE else android.view.View.VISIBLE
+                    
                     if (!isAiEnabled) {
                         view.subtitleView?.setStyle(
                              CaptionStyleCompat(
@@ -332,50 +339,11 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             )
         }
 
-        // LAYER 2: TRANSPARENT GESTURE DETECTOR
+        // LAYER 2: GESTURE DETECTOR (FIXED)
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectVerticalDragGestures(
-                        onDragStart = { 
-                            // Cancel any pending hide job to keep overlay visible while dragging
-                            gestureHideJob?.cancel()
-                            showGestureOverlay = true 
-                        },
-                        onDragEnd = { 
-                            gestureHideJob = scope.launch { 
-                                delay(500) 
-                                showGestureOverlay = false 
-                            } 
-                        }
-                    ) { change, dragAmount ->
-                        if (isLocked) return@detectVerticalDragGestures
-                        
-                        // FIX: Ensure overlay is visible during drag updates
-                        showGestureOverlay = true
-                        
-                        val isLeft = change.position.x < size.width / 2
-                        val delta = -dragAmount / (size.height / 2) // Sensitivity
-
-                        if (isLeft) {
-                            brightnessLevel = (brightnessLevel + delta).coerceIn(0f, 1f)
-                            val lp = activity?.window?.attributes
-                            lp?.screenBrightness = brightnessLevel
-                            activity?.window?.attributes = lp
-                            gestureIcon = Icons.Rounded.BrightnessMedium
-                            gestureText = "${(brightnessLevel * 100).toInt()}%"
-                        } else {
-                            val volDelta = (delta * maxVolume).toInt()
-                            val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                            val newVol = (currentVol + volDelta).coerceIn(0, maxVolume)
-                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
-                            volumeLevel = newVol.toFloat() / maxVolume
-                            gestureIcon = Icons.Rounded.VolumeUp
-                            gestureText = "${(volumeLevel * 100).toInt()}%"
-                        }
-                    }
-                }
+                // FIX: ট্যাপ জেসচার সবার আগে দিতে হবে যাতে ড্র্যাগ ইভেন্ট সেটাকে ব্লক না করে
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = { isControlsVisible = !isControlsVisible },
@@ -395,34 +363,89 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         }
                     )
                 }
+                // ড্র্যাগ জেসচার পরে থাকবে
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragStart = { showGestureOverlay = true },
+                        onDragEnd = { scope.launch { delay(500); showGestureOverlay = false } }
+                    ) { change, dragAmount ->
+                        if (isLocked) return@detectVerticalDragGestures
+                        // Consume event to prevent conflicts if needed, but usually not required here if tap handles its own
+                        // change.consume() 
+                        
+                        val isLeft = change.position.x < size.width / 2
+                        val delta = -dragAmount / (size.height / 2)
+
+                        if (isLeft) {
+                            brightnessLevel = (brightnessLevel + delta).coerceIn(0f, 1f)
+                            val lp = activity?.window?.attributes
+                            lp?.screenBrightness = brightnessLevel
+                            activity?.window?.attributes = lp
+                            gestureIcon = Icons.Rounded.BrightnessMedium
+                            gestureText = "${(brightnessLevel * 100).toInt()}%"
+                        } else {
+                            val volDelta = (delta * maxVolume).toInt()
+                            val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                            val newVol = (currentVol + volDelta).coerceIn(0, maxVolume)
+                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
+                            volumeLevel = newVol.toFloat() / maxVolume
+                            gestureIcon = Icons.Rounded.VolumeUp
+                            gestureText = "${(volumeLevel * 100).toInt()}%"
+                        }
+                    }
+                }
         )
 
-        // LAYER 3: ANIMATIONS (Rewind/Forward)
-        Box(modifier = Modifier.align(Alignment.CenterStart).padding(start = 50.dp).alpha(rewindAnimAlpha)
-            .background(Color.Black.copy(0.5f), CircleShape).padding(16.dp)) {
+        // LAYER 3: DOUBLE TAP ANIMATIONS
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(start = 50.dp)
+                .alpha(rewindAnimAlpha)
+                .background(Color.Black.copy(0.5f), CircleShape)
+                .padding(16.dp)
+        ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(Icons.Rounded.FastRewind, null, tint = Color.White, modifier = Modifier.size(40.dp))
-                Text("-10s", color = Color.White)
+                Text("-10s", color = Color.White, fontWeight = FontWeight.Bold)
             }
         }
-        Box(modifier = Modifier.align(Alignment.CenterEnd).padding(end = 50.dp).alpha(forwardAnimAlpha)
-            .background(Color.Black.copy(0.5f), CircleShape).padding(16.dp)) {
+        
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 50.dp)
+                .alpha(forwardAnimAlpha)
+                .background(Color.Black.copy(0.5f), CircleShape)
+                .padding(16.dp)
+        ) {
              Column(horizontalAlignment = Alignment.CenterHorizontally) {
                  Icon(Icons.Rounded.FastForward, null, tint = Color.White, modifier = Modifier.size(40.dp))
-                 Text("+10s", color = Color.White)
+                 Text("+10s", color = Color.White, fontWeight = FontWeight.Bold)
              }
         }
 
         // LAYER 4: AI SUBTITLES
         if (isAiEnabled && aiSubtitleText.isNotEmpty()) {
-            Box(modifier = Modifier.align(Alignment.BottomCenter)
-                .padding(bottom = if (isControlsVisible) 100.dp else 40.dp)
-                .background(Color.Black.copy(0.6f), RoundedCornerShape(8.dp)).padding(8.dp)) {
-                Text(aiSubtitleText, color = subtitleColor, fontSize = subtitleFontSize.sp, textAlign = TextAlign.Center)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = if (isControlsVisible) 100.dp else 40.dp)
+                    .padding(horizontal = 32.dp)
+                    .background(Color.Black.copy(0.6f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = aiSubtitleText,
+                    color = subtitleColor,
+                    fontSize = subtitleFontSize.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
             }
         }
 
-        // LAYER 5: GESTURE OVERLAY (Volume/Brightness)
+        // LAYER 5: GESTURE FEEDBACK OVERLAY
         if (showGestureOverlay) {
             Box(
                 modifier = Modifier.align(Alignment.Center)
@@ -436,87 +459,114 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
 
-        // LAYER 6: CONTROLS
-        // Only show full black screen loader if video path is NOT set yet.
+        // LAYER 6: MAIN CONTROLS
+        // FIX: ভিডিও লোড হয়ে গেলে (videoPath != null) এবং isBuffering false হলে কন্টেন্ট দেখাও
+        
+        // Initial Loading Screen
         if (isBuffering && videoPath == null) {
              Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Color.Cyan)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = Color.Cyan)
+                    Spacer(Modifier.height(16.dp))
+                    Text(statusMsg, color = Color.White)
+                }
+                IconButton(
+                    onClick = { navController.popBackStack() },
+                    modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
+                ) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }
              }
-        } 
-        
-        // Main Controls UI
-        AnimatedVisibility(
-            visible = isControlsVisible,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))) {
-                
-                // Top Bar
-                Row(Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopStart),
-                    horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { navController.popBackStack() }) { 
-                        Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) 
+        } else {
+            // Player Controls & Overlay
+            AnimatedVisibility(
+                visible = isControlsVisible || isBuffering, 
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))) {
+                    
+                    // Buffering Indicator (Center) - Only shows if actually buffering AND video is not playing smoothly
+                    if (isBuffering && !isPlaying) {
+                        CircularProgressIndicator(
+                            color = Color.White, 
+                            modifier = Modifier.align(Alignment.Center).size(50.dp)
+                        )
                     }
-                    // Stats
-                    if (decodedUrl.startsWith("magnet")) {
-                        Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 12.dp)) {
-                            Text("▼ $downloadSpeed", color = Color.Green, fontSize = 12.sp)
-                            Text("S: $seeds", color = Color.LightGray, fontSize = 10.sp)
+
+                    // Top Bar
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopStart),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { navController.popBackStack() }) { 
+                            Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) 
+                        }
+                        
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (decodedUrl.startsWith("magnet")) {
+                                Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 12.dp)) {
+                                    Text("▼ $downloadSpeed", color = Color.Green, fontSize = 12.sp)
+                                    Text("S: $seeds", color = Color.LightGray, fontSize = 10.sp)
+                                }
+                            }
+                            Button(
+                                onClick = { isAiEnabled = !isAiEnabled },
+                                colors = ButtonDefaults.buttonColors(containerColor = if(isAiEnabled) Color.Green else Color.DarkGray),
+                                contentPadding = PaddingValues(horizontal = 10.dp),
+                                modifier = Modifier.height(35.dp)
+                            ) { Text("AI", color = Color.Black, fontSize = 12.sp) }
+                            
+                            IconButton(onClick = { showSubtitleSettings = true }) {
+                                Icon(Icons.Rounded.Palette, "Style", tint = Color.White)
+                            }
+                            IconButton(onClick = {
+                                resizeMode = if (resizeMode == AspectRatioFrameLayout.RESIZE_MODE_FIT) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+                            }) { Icon(Icons.Rounded.AspectRatio, "Resize", tint = Color.White) }
                         }
                     }
-                    // Buttons
-                    Row {
-                         Button(onClick = { isAiEnabled = !isAiEnabled },
-                            colors = ButtonDefaults.buttonColors(containerColor = if(isAiEnabled) Color.Green else Color.DarkGray),
-                            modifier = Modifier.height(35.dp)) { Text("AI", color = Color.Black, fontSize = 12.sp) }
-                         IconButton(onClick = { showSubtitleSettings = true }) { Icon(Icons.Rounded.Palette, null, tint = Color.White) }
-                         IconButton(onClick = {
-                            resizeMode = if (resizeMode == AspectRatioFrameLayout.RESIZE_MODE_FIT) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        }) { Icon(Icons.Rounded.AspectRatio, null, tint = Color.White) }
-                    }
-                }
 
-                // Center Area (Play/Pause & Buffer)
-                Box(Modifier.align(Alignment.Center)) {
-                    // Show Buffering Spinner if buffering, BUT allow controls to be seen underneath or allow interaction
-                    if (isBuffering) {
-                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(50.dp))
-                    } else if (!isLocked) {
-                        // Play/Pause only if NOT buffering (or you can choose to show both)
-                        Row(horizontalArrangement = Arrangement.spacedBy(50.dp)) {
+                    // Center Play/Pause
+                    if (!isLocked && !isBuffering) {
+                        Row(modifier = Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(50.dp)) {
                             IconButton(onClick = { exoPlayer?.seekTo((exoPlayer?.currentPosition ?: 0) - 10000) }) {
-                                Icon(Icons.Rounded.Replay10, null, tint = Color.White, modifier = Modifier.size(48.dp))
+                                Icon(Icons.Rounded.Replay10, "Rewind", tint = Color.White, modifier = Modifier.size(48.dp))
                             }
                             IconButton(onClick = { if (isPlaying) exoPlayer?.pause() else exoPlayer?.play() }) {
-                                Icon(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(64.dp))
+                                Icon(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(64.dp))
                             }
                             IconButton(onClick = { exoPlayer?.seekTo((exoPlayer?.currentPosition ?: 0) + 10000) }) {
-                                Icon(Icons.Rounded.Forward10, null, tint = Color.White, modifier = Modifier.size(48.dp))
+                                Icon(Icons.Rounded.Forward10, "Forward", tint = Color.White, modifier = Modifier.size(48.dp))
                             }
                         }
                     }
-                }
 
-                // Lock Button
-                IconButton(onClick = { isLocked = !isLocked }, modifier = Modifier.align(Alignment.CenterEnd).padding(32.dp)) { 
-                    Icon(if (isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, null, tint = if (isLocked) Color.Red else Color.White) 
-                }
+                    // Lock Button
+                    IconButton(
+                        onClick = { isLocked = !isLocked },
+                        modifier = Modifier.align(Alignment.CenterEnd).padding(32.dp)
+                    ) { 
+                        Icon(
+                            if (isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, 
+                            "Lock", 
+                            tint = if (isLocked) Color.Red else Color.White
+                        ) 
+                    }
 
-                // Bottom Seekbar
-                if (!isLocked) {
-                    Column(modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(16.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(formatTime(currentTime), color = Color.White, fontSize = 12.sp)
-                            Text(formatTime(totalDuration), color = Color.White, fontSize = 12.sp)
+                    // Bottom Seekbar
+                    if (!isLocked) {
+                        Column(modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(16.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(formatTime(currentTime), color = Color.White, fontSize = 12.sp)
+                                Text(formatTime(totalDuration), color = Color.White, fontSize = 12.sp)
+                            }
+                            Slider(
+                                value = currentTime.toFloat(),
+                                onValueChange = { exoPlayer?.seekTo(it.toLong()) },
+                                valueRange = 0f..max(1f, totalDuration.toFloat()),
+                                colors = SliderDefaults.colors(thumbColor = Color.Cyan, activeTrackColor = Color.Cyan)
+                            )
                         }
-                        Slider(
-                            value = currentTime.toFloat(),
-                            onValueChange = { exoPlayer?.seekTo(it.toLong()) },
-                            valueRange = 0f..max(1f, totalDuration.toFloat()),
-                            colors = SliderDefaults.colors(thumbColor = Color.Cyan, activeTrackColor = Color.Cyan)
-                        )
                     }
                 }
             }
