@@ -26,8 +26,18 @@ jobs:
         with:
           ndk-version: '25.2.9519653'
 
-      - name: Set NDK Env
-        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
+      - name: Set NDK Env and vcpkg chainload
+        run: |
+          # Set the NDK root used by vcpkg and CMake
+          echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/25.2.9519653" >> $GITHUB_ENV
+          echo "VCPKG_CHAINLOAD_TOOLCHAIN_FILE=/usr/local/lib/android/sdk/ndk/25.2.9519653/build/cmake/android.toolchain.cmake" >> $GITHUB_ENV
+          # Optional default triplet; CMakeLists already sets VCPKG_TARGET_TRIPLET per-ABI
+          echo "VCPKG_DEFAULT_TRIPLET=arm-android" >> $GITHUB_ENV
+          # Print to logs for troubleshooting
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+          echo "VCPKG_CHAINLOAD_TOOLCHAIN_FILE=$VCPKG_CHAINLOAD_TOOLCHAIN_FILE"
+          echo "VCPKG_DEFAULT_TRIPLET=$VCPKG_DEFAULT_TRIPLET"
+          env | grep -E 'ANDROID_NDK_HOME|VCPKG|ANDROID_HOME' || true
           
       # FIX: Cache key bumped to 'v5' to clear old mismatch artifacts
       - name: Restore vcpkg artifacts
