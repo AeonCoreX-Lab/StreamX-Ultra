@@ -3,6 +3,7 @@ package com.aeoncorex.streamx
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -21,11 +22,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // --- 1. SMART CACHE CLEAN ON STARTUP ---
-        // Removes old temp files if the app crashed previously
+        // ১. লেটেস্ট অ্যান্ড্রয়েড ১৫ স্টাইল এজ-টু-এজ সাপোর্ট
+        enableEdgeToEdge()
+        
+        // ২. পুরোনো ক্র্যাশ বা অবশিষ্টাংশ পরিষ্কার করা
         TorrentEngine.clearCache(applicationContext)
         
-        // --- Music Player Initialize ---
+        // ৩. মিউজিক ইঞ্জিন ইনিশিয়ালাইজ
         MusicManager.initialize(applicationContext)
 
         setContent {
@@ -50,9 +53,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
+        // রিলিজ রিসোর্স এবং ক্যাশ ক্লিনআপ
         MusicManager.release()
-        // --- 2. AUTO CLEAR CACHE ON EXIT ---
+        TorrentEngine.stop()
         TorrentEngine.clearCache(applicationContext)
+        super.onDestroy()
     }
 }

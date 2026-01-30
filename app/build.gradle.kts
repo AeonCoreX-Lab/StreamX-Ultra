@@ -6,45 +6,41 @@ plugins {
 
 android {
     namespace = "com.aeoncorex.streamx"
-    compileSdk = 34
+    // Android 15 (Vanilla Ice Cream) এর জন্য API 35 ব্যবহার করা হয়েছে
+    compileSdk = 35 
     ndkVersion = "25.2.9519653"
 
     defaultConfig {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 24
-        targetSdk = 34
-        versionCode = 5 // ভার্সন কোড বাড়ানো হয়েছে
-        versionName = "1.2.2"
+        targetSdk = 35 // লেটেস্ট অ্যান্ড্রয়েড সাপোর্ট
+        versionCode = 4
+        versionName = "1.2.1" // মেজর ইঞ্জিন আপডেট
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         vectorDrawables {
             useSupportLibrary = true
         }
 
-        // --- C++ NATIVE CONFIG ---
         externalNativeBuild {
             cmake {
-                // FIX: প্রথমে Undefine (-U) করে তারপর Define (-D) করা হয়েছে যাতে ওয়ার্নিং না আসে
                 cppFlags("-std=c++17", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0")
-
+                
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
                 val envNdk = System.getenv("ANDROID_NDK_HOME")
                 val ndkPath = if (!envNdk.isNullOrBlank()) envNdk else android.ndkDirectory.absolutePath
-
-                println("StreamX Build: Using NDK Path -> $ndkPath")
 
                 arguments(
                     "-DANDROID_STL=c++_shared",
                     "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake",
                     "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ndkPath/build/cmake/android.toolchain.cmake",
-                    "-DVCPKG_TARGET_TRIPLET=arm64-android",
-                    "-DANDROID_ABI=arm64-v8a",
                     "-DANDROID_PLATFORM=android-24",
-                    // লিঙ্কার ফ্ল্যাগ ফিক্স
                     "-D_FORTIFY_SOURCE=0"
                 )
 
-                abiFilters("arm64-v8a")
+                // সব ধরণের ফোনের (Old & New) সাপোর্ট নিশ্চিত করতে:
+                abiFilters("arm64-v8a", "armeabi-v7a", "x86_64")
             }
         }
 
@@ -74,10 +70,20 @@ android {
             }
         }
     }
+    
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = true // একটি মাত্র APK তে সব সাপোর্ট চাইলে এটি true রাখুন
+        }
+    }
 
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true // অপ্রয়োজনীয় ফাইল বাদ দিয়ে সাইজ কমাবে
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }
