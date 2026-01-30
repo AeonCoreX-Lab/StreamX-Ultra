@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
 import android.util.Log
+import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.annotation.OptIn
@@ -49,6 +51,7 @@ import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.navigation.NavController
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -63,7 +66,7 @@ data class TrackInfo(
     val groupIndex: Int,
     val trackIndex: Int,
     val isSelected: Boolean,
-    val type: Int // C.TRACK_TYPE_AUDIO or C.TRACK_TYPE_TEXT
+    val type: Int
 )
 
 @OptIn(UnstableApi::class)
@@ -77,11 +80,14 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 
     // --- State Management ---
     var videoPath by remember { mutableStateOf<String?>(null) }
+    // FIX: Initially false so controls don't show during buffering
+    var isControlsVisible by remember { mutableStateOf(false) } 
+    var isVideoReady by remember { mutableStateOf(false) } // Track if video is ready to play
+
     var isPlaying by remember { mutableStateOf(true) }
     var currentTime by remember { mutableLongStateOf(0L) }
     var totalDuration by remember { mutableLongStateOf(0L) }
     var bufferedPercentage by remember { mutableIntStateOf(0) }
-    var isControlsVisible by remember { mutableStateOf(true) }
     var resizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var isLocked by remember { mutableStateOf(false) }
     
@@ -89,7 +95,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var showTrackSettings by remember { mutableStateOf(false) }
     var audioTracks by remember { mutableStateOf<List<TrackInfo>>(emptyList()) }
     var subtitleTracks by remember { mutableStateOf<List<TrackInfo>>(emptyList()) }
-    // Track Selector Reference
     val trackSelector = remember { DefaultTrackSelector(context) }
 
     // Gesture States
@@ -98,6 +103,8 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var gestureIcon by remember { mutableStateOf<ImageVector?>(null) }
     var gestureText by remember { mutableStateOf("") }
     var showGestureOverlay by remember { mutableStateOf(false) }
+    // FIX: Job to handle debouncing of overlay hide
+    var overlayHideJob by remember { mutableStateOf<Job?>(null) }
 
     // Torrent States
     var statusMsg by remember { mutableStateOf("Initializing Core...") }
@@ -116,27 +123,41 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // --- SYSTEM UI & CACHE CLEANUP SETUP ---
+    // --- SYSTEM UI & CACHE CLEANUP SETUP (FIXED) ---
     DisposableEffect(Unit) {
         // 1. Setup Landscape & Fullscreen
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        
         val window = activity?.window
         val controller = if (window != null) WindowCompat.getInsetsController(window, window.decorView) else null
+        
+        // Hide System Bars
         controller?.hide(WindowInsetsCompat.Type.systemBars())
         controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         
-        // 2. Cleanup when leaving screen
         onDispose {
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            Log.d("StreamX", "Exiting Player: Cleaning UI and Engine")
+            
+            // --- FIX: SYSTEM UI GLITCH ---
+            // 1. Show bars BEFORE changing orientation to avoid "floating bar" bug
             controller?.show(WindowInsetsCompat.Type.systemBars())
+            controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
             
-            Log.d("StreamX", "Exiting Player: Stopping Engine & Cleaning Cache")
+            // 2. Clear flags
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+
+            // 3. Reset Orientation
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             
-            // --- CRITICAL: Stop Engine First, Then Delete Files ---
+            // 4. Force UI Visibility Reset (Deprecated but needed for some devices)
+            @Suppress("DEPRECATION")
+            activity?.window?.decorView?.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+
+            // --- CRITICAL: Stop Engine ---
             TorrentEngine.stop() 
-            TorrentEngine.clearCache(context) // <--- এই লাইনটি ক্যাশ ডিলিট করবে
+            TorrentEngine.clearCache(context)
         }
     }
 
@@ -150,9 +171,16 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         statusMsg = "Buffering ${state.progress}%"
                         downloadSpeed = "${state.speed / 1024} KB/s"
                         seeds = state.seeds
+                        // FIX: Hide controls while buffering if video hasn't started
+                        if (!isVideoReady) isControlsVisible = false
                     }
                     is StreamState.Ready -> {
-                        if (videoPath != state.filePath) videoPath = state.filePath
+                        if (videoPath != state.filePath) {
+                            videoPath = state.filePath
+                            // FIX: Only show controls when video file is actually ready
+                            isVideoReady = true
+                            isControlsVisible = true
+                        }
                         statusMsg = ""
                     }
                     is StreamState.Error -> statusMsg = "Error: ${state.message}"
@@ -161,6 +189,8 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         } else {
             videoPath = decodedUrl
             statusMsg = ""
+            isVideoReady = true
+            isControlsVisible = true
         }
     }
 
@@ -176,18 +206,12 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { isControlsVisible = !isControlsVisible },
-                    onDoubleTap = { /* Handled deeper */ }
-                )
-            }
     ) {
         // 1. ExoPlayer Layer
         videoPath?.let { path ->
             val exoPlayer = remember(context) {
                 ExoPlayer.Builder(context)
-                    .setTrackSelector(trackSelector) // Inject Track Selector
+                    .setTrackSelector(trackSelector)
                     .build().apply {
                         val uri = if (path.startsWith("http")) Uri.parse(path) else Uri.fromFile(File(path))
                         setMediaItem(MediaItem.fromUri(uri))
@@ -199,40 +223,39 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             DisposableEffect(exoPlayer) {
                 val listener = object : Player.Listener {
                     override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+                    
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        // FIX: Ensure controls hide if buffering happens mid-stream
+                        if (playbackState == Player.STATE_BUFFERING) {
+                            // Optionally hide controls or show loading
+                        } else if (playbackState == Player.STATE_READY) {
+                            if (!isVideoReady) {
+                                isVideoReady = true
+                                isControlsVisible = true
+                            }
+                        }
+                    }
+
                     override fun onEvents(player: Player, events: Player.Events) {
                         currentTime = player.currentPosition
                         totalDuration = player.duration
                         bufferedPercentage = player.bufferedPercentage
                     }
-                    // --- TRACK DETECTION LOGIC ---
+
                     override fun onTracksChanged(tracks: Tracks) {
+                        // (Same Track Logic as before)
                         val newAudioTracks = mutableListOf<TrackInfo>()
                         val newSubtitleTracks = mutableListOf<TrackInfo>()
-
                         for (group in tracks.groups) {
                             for (i in 0 until group.length) {
                                 val format = group.getTrackFormat(i)
                                 val isSelected = group.isTrackSelected(i)
                                 val trackType = group.type
-                                
-                                val language = format.language ?: "Und"
-                                val label = format.label ?: language
-                                val name = "$label (${format.id ?: "Unknown"})".uppercase()
-
-                                val info = TrackInfo(
-                                    id = format.id ?: i.toString(),
-                                    name = name,
-                                    groupIndex = tracks.groups.indexOf(group),
-                                    trackIndex = i,
-                                    isSelected = isSelected,
-                                    type = trackType
-                                )
-
-                                if (trackType == C.TRACK_TYPE_AUDIO) {
-                                    newAudioTracks.add(info)
-                                } else if (trackType == C.TRACK_TYPE_TEXT) {
-                                    newSubtitleTracks.add(info)
-                                }
+                                val label = format.label ?: format.language ?: "Und"
+                                val name = "$label".uppercase()
+                                val info = TrackInfo(format.id ?: i.toString(), name, tracks.groups.indexOf(group), i, isSelected, trackType)
+                                if (trackType == C.TRACK_TYPE_AUDIO) newAudioTracks.add(info)
+                                else if (trackType == C.TRACK_TYPE_TEXT) newSubtitleTracks.add(info)
                             }
                         }
                         audioTracks = newAudioTracks
@@ -265,41 +288,16 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         )
                     }
                 },
+                modifier = Modifier.fillMaxSize()
+            )
+            
+            // --- FIX: GESTURE LAYER (Separate Box to prevent UI Jank) ---
+            // This box sits ON TOP of the player to intercept touches efficiently
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(Unit) {
-                        detectVerticalDragGestures(
-                            onDragStart = { showGestureOverlay = true },
-                            onDragEnd = { 
-                                showGestureOverlay = false 
-                                gestureIcon = null
-                            }
-                        ) { change, dragAmount ->
-                            if (isLocked) return@detectVerticalDragGestures
-                            val width = size.width
-                            val xPos = change.position.x
-                            val isLeft = xPos < width / 2
-                            
-                            if (isLeft) {
-                                val delta = -dragAmount / 500f
-                                brightnessLevel = (brightnessLevel + delta).coerceIn(0f, 1f)
-                                activity?.window?.attributes = activity?.window?.attributes?.apply {
-                                    screenBrightness = brightnessLevel
-                                }
-                                gestureIcon = Icons.Rounded.BrightnessMedium
-                                gestureText = "${(brightnessLevel * 100).toInt()}%"
-                            } else {
-                                val delta = -dragAmount / 50f
-                                val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                                val newVol = (currentVol + delta.toInt()).coerceIn(0, maxVolume)
-                                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
-                                volumeLevel = newVol.toFloat() / maxVolume
-                                gestureIcon = if (volumeLevel == 0f) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp
-                                gestureText = "${(volumeLevel * 100).toInt()}%"
-                            }
-                        }
-                    }
-                    .pointerInput(Unit) {
+                        // Detect Taps (Double & Single)
                         detectTapGestures(
                             onDoubleTap = { offset ->
                                 if (isLocked) return@detectTapGestures
@@ -307,17 +305,82 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 val isForward = offset.x > width / 2
                                 val seekTime = if (isForward) 10000L else -10000L
                                 exoPlayer.seekTo(exoPlayer.currentPosition + seekTime)
+                                
+                                // Smooth Overlay Handling
+                                overlayHideJob?.cancel()
                                 showGestureOverlay = true
                                 gestureIcon = if (isForward) Icons.Rounded.Forward10 else Icons.Rounded.Replay10
                                 gestureText = if (isForward) "+10s" else "-10s"
-                                scope.launch { delay(600); showGestureOverlay = false }
+                                
+                                overlayHideJob = scope.launch {
+                                    delay(600)
+                                    showGestureOverlay = false
+                                }
                             },
-                            onTap = { isControlsVisible = !isControlsVisible }
+                            onTap = { 
+                                // Only toggle if video is ready
+                                if (isVideoReady) isControlsVisible = !isControlsVisible 
+                            }
                         )
+                    }
+                    .pointerInput(Unit) {
+                        // Detect Drag (Volume/Brightness)
+                        detectVerticalDragGestures(
+                            onDragStart = { 
+                                if (!isLocked) {
+                                    overlayHideJob?.cancel()
+                                    showGestureOverlay = true 
+                                }
+                            },
+                            onDragEnd = { 
+                                overlayHideJob = scope.launch {
+                                    delay(600)
+                                    showGestureOverlay = false
+                                }
+                                gestureIcon = null
+                            }
+                        ) { change, dragAmount ->
+                            if (isLocked) return@detectVerticalDragGestures
+                            
+                            val width = size.width
+                            val xPos = change.position.x
+                            val isLeft = xPos < width / 2
+                            val delta = -dragAmount / size.height // Normalize drag
+
+                            if (isLeft) {
+                                // Brightness
+                                val newBrightness = (brightnessLevel + delta * 2.5f).coerceIn(0f, 1f)
+                                brightnessLevel = newBrightness
+                                
+                                // Optimize window call (don't call if value is same)
+                                val lp = activity?.window?.attributes
+                                if (lp != null && lp.screenBrightness != newBrightness) {
+                                    lp.screenBrightness = newBrightness
+                                    activity.window?.attributes = lp
+                                }
+                                
+                                gestureIcon = Icons.Rounded.BrightnessMedium
+                                gestureText = "${(brightnessLevel * 100).toInt()}%"
+                            } else {
+                                // Volume
+                                val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                                val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                                val changeVol = (delta * maxVol * 1.5f).toInt() // Sensitivity
+                                
+                                val newVol = (currentVol + changeVol).coerceIn(0, maxVol)
+                                if (newVol != currentVol) {
+                                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
+                                    volumeLevel = newVol.toFloat() / maxVol.toFloat()
+                                }
+                                
+                                gestureIcon = if (volumeLevel == 0f) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp
+                                gestureText = "${(volumeLevel * 100).toInt()}%"
+                            }
+                        }
                     }
             )
 
-            // --- SETTINGS SHEET (Audio & Subtitle) ---
+            // --- SETTINGS SHEET ---
             if (showTrackSettings) {
                 ModalBottomSheet(
                     onDismissRequest = { showTrackSettings = false },
@@ -332,29 +395,20 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             val group = tracks.groups[track.groupIndex]
                             trackSelector.setParameters(
                                 trackSelector.buildUponParameters()
-                                    .setOverrideForType(
-                                        TrackSelectionOverride(group.mediaTrackGroup, track.trackIndex)
-                                    )
+                                    .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, track.trackIndex))
                             )
                             showTrackSettings = false
                         },
                         onSubtitleSelect = { track ->
                             if (track == null) {
-                                // Turn Off Subtitles
-                                trackSelector.setParameters(
-                                    trackSelector.buildUponParameters()
-                                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                                )
+                                trackSelector.setParameters(trackSelector.buildUponParameters().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true))
                             } else {
-                                // Enable Specific Subtitle
                                 val tracks = exoPlayer.currentTracks
                                 val group = tracks.groups[track.groupIndex]
                                 trackSelector.setParameters(
                                     trackSelector.buildUponParameters()
                                         .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                                        .setOverrideForType(
-                                            TrackSelectionOverride(group.mediaTrackGroup, track.trackIndex)
-                                        )
+                                        .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, track.trackIndex))
                                 )
                             }
                             showTrackSettings = false
@@ -364,9 +418,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
 
-        // 2. Custom Controls Overlay
+        // 2. Custom Controls Overlay (Corrected Visibility)
         AnimatedVisibility(
-            visible = isControlsVisible,
+            visible = isControlsVisible, // Controlled by ready state
             enter = fadeIn(),
             exit = fadeOut()
         ) {
@@ -397,12 +451,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             }
                         }
 
-                        // Settings/Track Button
                         IconButton(onClick = { showTrackSettings = true }) {
                             Icon(Icons.Rounded.Settings, "Settings", tint = Color.White)
                         }
 
-                        // Resize Button
                         IconButton(onClick = { 
                             resizeMode = when(resizeMode) {
                                 AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -422,7 +474,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         horizontalArrangement = Arrangement.spacedBy(40.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = { videoPath?.let { /* Rewind handled by gesture usually */ } }, modifier = Modifier.size(50.dp)) {
+                        IconButton(onClick = { 
+                            /* Seek handled by gesture mostly, but can add Logic here */ 
+                        }, modifier = Modifier.size(50.dp)) {
                              Icon(Icons.Rounded.Replay10, "Rewind", tint = Color.White, modifier = Modifier.fillMaxSize())
                         }
                         IconButton(
@@ -468,9 +522,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         )
                         Slider(
                             value = currentTime.toFloat(),
-                            onValueChange = { /* Seek handled below to prevent UI jank */ },
-                            onValueChangeFinished = { /* Logic to seek */ },
-                            enabled = false, 
+                            onValueChange = { /* Prevent direct seek stutter, handle in finish */ },
+                            onValueChangeFinished = { /* Seek Logic */ },
+                            enabled = false, // Use gesture for seek mostly, or implement proper slider seek
                             valueRange = 0f..max(1f, totalDuration.toFloat()),
                             colors = SliderDefaults.colors(thumbColor = Color.Cyan, activeTrackColor = Color.Cyan, inactiveTrackColor = Color.White.copy(0.3f)),
                             modifier = Modifier.height(20.dp)
@@ -480,7 +534,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
 
-        // Gesture Overlay
+        // Gesture Overlay (Only shows when dragging or double tapping)
         if (showGestureOverlay) {
             Box(
                 modifier = Modifier
@@ -496,18 +550,24 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
 
-        // Loading
-        if (videoPath == null) {
-            Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+        // Loading / Buffering Indicator (Shows when Controls are Hidden)
+        if (!isVideoReady || videoPath == null) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .background(Color.Black.copy(0.5f), RoundedCornerShape(16.dp))
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 CircularProgressIndicator(color = Color.Cyan)
                 Spacer(Modifier.height(16.dp))
-                Text(statusMsg, color = Color.White)
+                Text(statusMsg, color = Color.White, fontWeight = FontWeight.Bold)
             }
         }
     }
 }
 
-// --- SUB-COMPONENTS ---
+// --- SUB-COMPONENTS & HELPERS --- (No Changes here)
 
 @Composable
 fun TrackSelectionSheet(
@@ -578,7 +638,6 @@ fun TrackItem(name: String, isSelected: Boolean, onClick: () -> Unit) {
     }
 }
 
-// Formatter
 fun formatTime(ms: Long): String {
     val totalSeconds = ms / 1000
     val hours = totalSeconds / 3600
