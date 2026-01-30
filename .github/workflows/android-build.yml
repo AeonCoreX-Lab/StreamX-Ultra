@@ -26,29 +26,19 @@ jobs:
         with:
           ndk-version: '25.2.9519653'
 
-      - name: Set NDK Env and vcpkg chainload
-        run: |
-          # Set the NDK root used by vcpkg and CMake (persist to job env)
-          echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/25.2.9519653" >> $GITHUB_ENV
-          echo "VCPKG_CHAINLOAD_TOOLCHAIN_FILE=/usr/local/lib/android/sdk/ndk/25.2.9519653/build/cmake/android.toolchain.cmake" >> $GITHUB_ENV
-          # Optional default triplet; CMakeLists already sets VCPKG_TARGET_TRIPLET per-ABI
-          echo "VCPKG_DEFAULT_TRIPLET=arm-android" >> $GITHUB_ENV
-          # Print to logs for troubleshooting
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
-          echo "VCPKG_CHAINLOAD_TOOLCHAIN_FILE=$VCPKG_CHAINLOAD_TOOLCHAIN_FILE"
-          echo "VCPKG_DEFAULT_TRIPLET=$VCPKG_DEFAULT_TRIPLET"
-          env | grep -E 'ANDROID_NDK_HOME|VCPKG|ANDROID_HOME' || true
+      - name: Set NDK Env
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
           
-      # FIX: Cache key bumped to 'v6' to clear old mismatch artifacts
+      # FIX: Cache key bumped to 'v4' to force clean build with new shim and flags
       - name: Restore vcpkg artifacts
         uses: actions/cache@v3
         with:
           path: |
             ~/.cache/vcpkg/archives
             vcpkg_installed
-          key: ${{ runner.os }}-vcpkg-v6-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
+          key: ${{ runner.os }}-vcpkg-v4-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
           restore-keys: |
-            ${{ runner.os }}-vcpkg-v5-
+            ${{ runner.os }}-vcpkg-v4-
 
       - name: Get latest vcpkg commit ID
         id: vcpkg-git
@@ -65,11 +55,6 @@ jobs:
           vcpkgGitURL: https://github.com/microsoft/vcpkg.git
           vcpkgGitCommitId: ${{ steps.vcpkg-git.outputs.commit_id }}
           doNotUpdateVcpkg: false
-
-      - name: Export VCPKG_ROOT for subsequent CMake/Gradle runs
-        run: |
-          echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" >> $GITHUB_ENV
-          echo "VCPKG_ROOT set to $VCPKG_ROOT"
 
       - name: Create google-services.json
         env:
