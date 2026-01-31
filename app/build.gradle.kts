@@ -158,7 +158,6 @@ dependencies {
         exclude(group = "com.google.protobuf", module = "protobuf-lite")
     }
     implementation("com.google.android.gms:play-services-auth:21.0.0")
-    implementation("com.facebook.android:facebook-login:16.3.0")
 
     // Media3 (ExoPlayer)
     implementation("androidx.media3:media3-exoplayer:1.3.1")
