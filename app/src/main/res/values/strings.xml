@@ -1,19 +1,6 @@
 <resources>
-    <!-- অ্যাপের নাম -->
     <string name="app_name">StreamX Ultra</string>
     
-    <!-- ====================================================== -->
-    <!-- ============== Google Sign-In-এর জন্য ============== -->
-    <!-- ====================================================== -->
     <string name="default_web_client_id" translatable="false">948787109880-b9qkqm2gc4fvjcil49ijpuj4c4li8e90.apps.googleusercontent.com</string>
-    
 
-    <!-- ======================================================= -->
-    <!-- ============== Facebook Sign-In-এর জন্য ============== -->
-    <!-- ======================================================= -->
-    <!-- TODO: এই মানগুলো আপনার Facebook App ড্যাশবোর্ড থেকে নিন -->
-    <string name="facebook_app_id" translatable="false">1425428049024981</string>
-    <string name="facebook_client_token" translatable="false">100ca96ac2f1a6c174155de0e0010b75</string>
-    <string name="fb_login_protocol_scheme" translatable="false">fb1425428049024981</string>
-
-</resources>
+    </resources>
