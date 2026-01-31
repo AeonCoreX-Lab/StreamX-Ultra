@@ -7,7 +7,7 @@
   <h1 align="center">StreamX Ultra</h1>
   <p align="center">
     <strong>Next-Generation Live TV & Streaming Platform</strong><br />
-    Built with ❤️ by <a href="https://github.com/cybernahid-dev"><strong>AeonCoreX</strong></a>
+    Built with ❤️ by <a href="https://github.com/AeonCoreX-Lab"><strong>AeonCoreX</strong></a>
   </p>
 
   <p align="center">
