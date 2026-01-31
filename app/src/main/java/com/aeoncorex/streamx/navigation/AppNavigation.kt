@@ -11,6 +11,7 @@ import com.aeoncorex.streamx.ui.auth.AuthScreen
 import com.aeoncorex.streamx.ui.main.MainScreen
 import com.aeoncorex.streamx.ui.settings.SettingsScreen
 import com.aeoncorex.streamx.ui.splash.SplashScreen
+import com.aeoncorex.streamx.ui.onboarding.OnboardingScreen
 import com.aeoncorex.streamx.ui.theme.ThemeScreen
 import com.aeoncorex.streamx.ui.theme.ThemeViewModel
 import com.aeoncorex.streamx.ui.privacy.PrivacyPolicyScreen
@@ -35,6 +36,7 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
     
     NavHost(navController = navController, startDestination = "splash") {
         composable("splash") { SplashScreen(navController) }
+        composable("onboarding") { OnboardingScreen(navController) }
         composable("auth") { AuthScreen(navController) }
         composable("home") { MainScreen(navController) }
         

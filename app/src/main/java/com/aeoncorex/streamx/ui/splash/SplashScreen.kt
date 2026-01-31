@@ -1,5 +1,6 @@
 package com.aeoncorex.streamx.ui.splash
 
+import android.content.Context
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -15,6 +16,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -26,9 +28,10 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun SplashScreen(navController: NavController) {
+    val context = LocalContext.current
     var startAnimation by remember { mutableStateOf(false) }
 
-    // --- অ্যানিমেশনের জন্য স্টেট ভ্যারিয়েবল (Smoother Easing) ---
+    // --- Animations ---
     val scaleAnim by animateFloatAsState(
         targetValue = if (startAnimation) 1f else 0.8f,
         animationSpec = tween(durationMillis = 1200, easing = FastOutSlowInEasing), label = "scale"
@@ -37,7 +40,6 @@ fun SplashScreen(navController: NavController) {
         targetValue = if (startAnimation) 1f else 0f,
         animationSpec = tween(durationMillis = 1000), label = "alpha"
     )
-
     val textOffsetY by animateDpAsState(
         targetValue = if (startAnimation) 0.dp else 50.dp,
         animationSpec = tween(durationMillis = 1200, delayMillis = 300, easing = FastOutSlowInEasing), label = "textOffset"
@@ -47,20 +49,29 @@ fun SplashScreen(navController: NavController) {
         animationSpec = tween(durationMillis = 1200, delayMillis = 300), label = "textAlpha"
     )
 
-    // --- অ্যানিমেশন এবং নেভিগেশন ---
+    // --- Navigation Logic ---
     LaunchedEffect(key1 = true) {
         startAnimation = true
-        delay(3000) // মোট সময়
-        
-        val currentUser = FirebaseAuth.getInstance().currentUser
-        val destination = if (currentUser != null) "home" else "auth"
+        delay(3000) // Splash time
+
+        // 1. Check if Onboarding is finished
+        val sharedPref = context.getSharedPreferences("StreamXPrefs", Context.MODE_PRIVATE)
+        val isOnboardingFinished = sharedPref.getBoolean("FinishedOnboarding", false)
+
+        // 2. Determine Destination
+        val destination = if (!isOnboardingFinished) {
+            "onboarding" // First time user
+        } else {
+            val currentUser = FirebaseAuth.getInstance().currentUser
+            if (currentUser != null) "home" else "auth" // Returning user
+        }
         
         navController.navigate(destination) {
             popUpTo("splash") { inclusive = true }
         }
     }
 
-    // --- UI Theme Colors (Matching the new Logo) ---
+    // --- UI Theme ---
     val darkBlue = Color(0xFF0A0A1E)
     val black = Color(0xFF000000)
 
@@ -70,18 +81,16 @@ fun SplashScreen(navController: NavController) {
             .background(Brush.verticalGradient(colors = listOf(darkBlue, black))),
         contentAlignment = Alignment.Center
     ) {
-        // প্রধান নতুন লোগো
         Image(
-            painter = painterResource(id = R.drawable.streamx_ultra_logo), // আপনার নতুন লোগো
+            painter = painterResource(id = R.drawable.streamx_ultra_logo),
             contentDescription = "StreamX Ultra Logo",
             modifier = Modifier
-                .fillMaxWidth(0.7f) // স্ক্রিনের প্রস্থের ৭০% জুড়ে থাকবে
-                .aspectRatio(1f) // স্কয়ার শেইপ মেইনটেইন করবে
+                .fillMaxWidth(0.7f)
+                .aspectRatio(1f)
                 .graphicsLayer(scaleX = scaleAnim, scaleY = scaleAnim)
                 .alpha(alphaAnim)
         )
 
-        // নিচের ব্র্যান্ডিং
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -90,28 +99,15 @@ fun SplashScreen(navController: NavController) {
                 .alpha(textAlpha),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = "From",
-                color = Color.Gray,
-                fontSize = 12.sp
-            )
+            Text(text = "From", color = Color.Gray, fontSize = 12.sp)
             Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // যদি AeonCoreX এর লোগো থাকে তবে এটি আনকমেন্ট করুন
-                 Image(
-                    painter = painterResource(id = R.drawable.aeoncorex_logo),
-                    contentDescription = "AeonCoreX Logo",
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp)) 
-                Text(
-                    text = "AeonCoreX Labs",
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp
-                )
-            }
+            Text(
+                text = "AeonCoreX Labs",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
         }
     }
 }
