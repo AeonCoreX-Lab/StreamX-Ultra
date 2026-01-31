@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -23,6 +24,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
@@ -81,6 +83,7 @@ val onboardingPages = listOf(
     )
 )
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun OnboardingScreen(navController: NavController) {
     val context = LocalContext.current
@@ -330,7 +333,8 @@ fun TechMovieGraphic(color: Color) {
             close()
         }
         drawPath(path, color)
-        drawPath(path, style = Stroke(width = 4f, color = Color.White))
+        // FIXED: Moved color out of Stroke and into drawPath
+        drawPath(path, color = Color.White, style = Stroke(width = 4f))
     }
 }
 
@@ -344,6 +348,7 @@ fun TechTVGraphic(color: Color) {
         drawRoundRect(
             color = color,
             style = Stroke(width = 6.dp.toPx()),
+            // FIXED: CornerRadius is now imported
             cornerRadius = CornerRadius(20f, 20f),
             size = Size(w, h * 0.7f),
             topLeft = Offset(0f, h * 0.15f)
@@ -388,7 +393,9 @@ fun TechShieldGraphic(color: Color) {
         }
         
         drawPath(shieldPath, color.copy(alpha = 0.2f))
-        drawPath(shieldPath, style = Stroke(width = 6.dp.toPx(), color = color))
+        
+        // FIXED: Moved color out of Stroke and into drawPath
+        drawPath(shieldPath, color = color, style = Stroke(width = 6.dp.toPx()))
         
         // Cross / Block symbol inside
         drawLine(
