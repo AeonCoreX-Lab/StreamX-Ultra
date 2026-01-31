@@ -370,10 +370,11 @@ fun FuturisticButton(text: String, isLoading: Boolean, onClick: () -> Unit) {
         contentPadding = PaddingValues() // Gradient দেখানোর জন্য প্যাডিং জিরো করা
     ) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            AnimatedVisibility(visible = isLoading, enter = fadeIn(), exit = fadeOut()) {
+            // Fix: Using fully qualified name to avoid Scope ambiguity between RowScope (from Button) and BoxScope
+            androidx.compose.animation.AnimatedVisibility(visible = isLoading, enter = fadeIn(), exit = fadeOut()) {
                 CircularProgressIndicator(modifier = Modifier.size(24.dp), color = TextWhite, strokeWidth = 2.dp)
             }
-            AnimatedVisibility(visible = !isLoading, enter = fadeIn(), exit = fadeOut()) {
+            androidx.compose.animation.AnimatedVisibility(visible = !isLoading, enter = fadeIn(), exit = fadeOut()) {
                 Text(text, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextWhite, letterSpacing = 1.sp)
             }
         }
@@ -422,7 +423,7 @@ private suspend fun handleGoogleSignInResult(result: ActivityResult, onSuccess: 
         val account = GoogleSignIn.getSignedInAccountFromIntent(result.data).await()
         val credential = GoogleAuthProvider.getCredential(account.idToken!!, null)
         Firebase.auth.signInWithCredential(credential).await()
-        Log.d("AuthScreen", "Google sign-in to Firebase successful.")
+        Log.d("AuthScreen", "Google sign-in successful.")
         onSuccess()
     } catch (e: Exception) {
         Log.w("AuthScreen", "Google sign-in failed.", e)

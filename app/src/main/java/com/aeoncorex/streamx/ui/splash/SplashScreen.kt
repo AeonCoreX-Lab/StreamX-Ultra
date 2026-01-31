@@ -103,7 +103,7 @@ fun SplashScreen(navController: NavController) {
                     contentDescription = "AeonCoreX Logo",
                     modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp)) */
+                Spacer(modifier = Modifier.width(8.dp)) 
                 Text(
                     text = "AeonCoreX Labs",
                     color = Color.White,
