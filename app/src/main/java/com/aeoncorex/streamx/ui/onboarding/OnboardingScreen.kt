@@ -1,13 +1,8 @@
 package com.aeoncorex.streamx.ui.onboarding
 
 import android.content.Context
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -20,8 +15,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
@@ -36,12 +29,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.sin
 
 // --- Futuristic Neon Color Palette ---
 val DeepSpaceBlack = Color(0xFF050510)
+val NeonBlue = Color(0xFF2979FF)    // Welcome / System Start
 val NeonCyan = Color(0xFF00E5FF)    // Movie Engine
 val NeonPurple = Color(0xFFD500F9)  // Live TV
 val NeonGreen = Color(0xFF00E676)   // Ad Blocker
@@ -54,9 +49,17 @@ data class OnboardingPage(
     val type: PageType
 )
 
-enum class PageType { MOVIE_ENGINE, LIVE_TV, AD_BLOCKER, MUSIC }
+// Added WELCOME type
+enum class PageType { WELCOME, MOVIE_ENGINE, LIVE_TV, AD_BLOCKER, MUSIC }
 
 val onboardingPages = listOf(
+    // --- NEW PROFESSIONAL WELCOME SCREEN ---
+    OnboardingPage(
+        title = "Welcome to StreamX",
+        description = "Initiating Quantum Entertainment Protocol. Experience the absolute pinnacle of next-gen streaming technology.",
+        primaryColor = NeonBlue,
+        type = PageType.WELCOME
+    ),
     OnboardingPage(
         title = "Ultra-Core Movie Engine",
         description = "Powered by our proprietary Next-Gen Engine. Watch 4K movies via Public Cloud & Torrents with Zero Buffering.",
@@ -109,6 +112,18 @@ fun OnboardingScreen(navController: NavController) {
         }
     }
 
+    // --- AUTOMATIC SLIDER SWITCHING LOGIC ---
+    LaunchedEffect(pagerState.currentPage) {
+        // Auto-advance every 4 seconds unless it's the last page
+        if (pagerState.currentPage < onboardingPages.size - 1) {
+            delay(4000) 
+            // Only scroll if user isn't interacting (simplified check)
+            if (!pagerState.isScrollInProgress) {
+                pagerState.animateScrollToPage(pagerState.currentPage + 1)
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -127,12 +142,13 @@ fun OnboardingScreen(navController: NavController) {
             )
         }
 
-        // --- 2. Skip Button ---
+        // --- 2. Skip Button (Functional) ---
         TextButton(
             onClick = { finishOnboarding() },
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(top = 48.dp, end = 24.dp)
+                .statusBarsPadding() // Ensure it doesn't overlap system icons
         ) {
             Text(
                 "SKIP INTRO",
@@ -212,7 +228,7 @@ fun OnboardingScreen(navController: NavController) {
                     shape = RoundedCornerShape(16.dp)
                 ) {
                     Text(
-                        text = if (isLastPage) "LAUNCH SYSTEM" else "NEXT STEP",
+                        text = if (isLastPage) "LAUNCH SYSTEM" else if (pagerState.currentPage == 0) "START TOUR" else "NEXT STEP",
                         color = DeepSpaceBlack,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Black,
@@ -263,6 +279,7 @@ fun OnboardingPageContent(page: OnboardingPage) {
 
             // Render Specific Tech Graphics based on Type
             when (page.type) {
+                PageType.WELCOME -> TechWelcomeGraphic(page.primaryColor) // NEW
                 PageType.MOVIE_ENGINE -> TechMovieGraphic(page.primaryColor)
                 PageType.LIVE_TV -> TechTVGraphic(page.primaryColor)
                 PageType.AD_BLOCKER -> TechShieldGraphic(page.primaryColor)
@@ -297,6 +314,72 @@ fun OnboardingPageContent(page: OnboardingPage) {
 // =====================================================================
 // === ULTRA CUSTOM GRAPHICS (CANVAS DRAWINGS) FOR NEXT-GEN LOOK ===
 // =====================================================================
+
+// --- NEW WELCOME GRAPHIC: QUANTUM CORE ---
+@Composable
+fun TechWelcomeGraphic(color: Color) {
+    val infiniteTransition = rememberInfiniteTransition(label = "welcome_spin")
+    
+    // Multiple rotation speeds for complex effect
+    val rotationOuter by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(10000, easing = LinearEasing)), label = "rot1"
+    )
+    val rotationInner by infiniteTransition.animateFloat(
+        initialValue = 360f, targetValue = 0f,
+        animationSpec = infiniteRepeatable(tween(6000, easing = LinearEasing)), label = "rot2"
+    )
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 0.6f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1500, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse"
+    )
+
+    Canvas(modifier = Modifier.size(180.dp)) {
+        val cx = size.width / 2
+        val cy = size.height / 2
+        
+        // 1. Core Sphere (Pulsing)
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(Color.White, color, color.copy(alpha = 0.2f)),
+                center = center,
+                radius = 40.dp.toPx() * pulse
+            ),
+            radius = 35.dp.toPx() * pulse
+        )
+
+        // 2. Inner Tech Ring (Counter Clockwise)
+        rotate(rotationInner) {
+            drawCircle(
+                color = color,
+                style = Stroke(width = 2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f)),
+                radius = 55.dp.toPx()
+            )
+            // Triangles on ring
+            drawCircle(color = Color.White, radius = 3.dp.toPx(), center = Offset(cx, cy - 55.dp.toPx()))
+            drawCircle(color = Color.White, radius = 3.dp.toPx(), center = Offset(cx, cy + 55.dp.toPx()))
+        }
+
+        // 3. Outer Hex/Tech Ring (Clockwise)
+        rotate(rotationOuter) {
+            drawCircle(
+                brush = Brush.sweepGradient(listOf(Color.Transparent, color, Color.White, color, Color.Transparent)),
+                style = Stroke(width = 4.dp.toPx()),
+                radius = 75.dp.toPx()
+            )
+        }
+        
+        // 4. Orbital Lines
+        rotate(45f) {
+            drawOval(
+                color = color.copy(alpha = 0.3f),
+                topLeft = Offset(cx - 85.dp.toPx(), cy - 20.dp.toPx()),
+                size = Size(170.dp.toPx(), 40.dp.toPx()),
+                style = Stroke(width = 1.dp.toPx())
+            )
+        }
+    }
+}
 
 @Composable
 fun TechMovieGraphic(color: Color) {
@@ -333,7 +416,6 @@ fun TechMovieGraphic(color: Color) {
             close()
         }
         drawPath(path, color)
-        // FIXED: Moved color out of Stroke and into drawPath
         drawPath(path, color = Color.White, style = Stroke(width = 4f))
     }
 }
@@ -348,7 +430,6 @@ fun TechTVGraphic(color: Color) {
         drawRoundRect(
             color = color,
             style = Stroke(width = 6.dp.toPx()),
-            // FIXED: CornerRadius is now imported
             cornerRadius = CornerRadius(20f, 20f),
             size = Size(w, h * 0.7f),
             topLeft = Offset(0f, h * 0.15f)
@@ -394,7 +475,6 @@ fun TechShieldGraphic(color: Color) {
         
         drawPath(shieldPath, color.copy(alpha = 0.2f))
         
-        // FIXED: Moved color out of Stroke and into drawPath
         drawPath(shieldPath, color = color, style = Stroke(width = 6.dp.toPx()))
         
         // Cross / Block symbol inside
