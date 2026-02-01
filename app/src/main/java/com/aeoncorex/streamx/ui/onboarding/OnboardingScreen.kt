@@ -31,8 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.cos
-import kotlin.math.sin
+import kotlinx.coroutines.isActive // Import added for safer loop
 
 // --- Futuristic Neon Color Palette ---
 val DeepSpaceBlack = Color(0xFF050510)
@@ -49,11 +48,9 @@ data class OnboardingPage(
     val type: PageType
 )
 
-// Added WELCOME type
 enum class PageType { WELCOME, MOVIE_ENGINE, LIVE_TV, AD_BLOCKER, MUSIC }
 
 val onboardingPages = listOf(
-    // --- NEW PROFESSIONAL WELCOME SCREEN ---
     OnboardingPage(
         title = "Welcome to StreamX",
         description = "Initiating Quantum Entertainment Protocol. Experience the absolute pinnacle of next-gen streaming technology.",
@@ -107,18 +104,21 @@ fun OnboardingScreen(navController: NavController) {
             putBoolean("FinishedOnboarding", true)
             apply()
         }
+        // Navigate to Auth and clear backstack
         navController.navigate("auth") {
             popUpTo("onboarding") { inclusive = true }
         }
     }
 
-    // --- AUTOMATIC SLIDER SWITCHING LOGIC ---
-    LaunchedEffect(pagerState.currentPage) {
-        // Auto-advance every 4 seconds unless it's the last page
-        if (pagerState.currentPage < onboardingPages.size - 1) {
+    // --- FIXED: AUTOMATIC SLIDER SWITCHING LOGIC ---
+    // Using Unit as key ensures this coroutine stays alive and doesn't get cancelled 
+    // when currentPage changes mid-animation.
+    LaunchedEffect(Unit) {
+        while (isActive) {
             delay(4000) 
-            // Only scroll if user isn't interacting (simplified check)
-            if (!pagerState.isScrollInProgress) {
+            // Check if we can scroll forward and user is not currently dragging
+            if (pagerState.currentPage < onboardingPages.size - 1 && !pagerState.isScrollInProgress) {
+                // animateScrollToPage is suspend function, it will wait until finished
                 pagerState.animateScrollToPage(pagerState.currentPage + 1)
             }
         }
@@ -129,7 +129,7 @@ fun OnboardingScreen(navController: NavController) {
             .fillMaxSize()
             .background(DeepSpaceBlack)
     ) {
-        // --- 1. Ambient Background Glow (Dynamic) ---
+        // --- 1. Ambient Background Glow ---
         Canvas(modifier = Modifier.fillMaxSize()) {
             drawCircle(
                 brush = Brush.radialGradient(
@@ -142,25 +142,10 @@ fun OnboardingScreen(navController: NavController) {
             )
         }
 
-        // --- 2. Skip Button (Functional) ---
-        TextButton(
-            onClick = { finishOnboarding() },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 48.dp, end = 24.dp)
-                .statusBarsPadding() // Ensure it doesn't overlap system icons
-        ) {
-            Text(
-                "SKIP INTRO",
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
-            )
-        }
-
+        // --- 2. Main Content (Slider & Bottom Controls) ---
+        // Moved Column BEFORE the Skip Button so the button draws ON TOP
         Column(modifier = Modifier.fillMaxSize()) {
-            // --- 3. Main Content (Slider) ---
+            
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier
@@ -170,10 +155,10 @@ fun OnboardingScreen(navController: NavController) {
                 OnboardingPageContent(page = onboardingPages[index])
             }
 
-            // --- 4. Bottom Controls ---
+            // --- Bottom Controls ---
             Column(
                 modifier = Modifier
-                    .weight(0.25f) // Bottom area
+                    .weight(0.25f)
                     .fillMaxWidth()
                     .padding(horizontal = 32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -237,6 +222,24 @@ fun OnboardingScreen(navController: NavController) {
                 }
             }
         }
+
+        // --- 3. FIXED: Skip Button (Moved to End) ---
+        // This ensures it is drawn on top of the Column and receives clicks
+        TextButton(
+            onClick = { finishOnboarding() },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 48.dp, end = 24.dp)
+                .statusBarsPadding()
+        ) {
+            Text(
+                "SKIP INTRO",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+        }
     }
 }
 
@@ -249,7 +252,7 @@ fun OnboardingPageContent(page: OnboardingPage) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // --- High-Level Custom Graphic (Code Generated) ---
+        // --- High-Level Custom Graphic ---
         Box(
             modifier = Modifier
                 .size(300.dp)
@@ -279,7 +282,7 @@ fun OnboardingPageContent(page: OnboardingPage) {
 
             // Render Specific Tech Graphics based on Type
             when (page.type) {
-                PageType.WELCOME -> TechWelcomeGraphic(page.primaryColor) // NEW
+                PageType.WELCOME -> TechWelcomeGraphic(page.primaryColor)
                 PageType.MOVIE_ENGINE -> TechMovieGraphic(page.primaryColor)
                 PageType.LIVE_TV -> TechTVGraphic(page.primaryColor)
                 PageType.AD_BLOCKER -> TechShieldGraphic(page.primaryColor)
@@ -287,7 +290,7 @@ fun OnboardingPageContent(page: OnboardingPage) {
             }
         }
 
-        // --- Text Content with Entry Animation ---
+        // --- Text Content ---
         Text(
             text = page.title.uppercase(),
             style = MaterialTheme.typography.headlineMedium.copy(
@@ -312,15 +315,13 @@ fun OnboardingPageContent(page: OnboardingPage) {
 }
 
 // =====================================================================
-// === ULTRA CUSTOM GRAPHICS (CANVAS DRAWINGS) FOR NEXT-GEN LOOK ===
+// === ULTRA CUSTOM GRAPHICS (UNCHANGED) ===
 // =====================================================================
 
-// --- NEW WELCOME GRAPHIC: QUANTUM CORE ---
 @Composable
 fun TechWelcomeGraphic(color: Color) {
     val infiniteTransition = rememberInfiniteTransition(label = "welcome_spin")
     
-    // Multiple rotation speeds for complex effect
     val rotationOuter by infiniteTransition.animateFloat(
         initialValue = 0f, targetValue = 360f,
         animationSpec = infiniteRepeatable(tween(10000, easing = LinearEasing)), label = "rot1"
@@ -338,7 +339,6 @@ fun TechWelcomeGraphic(color: Color) {
         val cx = size.width / 2
         val cy = size.height / 2
         
-        // 1. Core Sphere (Pulsing)
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(Color.White, color, color.copy(alpha = 0.2f)),
@@ -348,19 +348,16 @@ fun TechWelcomeGraphic(color: Color) {
             radius = 35.dp.toPx() * pulse
         )
 
-        // 2. Inner Tech Ring (Counter Clockwise)
         rotate(rotationInner) {
             drawCircle(
                 color = color,
                 style = Stroke(width = 2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f)),
                 radius = 55.dp.toPx()
             )
-            // Triangles on ring
             drawCircle(color = Color.White, radius = 3.dp.toPx(), center = Offset(cx, cy - 55.dp.toPx()))
             drawCircle(color = Color.White, radius = 3.dp.toPx(), center = Offset(cx, cy + 55.dp.toPx()))
         }
 
-        // 3. Outer Hex/Tech Ring (Clockwise)
         rotate(rotationOuter) {
             drawCircle(
                 brush = Brush.sweepGradient(listOf(Color.Transparent, color, Color.White, color, Color.Transparent)),
@@ -369,7 +366,6 @@ fun TechWelcomeGraphic(color: Color) {
             )
         }
         
-        // 4. Orbital Lines
         rotate(45f) {
             drawOval(
                 color = color.copy(alpha = 0.3f),
@@ -390,13 +386,11 @@ fun TechMovieGraphic(color: Color) {
     )
 
     Canvas(modifier = Modifier.size(160.dp)) {
-        // Outer Rotating Data Ring
         rotate(rotation) {
             drawCircle(
                 brush = Brush.sweepGradient(listOf(Color.Transparent, color, Color.Transparent)),
                 style = Stroke(width = 4.dp.toPx())
             )
-            // Tech notches
             for (i in 0 until 12) {
                 rotate(i * 30f) {
                     drawLine(
@@ -408,7 +402,6 @@ fun TechMovieGraphic(color: Color) {
                 }
             }
         }
-        // Inner Play Button Triangle
         val path = Path().apply {
             moveTo(center.x + 40f, center.y)
             lineTo(center.x - 25f, center.y - 40f)
@@ -426,7 +419,6 @@ fun TechTVGraphic(color: Color) {
         val w = size.width
         val h = size.height
         
-        // Screen Frame
         drawRoundRect(
             color = color,
             style = Stroke(width = 6.dp.toPx()),
@@ -435,7 +427,6 @@ fun TechTVGraphic(color: Color) {
             topLeft = Offset(0f, h * 0.15f)
         )
         
-        // Antennas
         drawLine(
             color = color,
             start = Offset(w * 0.2f, 0f),
@@ -451,7 +442,6 @@ fun TechTVGraphic(color: Color) {
             cap = StrokeCap.Round
         )
         
-        // "Live" Dot
         drawCircle(
             color = Color.Red,
             radius = 8.dp.toPx(),
@@ -477,7 +467,6 @@ fun TechShieldGraphic(color: Color) {
         
         drawPath(shieldPath, color = color, style = Stroke(width = 6.dp.toPx()))
         
-        // Cross / Block symbol inside
         drawLine(
             color = Color.White,
             start = Offset(w * 0.35f, h * 0.35f),
@@ -499,7 +488,6 @@ fun TechShieldGraphic(color: Color) {
 fun TechMusicGraphic(color: Color) {
     val infiniteTransition = rememberInfiniteTransition(label = "music")
     
-    // Create 3 animated bars
     val bar1 by infiniteTransition.animateFloat(0.3f, 1f, infiniteRepeatable(tween(500, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "b1")
     val bar2 by infiniteTransition.animateFloat(0.5f, 1f, infiniteRepeatable(tween(400, easing = LinearEasing), RepeatMode.Reverse), label = "b2")
     val bar3 by infiniteTransition.animateFloat(0.2f, 0.9f, infiniteRepeatable(tween(600, easing = FastOutLinearInEasing), RepeatMode.Reverse), label = "b3")

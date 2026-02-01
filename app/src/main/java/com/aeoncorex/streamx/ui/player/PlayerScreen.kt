@@ -12,13 +12,10 @@ import android.net.TrafficStats
 import android.os.Build
 import android.provider.Settings
 import android.util.Rational
-import android.view.HapticFeedbackConstants
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,7 +34,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -64,12 +60,20 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.net.URLDecoder
+import java.util.*
 
 // --- Themes Colors ---
 val NeonBlue = Color(0xFF00FFFF)
 val NeonPurple = Color(0xFFBC13FE)
 val GlassBlack = Color(0xCC000000)
 val LiveRed = Color(0xFFFF0044)
+
+// --- EPG Data Structure (New) ---
+data class EPGProgram(
+    val title: String,
+    val startTime: Calendar,
+    val endTime: Calendar
+)
 
 fun isInternetAvailable(context: Context): Boolean {
     val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -86,7 +90,7 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
     val streamUrl = remember(encodedUrl) { URLDecoder.decode(encodedUrl, "UTF-8") }
     val activity = context as? Activity
     
-    // --- FIX: Stop Music when Video Starts ---
+    // --- Stop Music when Video Starts ---
     LaunchedEffect(Unit) {
         MusicManager.pause()
     }
@@ -104,13 +108,10 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
                 true
             )
             .setHandleAudioBecomingNoisy(true)
-            .setSeekForwardIncrementMs(10000)
-            .setSeekBackIncrementMs(10000)
             .build()
     }
 
     // --- Features States ---
-    var isLiveContent by remember { mutableStateOf(false) } // DETECTS IF CHANNEL OR MOVIE
     var isAudioOnlyMode by remember { mutableStateOf(false) }
     var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
     var subtitlesEnabled by remember { mutableStateOf(false) }
@@ -120,16 +121,12 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
     var isLocked by remember { mutableStateOf(false) }
     var resizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var showSettingsSheet by remember { mutableStateOf(false) }
-    
-    // --- Seek & Time ---
-    var currentPos by remember { mutableLongStateOf(0L) }
-    var duration by remember { mutableLongStateOf(0L) }
-    var isDraggingSlider by remember { mutableStateOf(false) }
-    
-    // --- Visual Feedback States (Double Tap) ---
-    var showForwardAnim by remember { mutableStateOf(false) }
-    var showRewindAnim by remember { mutableStateOf(false) }
 
+    // --- EPG States (New) ---
+    var currentProgramTitle by remember { mutableStateOf("Loading Stream Info...") }
+    var nextProgramTitle by remember { mutableStateOf("Upcoming...") }
+    var epgProgress by remember { mutableFloatStateOf(0f) }
+    
     // --- Dialogs ---
     var showQualityDialog by remember { mutableStateOf(false) }
     var currentQualityLabel by remember { mutableStateOf("Auto") }
@@ -171,24 +168,34 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
         exoPlayer.playWhenReady = true
     }
 
-    // Timer & Position Updater
+    // Stats & EPG Engine (Updated)
     LaunchedEffect(exoPlayer) {
         while (isActive) {
-            if (!isDraggingSlider) {
-                currentPos = exoPlayer.currentPosition.coerceAtLeast(0L)
-            }
-            duration = exoPlayer.duration.coerceAtLeast(0L)
-            
-            // Check if Live
-            if (exoPlayer.isCurrentMediaItemLive && !isLiveContent) {
-                isLiveContent = true
-            }
-            
-            // Stats
+            // 1. Stats Update
             val currentRxBytes = TrafficStats.getTotalRxBytes()
             downloadSpeed = formatSpeed(currentRxBytes - startRxBytes)
             totalDataUsed = formatData(TrafficStats.getUidRxBytes(android.os.Process.myUid()))
             startRxBytes = currentRxBytes
+
+            // 2. EPG Simulation Logic (Real-time based on clock)
+            val now = Calendar.getInstance()
+            val hour = now.get(Calendar.HOUR_OF_DAY)
+            
+            // Dummy Schedule Generation based on Hour
+            val titles = listOf("Morning News", "Tech Talk Live", "Live Sports: Final", "Music Hits", "Movie: Cyber World", "Late Night Show")
+            val programIndex = hour % titles.size
+            
+            // Set Start/End times (Assuming 1 hour programs for demo)
+            val start = Calendar.getInstance().apply { set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0) }
+            val end = (start.clone() as Calendar).apply { add(Calendar.HOUR, 1) }
+            
+            currentProgramTitle = titles[programIndex]
+            nextProgramTitle = titles[(programIndex + 1) % titles.size]
+
+            // Calculate Progress Bar
+            val totalDuration = end.timeInMillis - start.timeInMillis
+            val passed = now.timeInMillis - start.timeInMillis
+            epgProgress = (passed.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
             
             delay(1000)
         }
@@ -224,13 +231,6 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
                 isBuffering = false
             }
             override fun onIsPlayingChanged(isPlayingState: Boolean) { isPlaying = isPlayingState }
-            
-            // Detect Live vs VOD
-            override fun onEvents(player: Player, events: Player.Events) {
-                if (events.contains(Player.EVENT_TIMELINE_CHANGED) || events.contains(Player.EVENT_IS_LOADING_CHANGED)) {
-                    isLiveContent = player.isCurrentMediaItemLive
-                }
-            }
         }
         exoPlayer.addListener(listener)
         onDispose {
@@ -242,7 +242,7 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
     // Auto Hide Controls
     LaunchedEffect(isControlsVisible, isPlaying) {
         if (isControlsVisible && isPlaying) {
-            delay(4000)
+            delay(5000) // Increased to 5s to read EPG
             isControlsVisible = false
         }
     }
@@ -271,27 +271,6 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
             .background(Color.Black)
             .pointerInput(Unit) {
                 detectTapGestures(
-                    onDoubleTap = { offset ->
-                        if (!isLocked && !isLiveContent) {
-                            val screenWidth = size.width
-                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                            if (offset.x < screenWidth / 2) {
-                                // Rewind
-                                val newPos = (exoPlayer.currentPosition - 10000).coerceAtLeast(0)
-                                exoPlayer.seekTo(newPos)
-                                currentPos = newPos
-                                showRewindAnim = true
-                                scope.launch { delay(600); showRewindAnim = false }
-                            } else {
-                                // Forward
-                                val newPos = (exoPlayer.currentPosition + 10000).coerceAtMost(duration)
-                                exoPlayer.seekTo(newPos)
-                                currentPos = newPos
-                                showForwardAnim = true
-                                scope.launch { delay(600); showForwardAnim = false }
-                            }
-                        }
-                    },
                     onTap = { 
                         isControlsVisible = !isControlsVisible 
                     }
@@ -324,7 +303,7 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
     ) {
         // 1. Ambilight (Disabled in Audio Mode)
         if(isPlaying && !isAudioOnlyMode) {
-            Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(NeonPurple.copy(0.1f), Color.Transparent))))
+            Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(NeonPurple.copy(0.15f), Color.Transparent))))
         }
 
         // 2. Video Player Surface
@@ -357,22 +336,18 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
                         Spacer(Modifier.height(16.dp))
                         Text("AUDIO ONLY MODE", color = Color.White, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(8.dp))
-                        Text("Double tap screen to wake controls", color = Color.Gray, fontSize = 12.sp)
+                        Text("Tap screen to wake controls", color = Color.Gray, fontSize = 12.sp)
                     }
                 }
             }
         }
 
-        // 3. Visual Feedback (Seek Animations)
-        SeekAnimation(visible = showRewindAnim, isForward = false, modifier = Modifier.align(Alignment.CenterStart).padding(start = 50.dp))
-        SeekAnimation(visible = showForwardAnim, isForward = true, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 50.dp))
-
-        // 4. Buffering
+        // 3. Buffering
         if (isBuffering && !hasError) {
             CircularProgressIndicator(color = NeonBlue, strokeWidth = 4.dp, modifier = Modifier.align(Alignment.Center))
         }
 
-        // 5. Sliders (Volume/Brightness)
+        // 4. Sliders (Volume/Brightness)
         AnimatedVisibility(visible = showBrightnessSlider, enter = slideInHorizontally { -it }, exit = fadeOut(), modifier = Modifier.align(Alignment.CenterStart).padding(start = 32.dp)) {
             CyberSlider(icon = Icons.Default.BrightnessMedium, level = brightness, max = 1f, color = Color.Yellow)
         }
@@ -380,18 +355,18 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
             CyberSlider(icon = Icons.Default.VolumeUp, level = currentVolume.toFloat(), max = maxVolume.toFloat(), color = NeonBlue)
         }
 
-        // 6. Controls
+        // 5. Controls (LIVE WITH EPG)
         AnimatedVisibility(visible = isControlsVisible, enter = fadeIn(), exit = fadeOut()) {
             AdvancedPlayerControls(
-                title = if(isLiveContent) "LIVE TV STREAM" else "MOVIE PLAYBACK",
+                title = "STREAMX ULTRA LIVE",
                 networkSpeed = downloadSpeed,
                 dataUsed = totalDataUsed,
                 isPlaying = isPlaying,
                 isLocked = isLocked,
-                isLive = isLiveContent,
-                currentPos = currentPos,
-                duration = duration,
                 qualityLabel = currentQualityLabel,
+                currentProgram = currentProgramTitle,
+                nextProgram = nextProgramTitle,
+                epgProgress = epgProgress,
                 onBack = { navController.popBackStack() },
                 onPlayPause = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
                 onLockToggle = { isLocked = !isLocked },
@@ -426,33 +401,11 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
                     } else {
                         Toast.makeText(context, "PiP not supported on this device", Toast.LENGTH_SHORT).show()
                     }
-                },
-                onRewind = { 
-                    if(!isLiveContent) {
-                        val newPos = (exoPlayer.currentPosition - 10000).coerceAtLeast(0)
-                        exoPlayer.seekTo(newPos)
-                        currentPos = newPos
-                    }
-                },
-                onForward = { 
-                    if(!isLiveContent) {
-                        val newPos = (exoPlayer.currentPosition + 10000).coerceAtMost(duration)
-                        exoPlayer.seekTo(newPos)
-                        currentPos = newPos
-                    }
-                },
-                onSeek = { pos ->
-                    isDraggingSlider = true
-                    currentPos = pos
-                },
-                onSeekFinished = {
-                    exoPlayer.seekTo(currentPos)
-                    isDraggingSlider = false
                 }
             )
         }
 
-        // 7. Settings Sheet
+        // 6. Settings Sheet
         if (showSettingsSheet) {
             PlayerSettingsSheet(
                 onDismiss = { showSettingsSheet = false },
@@ -487,7 +440,7 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
             )
         }
 
-        // 8. Dialogs
+        // 7. Dialogs
         if (showQualityDialog) {
             QualitySelectorDialog(trackSelector, { showQualityDialog = false }) { currentQualityLabel = it }
         }
@@ -496,7 +449,7 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
             SleepTimerDialog(sleepTimerMinutes, { showSleepTimerDialog = false }) { sleepTimerMinutes = it; showSleepTimerDialog = false }
         }
 
-        // 9. Error / Retry Overlay
+        // 8. Error / Retry Overlay
         if (hasError) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(0.9f)), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -527,7 +480,7 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
 }
 
 // -----------------------------------------------------------------------------
-// IMPROVED UI COMPONENTS
+// IMPROVED UI COMPONENTS (LIVE FOCUSED + EPG)
 // -----------------------------------------------------------------------------
 
 @Composable
@@ -537,21 +490,17 @@ fun AdvancedPlayerControls(
     dataUsed: String,
     isPlaying: Boolean,
     isLocked: Boolean,
-    isLive: Boolean,
-    currentPos: Long,
-    duration: Long,
     qualityLabel: String,
+    currentProgram: String, // New
+    nextProgram: String,    // New
+    epgProgress: Float,     // New
     onBack: () -> Unit,
     onPlayPause: () -> Unit,
     onLockToggle: () -> Unit,
     onRotateScreen: () -> Unit,
     onResizeToggle: () -> Unit,
     onSettingsClick: () -> Unit,
-    onPipClick: () -> Unit,
-    onRewind: () -> Unit,
-    onForward: () -> Unit,
-    onSeek: (Long) -> Unit,
-    onSeekFinished: () -> Unit
+    onPipClick: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -586,8 +535,8 @@ fun AdvancedPlayerControls(
             Spacer(Modifier.width(8.dp))
             
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, color = if(isLive) LiveRed else NeonBlue, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1)
-                Text("$qualityLabel • $networkSpeed • $dataUsed", color = Color.LightGray, fontSize = 11.sp)
+                Text(title, color = LiveRed, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1)
+                Text("$qualityLabel • $networkSpeed • $dataUsed", color = Color.LightGray, fontSize = 10.sp)
             }
             
             IconButton(onClick = onPipClick) { Icon(Icons.Default.PictureInPictureAlt, null, tint = Color.White) }
@@ -595,20 +544,10 @@ fun AdvancedPlayerControls(
             IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Settings, null, tint = Color.White) }
         }
 
-        // --- CENTER CONTROLS ---
-        Row(
-            modifier = Modifier.align(Alignment.Center),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(40.dp)
+        // --- CENTER CONTROLS (Only Play/Pause) ---
+        Box(
+            modifier = Modifier.align(Alignment.Center)
         ) {
-            // Rewind (Hidden for Live)
-            if(!isLive) {
-                IconButton(onClick = onRewind, modifier = Modifier.size(50.dp)) {
-                    Icon(Icons.Default.Replay10, null, tint = Color.White, modifier = Modifier.fillMaxSize())
-                }
-            }
-
-            // Play/Pause
             Box(
                 modifier = Modifier
                     .size(72.dp)
@@ -622,87 +561,55 @@ fun AdvancedPlayerControls(
                     null, tint = Color.White, modifier = Modifier.size(40.dp)
                 )
             }
-
-            // Forward (Hidden for Live)
-            if(!isLive) {
-                IconButton(onClick = onForward, modifier = Modifier.size(50.dp)) {
-                    Icon(Icons.Default.Forward10, null, tint = Color.White, modifier = Modifier.fillMaxSize())
-                }
-            }
         }
 
-        // --- BOTTOM BAR ---
+        // --- BOTTOM BAR (EPG + CONTROLS) ---
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.9f))))
-                .padding(horizontal = 16.dp, vertical = 16.dp)
-        ) {
-            // SeekBar / Live Indicator
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-            ) {
-                if(isLive) {
-                    Box(Modifier.background(LiveRed, RoundedCornerShape(4.dp)).padding(horizontal = 8.dp, vertical = 4.dp)) {
-                        Text("LIVE", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Box(Modifier.height(4.dp).weight(1f).background(Color.DarkGray, RoundedCornerShape(2.dp)))
-                } else {
-                    Text(formatTime(currentPos), color = Color.White, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-                    Slider(
-                        value = currentPos.toFloat(),
-                        onValueChange = { onSeek(it.toLong()) },
-                        onValueChangeFinished = onSeekFinished,
-                        valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
-                        colors = SliderDefaults.colors(
-                            thumbColor = NeonBlue,
-                            activeTrackColor = NeonBlue,
-                            inactiveTrackColor = Color.Gray.copy(0.5f)
-                        ),
-                        modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
-                    )
-                    Text(formatTime(duration), color = Color.White, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-                }
-            }
-
-            // Bottom Actions
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                IconButton(onClick = onLockToggle) {
-                    Icon(Icons.Default.LockOpen, null, tint = Color.White)
-                }
-                IconButton(onClick = onRotateScreen) {
-                    Icon(Icons.Default.ScreenRotation, null, tint = Color.White)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun SeekAnimation(visible: Boolean, isForward: Boolean, modifier: Modifier = Modifier) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = scaleIn() + fadeIn(),
-        exit = scaleOut() + fadeOut(),
-        modifier = modifier
-    ) {
-        Box(
-            modifier = Modifier
-                .background(Color.Black.copy(0.5f), CircleShape)
                 .padding(16.dp)
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    if(isForward) Icons.Default.FastForward else Icons.Default.FastRewind,
-                    null, tint = Color.White
+            // 1. Current Program & LIVE Tag
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = currentProgram, 
+                    color = Color.White, 
+                    fontWeight = FontWeight.Bold, 
+                    fontSize = 18.sp,
+                    modifier = Modifier.weight(1f)
                 )
-                Text(if(isForward) "+10s" else "-10s", color = Color.White, fontWeight = FontWeight.Bold)
+                Box(Modifier.background(LiveRed, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                    Text("LIVE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            
+            Spacer(Modifier.height(8.dp))
+            
+            // 2. Dynamic EPG Progress Bar
+            Box(Modifier.fillMaxWidth().height(4.dp).background(Color.White.copy(0.2f), RoundedCornerShape(2.dp))) {
+                Box(Modifier.fillMaxWidth(epgProgress).fillMaxHeight().background(NeonBlue, RoundedCornerShape(2.dp)))
+            }
+            
+            Spacer(Modifier.height(8.dp))
+            
+            // 3. Next Program & Bottom Actions
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Next: $nextProgram", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                
+                Row {
+                    IconButton(onClick = onLockToggle) {
+                        Icon(Icons.Default.LockOpen, null, tint = Color.White)
+                    }
+                    IconButton(onClick = onRotateScreen) {
+                        Icon(Icons.Default.ScreenRotation, null, tint = Color.White)
+                    }
+                }
             }
         }
     }
@@ -890,12 +797,6 @@ fun QualityItem(text: String, isSelected: Boolean, onClick: () -> Unit) {
 }
 
 // --- Helpers ---
-private fun formatTime(ms: Long): String {
-    val totalSeconds = ms / 1000
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return String.format("%02d:%02d", minutes, seconds)
-}
 private fun formatData(bytes: Long): String = String.format("%.1f MB", bytes / 1024.0 / 1024.0)
 private fun formatSpeed(bytes: Long): String = if (bytes > 1024 * 1024) String.format("%.1f MB/s", bytes / 1024.0 / 1024.0) else String.format("%.0f KB/s", bytes / 1024.0)
 
