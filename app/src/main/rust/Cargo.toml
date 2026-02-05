@@ -1,0 +1,33 @@
+[package]
+name = "streamx_core"
+version = "1.3.0"
+edition = "2021"
+authors = ["AeonCoreX Team"]
+publish = false
+
+[lib]
+# Android এর জন্য ডাইনামিক লাইব্রেরি (.so) তৈরি করতে হবে
+crate-type = ["cdylib"]
+
+[dependencies]
+# JNI Bridge: জাভা এবং রাস্টের মধ্যে যোগাযোগের জন্য
+jni = "0.21"
+
+# Global State: সিঙ্গেলটন প্যাটার্ন মেইনটেইন করার জন্য (AI State ধরে রাখতে)
+lazy_static = "1.4"
+once_cell = "1.18"
+
+# Logging: Logcat এ রাস্টের লগ দেখার জন্য
+log = "0.4"
+android_logger = "0.13"
+
+# Thread Safety: মাল্টি-থ্রেডিং এর জন্য (যদিও std যথেষ্ট, anyhow ভালো এরর হ্যান্ডলিং দেয়)
+anyhow = "1.0"
+
+[profile.release]
+# অপ্টিমাইজেশন সেটিংস (সাইজ এবং স্পিড)
+lto = true        # Link Time Optimization
+opt-level = 3     # Maximum Speed
+codegen-units = 1 # Better Optimization
+strip = true      # Remove symbols to reduce size
+panic = "abort"   # Crash on panic (Don't unwind stack, saves size)

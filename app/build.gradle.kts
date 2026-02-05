@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.gms.google-services")
+    id("org.mozilla.rust-android-gradle.rust-android") version "0.9.3"
 }
 
 android {
@@ -11,7 +12,7 @@ android {
 
     defaultConfig {
         applicationId = "com.aeoncorex.streamx"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 34
         versionCode = 4 
         versionName = "1.2.1"
@@ -49,6 +50,14 @@ android {
                 abiFilters("arm64-v8a")
             }
         }
+        
+        // --- RUST BUILD CONFIG (The Brain) ---
+    cargo {
+        module = "src/main/rust" // Rust ফোল্ডারের লোকেশন
+        libname = "streamx_core" // জেনারেট হবে: libstreamx_core.so
+        targets = listOf("arm64")
+        profile = "release" // ম্যাক্সিমাম স্পিড
+    }
 
         val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\""
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
