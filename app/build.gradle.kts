@@ -8,14 +8,12 @@ plugins {
 
 android {
     namespace = "com.aeoncorex.streamx"
-    // Updated for Android 15 (Vanilla Ice Cream)
     compileSdk = 35
     ndkVersion = "25.2.9519653"
 
     defaultConfig {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 26
-        // Updated Target SDK to 35
         targetSdk = 35
         versionCode = 5
         versionName = "1.3.0"
@@ -26,7 +24,6 @@ android {
             useSupportLibrary = true
         }
 
-        // --- C++ NATIVE CONFIG ---
         externalNativeBuild {
             cmake {
                 cppFlags("-std=c++17", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0")
@@ -35,8 +32,9 @@ android {
                 val envNdk = System.getenv("ANDROID_NDK_HOME")
                 val ndkPath = if (!envNdk.isNullOrBlank()) envNdk else android.ndkDirectory.absolutePath
 
-                // Path to where Rust plugin dumps the .so files
-                val rustLibPath = "${project.layout.buildDirectory.get().asFile.absolutePath}/rustJniLibs/android"
+                // FIX: Rust এর জেনারেট করা .a ফাইলগুলো যেখানে থাকে সেই পাথ
+                // প্লাগিন সাধারণত 'build/rust/targets' ফোল্ডারে বিল্ড করে
+                val rustBuildDir = "${project.layout.buildDirectory.get().asFile.absolutePath}/rust/targets"
 
                 arguments(
                     "-DANDROID_STL=c++_shared",
@@ -47,18 +45,17 @@ android {
                     "-DANDROID_PLATFORM=android-24",
                     "-D_FORTIFY_SOURCE=0",
                     "-DWHISPER_NO_AVX=ON",
-                    "-DRUST_LIB_PATH=$rustLibPath"
+                    // CMake কে Rust এর বিল্ড ফোল্ডার চিনিয়ে দেওয়া হলো
+                    "-DRUST_BUILD_DIR=$rustBuildDir"
                 )
 
                 abiFilters("arm64-v8a", "armeabi-v7a", "x86_64")
             }
         }
 
-        // --- RUST BUILD CONFIG ---
         cargo {
             module = "src/main/rust"
             libname = "streamx_core"
-            // Broad device support: ARM64, ARMv7, x86_64
             targets = listOf("arm64", "arm", "x86_64")
             profile = "release"
         }
@@ -97,7 +94,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
-            isShrinkResources = true // Added for smaller APK size
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }
@@ -121,20 +118,18 @@ android {
         buildConfig = true
     }
 
-    // FIX: composeOptions ব্লক ডিলিট করা হয়েছে কারণ Kotlin 2.0 তে এটি লাগে না
-
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/DEPENDENCIES"
             excludes += "META-INF/INDEX.LIST"
             pickFirsts += "lib/**/libc++_shared.so"
-            pickFirsts += "lib/**/libstreamx_core.so"
+            // FIX: libstreamx_core.so এখন আর আলাদাভাবে থাকবে না, তাই ওটা রিমুভ করা হয়েছে
         }
     }
 }
 
-// FIX: Force Rust build to happen before CMake linkage
+// FIX: Ensure Rust builds before C++
 afterEvaluate {
     tasks.withType(com.android.build.gradle.tasks.ExternalNativeBuildTask::class.java).configureEach {
         dependsOn("cargoBuild")
@@ -142,31 +137,27 @@ afterEvaluate {
 }
 
 dependencies {
-    // Core Android
     implementation("androidx.core:core-ktx:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    implementation("androidx.activity:activity-compose:1.9.0") // Needed for EdgeToEdge
-    implementation(platform("androidx.compose:compose-bom:2024.04.00")) // Stable BOM
+    implementation("androidx.activity:activity-compose:1.9.0")
+    implementation(platform("androidx.compose:compose-bom:2024.04.00"))
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
 
-    // Networking
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
     implementation("com.squareup.retrofit2:converter-scalars:2.11.0")
     implementation("org.jsoup:jsoup:1.17.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // NewPipe Extractor
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.25.1") {
         exclude(group = "com.github.TeamNewPipe", module = "nanojson")
     }
     implementation("com.grack:nanojson:1.2")
 
-    // Navigation & Firebase
     implementation("androidx.compose.foundation:foundation:1.6.7")
     implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
@@ -177,14 +168,12 @@ dependencies {
     }
     implementation("com.google.android.gms:play-services-auth:21.1.1")
 
-    // Media3 (ExoPlayer) - Updated to 1.3.1 (Stable)
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-common:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
-    implementation("androidx.media3:media3-session:1.3.1") // Good for background playback
+    implementation("androidx.media3:media3-session:1.3.1")
 
-    // UI Utilities
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")

@@ -16,18 +16,25 @@ FetchContent_MakeAvailable(whisper_cpp)
 
 add_compile_options(-Wno-macro-redefined)
 
-# --- 2. Rust Library Import (FIXED) ---
-# If RUST_LIB_PATH isn't passed from Gradle, try to guess it (fallback)
-if (NOT DEFINED RUST_LIB_PATH)
-    message(WARNING "RUST_LIB_PATH not defined via Gradle! Guessing path...")
-    set(RUST_LIB_PATH "${CMAKE_BINARY_DIR}/../../../rustJniLibs/android")
+# --- 2. Rust Library Import (FIXED FOR STATIC LIB) ---
+# Android ABI অনুযায়ী সঠিক Rust Target ফোল্ডার সিলেক্ট করা
+if(${ANDROID_ABI} STREQUAL "arm64-v8a")
+    set(RUST_TARGET_ARCH "aarch64-linux-android")
+elseif(${ANDROID_ABI} STREQUAL "armeabi-v7a")
+    set(RUST_TARGET_ARCH "armv7-linux-androideabi")
+elseif(${ANDROID_ABI} STREQUAL "x86_64")
+    set(RUST_TARGET_ARCH "x86_64-linux-android")
+else()
+    message(FATAL_ERROR "Unsupported Architecture: ${ANDROID_ABI}")
 endif()
 
-message(STATUS "Linking Rust Library from: ${RUST_LIB_PATH}/${ANDROID_ABI}/libstreamx_core.so")
+# Rust এর .a ফাইলের পাথ তৈরি (build.gradle থেকে RUST_BUILD_DIR আসছে)
+set(RUST_LIB_FILE "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/release/libstreamx_core.a")
+message(STATUS "Linking Rust Static Lib: ${RUST_LIB_FILE}")
 
-add_library(streamx_core SHARED IMPORTED)
-set_target_properties(streamx_core PROPERTIES IMPORTED_LOCATION 
-    ${RUST_LIB_PATH}/${ANDROID_ABI}/libstreamx_core.so)
+# Rust লাইব্রেরি ইমপোর্ট করা
+add_library(streamx_core STATIC IMPORTED)
+set_target_properties(streamx_core PROPERTIES IMPORTED_LOCATION "${RUST_LIB_FILE}")
 
 # --- 3. Define C++ Libraries ---
 add_library(
@@ -47,7 +54,9 @@ find_package(Boost REQUIRED COMPONENTS system)
 target_link_libraries(
         streamx-native
         PRIVATE
-        streamx_core        # Linked Rust Library
+        # FIX: --whole-archive ব্যবহার করা জরুরি যাতে JNI মেথডগুলো বাদ না পড়ে যায়
+        -Wl,--whole-archive streamx_core -Wl,--no-whole-archive
+        
         LibtorrentRasterbar::torrent-rasterbar
         OpenSSL::SSL
         OpenSSL::Crypto
