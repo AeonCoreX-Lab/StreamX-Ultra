@@ -15,8 +15,8 @@ android {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.3.0"
+        versionCode = 4
+        versionName = "1.2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -32,8 +32,7 @@ android {
                 val envNdk = System.getenv("ANDROID_NDK_HOME")
                 val ndkPath = if (!envNdk.isNullOrBlank()) envNdk else android.ndkDirectory.absolutePath
 
-                // FIX: Rust এর জেনারেট করা .a ফাইলগুলো যেখানে থাকে সেই পাথ
-                // প্লাগিন সাধারণত 'build/rust/targets' ফোল্ডারে বিল্ড করে
+                [span_0](start_span)// Rust Plugin Output Directory[span_0](end_span)
                 val rustBuildDir = "${project.layout.buildDirectory.get().asFile.absolutePath}/rust/targets"
 
                 arguments(
@@ -45,7 +44,6 @@ android {
                     "-DANDROID_PLATFORM=android-24",
                     "-D_FORTIFY_SOURCE=0",
                     "-DWHISPER_NO_AVX=ON",
-                    // CMake কে Rust এর বিল্ড ফোল্ডার চিনিয়ে দেওয়া হলো
                     "-DRUST_BUILD_DIR=$rustBuildDir"
                 )
 
@@ -124,13 +122,18 @@ android {
             excludes += "META-INF/DEPENDENCIES"
             excludes += "META-INF/INDEX.LIST"
             pickFirsts += "lib/**/libc++_shared.so"
-            // FIX: libstreamx_core.so এখন আর আলাদাভাবে থাকবে না, তাই ওটা রিমুভ করা হয়েছে
         }
     }
 }
 
-// FIX: Ensure Rust builds before C++
+// FIX: Force Cargo to build BEFORE CMake and Android tasks
 afterEvaluate {
+    // Make 'preBuild' depend on 'cargoBuild' to ensure Rust libs exist early
+    tasks.named("preBuild").configure {
+        dependsOn("cargoBuild")
+    }
+    
+    // Explicitly link ExternalNativeBuild (CMake) to Cargo
     tasks.withType(com.android.build.gradle.tasks.ExternalNativeBuildTask::class.java).configureEach {
         dependsOn("cargoBuild")
     }

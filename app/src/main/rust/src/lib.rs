@@ -1,9 +1,9 @@
 // Rust JNI Bridge for StreamX
-// Dependencies in Cargo.toml: jni = "0.21", lazy_static = "1.4"
+// Dependencies: jni = "0.21", lazy_static = "1.4"
 
 use jni::JNIEnv;
 use jni::objects::{JClass, JString, JFloatArray};
-// FIX: 'jfloatArray' রিমুভ করা হয়েছে কারণ এটি unused ছিল এবং ওয়ার্নিং দিচ্ছিল
+// FIX: unused 'jfloatArray' import removed
 use jni::sys::{jboolean, jstring};
 use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
@@ -25,7 +25,7 @@ lazy_static! {
     }));
 }
 
-// C++ Functions Import (Using c_char for cross-platform pointer compatibility)
+// C++ Functions Import
 extern "C" {
     fn initAINative_CPP(path: *const c_char) -> bool;
     fn pushAudioNative_CPP(data: *const f32, size: i32);
@@ -35,20 +35,17 @@ extern "C" {
 
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initAI(
-    mut env: JNIEnv, // FIX: এখানে 'mut' যোগ করা হয়েছে (Error E0596 Solved)
+    mut env: JNIEnv, // FIX: Added 'mut' here to fix E0596
     _class: JClass,
     model_path: JString,
 ) -> jboolean {
-    // env.get_string ইন্টারনালি env মডিফাই করে, তাই mut env জরুরি
+    // env.get_string requires mutable borrow
     let path_str: String = env.get_string(&model_path).expect("Couldn't get java string").into();
-    
     let c_path = CString::new(path_str).unwrap();
 
+    let success = unsafe { initAINative_CPP(c_path.as_ptr()) };
+    
     let mut ctx = CTX.lock().unwrap();
-    
-    // Cast pointer to *const c_char to match extern signature
-    let success = unsafe { initAINative_CPP(c_path.as_ptr() as *const c_char) };
-    
     ctx.is_running = success;
     ctx.model_loaded = success;
     
@@ -57,7 +54,7 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initAI(
 
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pushAudio(
-    mut env: JNIEnv, // FIX: এখানেও 'mut' যোগ করা হয়েছে
+    mut env: JNIEnv, // FIX: Added 'mut'
     _class: JClass,
     audio_data: JFloatArray, 
 ) {
@@ -67,7 +64,7 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pushAudio
     let len = env.get_array_length(&audio_data).unwrap();
     let mut buf = vec![0.0f32; len as usize];
     
-    // get_float_array_region মেমোরি কপি করে, তাই env মিউটেবল হতে হবে
+    // get_float_array_region requires mutable env
     env.get_float_array_region(&audio_data, 0, &mut buf).unwrap();
 
     unsafe {
@@ -77,7 +74,7 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pushAudio
 
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getSubtitle(
-    mut env: JNIEnv, // FIX: এখানেও 'mut' যোগ করা হয়েছে
+    mut env: JNIEnv, // FIX: Added 'mut'
     _class: JClass,
 ) -> jstring {
     let c_sub = unsafe { getSubtitleNative_CPP() };
@@ -86,16 +83,16 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getSubtit
         return env.new_string("").unwrap().into_raw();
     }
 
-    let c_str = unsafe { CStr::from_ptr(c_sub as *const c_char) };
+    let c_str = unsafe { CStr::from_ptr(c_sub) };
     let output = c_str.to_str().unwrap_or("");
-
-    // new_string নতুন জাভা অবজেক্ট তৈরি করে, তাই env মিউটেবল হতে হবে
+    
+    // new_string requires mutable env
     env.new_string(output).unwrap().into_raw()
 }
 
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_stopAI(
-    _env: JNIEnv, // এখানে env ব্যবহার হচ্ছে না, তাই mut না দিলেও চলে, তবে ওয়ার্নিং এড়াতে _env রাখা ভালো
+    _env: JNIEnv, 
     _class: JClass,
 ) {
     let mut ctx = CTX.lock().unwrap();

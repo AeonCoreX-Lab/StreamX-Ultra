@@ -16,8 +16,8 @@ FetchContent_MakeAvailable(whisper_cpp)
 
 add_compile_options(-Wno-macro-redefined)
 
-# --- 2. Rust Library Import (FIXED FOR STATIC LIB) ---
-# Android ABI অনুযায়ী সঠিক Rust Target ফোল্ডার সিলেক্ট করা
+# --- 2. Rust Library Import (FIXED) ---
+# Map Android ABI to Rust Triple
 if(${ANDROID_ABI} STREQUAL "arm64-v8a")
     set(RUST_TARGET_ARCH "aarch64-linux-android")
 elseif(${ANDROID_ABI} STREQUAL "armeabi-v7a")
@@ -28,11 +28,16 @@ else()
     message(FATAL_ERROR "Unsupported Architecture: ${ANDROID_ABI}")
 endif()
 
-# Rust এর .a ফাইলের পাথ তৈরি (build.gradle থেকে RUST_BUILD_DIR আসছে)
+# Rust output path from build.gradle argument
 set(RUST_LIB_FILE "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/release/libstreamx_core.a")
+
+# Check if file exists to give better error message
+if(NOT EXISTS "${RUST_LIB_FILE}")
+    message(WARNING "Rust library not found at: ${RUST_LIB_FILE}. Make sure 'cargoBuild' task runs before CMake.")
+endif()
+
 message(STATUS "Linking Rust Static Lib: ${RUST_LIB_FILE}")
 
-# Rust লাইব্রেরি ইমপোর্ট করা
 add_library(streamx_core STATIC IMPORTED)
 set_target_properties(streamx_core PROPERTIES IMPORTED_LOCATION "${RUST_LIB_FILE}")
 
@@ -54,7 +59,7 @@ find_package(Boost REQUIRED COMPONENTS system)
 target_link_libraries(
         streamx-native
         PRIVATE
-        # FIX: --whole-archive ব্যবহার করা জরুরি যাতে JNI মেথডগুলো বাদ না পড়ে যায়
+        # Force include all symbols from Rust static lib to avoid stripping JNI functions
         -Wl,--whole-archive streamx_core -Wl,--no-whole-archive
         
         LibtorrentRasterbar::torrent-rasterbar
