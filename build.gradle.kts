@@ -14,7 +14,7 @@ plugins {
     id("com.google.gms.google-services") version "4.4.2" apply false
     
     // Rust প্লাগইন
-    id("org.mozilla.rust-android-gradle.rust-android") version "0.9.3" apply false
+    id("org.mozilla.rust-android-gradle.rust-android") version "0.9.6" apply false
 }
 
 tasks.register<Delete>("clean") {

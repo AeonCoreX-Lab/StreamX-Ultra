@@ -3,7 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services")
-    id("org.mozilla.rust-android-gradle.rust-android") version "0.9.3"
+    id("org.mozilla.rust-android-gradle.rust-android") version "0.9.6"
 }
 
 android {
