@@ -57,19 +57,6 @@ android {
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
     }
 
-    // Cargo কনফিগারেশন (Rust)
-    // এটি defaultConfig এর বাইরে থাকা উচিত
-    configure<org.mozilla.rust.android.gradle.RustAndroidExtension> {
-        tools {
-            cargo {
-                module = "src/main/rust" // নিশ্চিত করুন এই ফোল্ডারে Cargo.toml আছে
-                libname = "streamx_core"
-                targets = listOf("arm64", "arm", "x86_64")
-                profile = "release"
-            }
-        }
-    }
-
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
@@ -132,6 +119,14 @@ android {
             pickFirsts += "lib/**/libc++_shared.so"
         }
     }
+}
+
+// FIX: Cargo/Rust Configuration moved OUTSIDE the android block
+cargo {
+    module = "src/main/rust" // নিশ্চিত করুন এই ফোল্ডারে Cargo.toml আছে
+    libname = "streamx_core"
+    targets = listOf("arm64", "arm", "x86_64")
+    profile = "release"
 }
 
 // FIX: Ensure Rust builds before C++ triggers
