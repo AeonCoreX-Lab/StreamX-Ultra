@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services")
     id("org.mozilla.rust-android-gradle.rust-android") version "0.9.3"
 }
@@ -18,7 +19,7 @@ android {
         targetSdk = 35
         versionCode = 5
         versionName = "1.3.0"
-      
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         vectorDrawables {
@@ -52,14 +53,14 @@ android {
                 abiFilters("arm64-v8a", "armeabi-v7a", "x86_64")
             }
         }
-        
+
         // --- RUST BUILD CONFIG ---
         cargo {
-            module = "src/main/rust" 
-            libname = "streamx_core" 
+            module = "src/main/rust"
+            libname = "streamx_core"
             // Broad device support: ARM64, ARMv7, x86_64
-            targets = listOf("arm64", "arm", "x86_64") 
-            profile = "release" 
+            targets = listOf("arm64", "arm", "x86_64")
+            profile = "release"
         }
 
         val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\""
@@ -120,10 +121,7 @@ android {
         buildConfig = true
     }
 
-    composeOptions {
-        // Ensure this matches your Kotlin version (1.9.22+ recommended for Compose 1.6+)
-        kotlinCompilerExtensionVersion = "1.5.10" 
-    }
+    // FIX: composeOptions ব্লক ডিলিট করা হয়েছে কারণ Kotlin 2.0 তে এটি লাগে না
 
     packaging {
         resources {
