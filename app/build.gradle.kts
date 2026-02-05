@@ -28,11 +28,12 @@ android {
             cmake {
                 cppFlags("-std=c++17", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0")
 
+                // এনভায়রনমেন্ট ভেরিয়েবল হ্যান্ডলিং (VCPKG এবং অন্যান্য)
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
                 val envNdk = System.getenv("ANDROID_NDK_HOME")
                 val ndkPath = if (!envNdk.isNullOrBlank()) envNdk else android.ndkDirectory.absolutePath
 
-                [span_0](start_span)// Rust Plugin Output Directory[span_0](end_span)
+                // FIX: Rust বিল্ড ডিরেক্টরি পাথ সঠিক করা হলো
                 val rustBuildDir = "${project.layout.buildDirectory.get().asFile.absolutePath}/rust/targets"
 
                 arguments(
@@ -41,9 +42,10 @@ android {
                     "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ndkPath/build/cmake/android.toolchain.cmake",
                     "-DVCPKG_TARGET_TRIPLET=arm64-android",
                     "-DANDROID_ABI=arm64-v8a",
-                    "-DANDROID_PLATFORM=android-24",
+                    "-DANDROID_PLATFORM=android-26", // minSdk এর সাথে মিল রাখা ভালো
                     "-D_FORTIFY_SOURCE=0",
                     "-DWHISPER_NO_AVX=ON",
+                    // CMake-কে Rust এর লাইব্রেরি পাথ চিনিয়ে দেওয়া
                     "-DRUST_BUILD_DIR=$rustBuildDir"
                 )
 
@@ -51,15 +53,21 @@ android {
             }
         }
 
-        cargo {
-            module = "src/main/rust"
-            libname = "streamx_core"
-            targets = listOf("arm64", "arm", "x86_64")
-            profile = "release"
-        }
-
         val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\""
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
+    }
+
+    // Cargo কনফিগারেশন (Rust)
+    // এটি defaultConfig এর বাইরে থাকা উচিত
+    configure<org.mozilla.rust.android.gradle.RustAndroidExtension> {
+        tools {
+            cargo {
+                module = "src/main/rust" // নিশ্চিত করুন এই ফোল্ডারে Cargo.toml আছে
+                libname = "streamx_core"
+                targets = listOf("arm64", "arm", "x86_64")
+                profile = "release"
+            }
+        }
     }
 
     externalNativeBuild {
@@ -126,14 +134,9 @@ android {
     }
 }
 
-// FIX: Force Cargo to build BEFORE CMake and Android tasks
+// FIX: Ensure Rust builds before C++ triggers
+// Gradle tasks গ্রাফে cargoBuild কে externalNativeBuild এর আগে রান করানো হচ্ছে
 afterEvaluate {
-    // Make 'preBuild' depend on 'cargoBuild' to ensure Rust libs exist early
-    tasks.named("preBuild").configure {
-        dependsOn("cargoBuild")
-    }
-    
-    // Explicitly link ExternalNativeBuild (CMake) to Cargo
     tasks.withType(com.android.build.gradle.tasks.ExternalNativeBuildTask::class.java).configureEach {
         dependsOn("cargoBuild")
     }
@@ -163,6 +166,8 @@ dependencies {
 
     implementation("androidx.compose.foundation:foundation:1.6.7")
     implementation("androidx.navigation:navigation-compose:2.7.7")
+    
+    // Firebase
     implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx") {
@@ -171,12 +176,14 @@ dependencies {
     }
     implementation("com.google.android.gms:play-services-auth:21.1.1")
 
+    // Media3 (ExoPlayer)
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-common:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
     implementation("androidx.media3:media3-session:1.3.1")
 
+    // UI Utilities
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
