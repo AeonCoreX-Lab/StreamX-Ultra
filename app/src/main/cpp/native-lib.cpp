@@ -9,7 +9,7 @@
 
 #define TAG "StreamX_JNI"
 
-// --- FIX FOR LINKER ERROR (Legacy Support) ---
+// Legacy Support
 extern "C" {
     __attribute__((weak))
     ssize_t __sendto_chk(int fd, const void* buf, size_t len, size_t buflen, int flags, const struct sockaddr* addr, socklen_t addr_len) {
@@ -17,12 +17,12 @@ extern "C" {
     }
 }
 
-// গ্লোবাল ইনস্ট্যান্স (সিঙ্গেলটন)
+// Global Instances
 static TorrentSystem* torrentEngine = nullptr;
 static AIEngine* aiEngine = nullptr;
 
 // =============================================================================================
-// SECTION 1: TORRENT ENGINE JNI (Mapped to TorrentEngine.kt)
+// SECTION 1: TORRENT ENGINE JNI (Kept as is - called by Java)
 // =============================================================================================
 
 extern "C" JNIEXPORT void JNICALL
@@ -66,46 +66,42 @@ Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getFilePathNative(JNIEnv* env,
 }
 
 // =============================================================================================
-// SECTION 2: AI ENGINE JNI (Mapped to StreamXCore object in MoviePlayerScreen.kt)
+// SECTION 2: AI ENGINE BRIDGE (Called by Rust)
+// Note: We removed the JNI exports here because lib.rs handles the Java->Rust JNI part.
+// Instead, we implement the C functions that Rust calls via 'extern "C"'.
 // =============================================================================================
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initAI(JNIEnv* env, jobject, jstring modelPath) {
-    if (!aiEngine) aiEngine = new AIEngine();
-    
-    const char* path = env->GetStringUTFChars(modelPath, nullptr);
-    bool result = aiEngine->init(path);
-    env->ReleaseStringUTFChars(modelPath, path);
-    
-    return (jboolean)result;
-}
+extern "C" {
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pushAudio(JNIEnv* env, jobject, jfloatArray data) {
-    if (!aiEngine) return;
-    
-    jsize len = env->GetArrayLength(data);
-    jfloat* body = env->GetFloatArrayElements(data, 0);
-    
-    // কনভার্ট টু C++ ভেক্টর
-    std::vector<float> pcm(body, body + len);
-    aiEngine->pushAudio(pcm);
-    
-    env->ReleaseFloatArrayElements(data, body, JNI_ABORT); // JNI_ABORT স্পিড বাড়ায় কারণ ডাটা কপি ব্যাক করে না
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getSubtitle(JNIEnv* env, jobject) {
-    if (!aiEngine) return env->NewStringUTF("");
-    return env->NewStringUTF(aiEngine->getCurrentSubtitle().c_str());
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_stopAI(JNIEnv* env, jobject) {
-    if (aiEngine) {
-        aiEngine->stop();
-        // মেমোরি ক্লিনআপ (অপশনাল, কিন্তু রিসোর্স বাঁচাতে ভালো)
-        delete aiEngine;
-        aiEngine = nullptr;
+    // Rust calls this
+    bool initAINative_CPP(const char* path) {
+        if (!aiEngine) aiEngine = new AIEngine();
+        // Since we get a raw pointer, we can use it directly
+        return aiEngine->init(path);
     }
+
+    // Rust calls this
+    void pushAudioNative_CPP(const float* data, int size) {
+        if (!aiEngine) return;
+        std::vector<float> pcm(data, data + size);
+        aiEngine->pushAudio(pcm);
+    }
+
+    // Rust calls this
+    const char* getSubtitleNative_CPP() {
+        if (!aiEngine) return "";
+        static std::string lastSub; // Static to ensure pointer remains valid for Rust to copy
+        lastSub = aiEngine->getCurrentSubtitle();
+        return lastSub.c_str();
+    }
+
+    // Rust calls this
+    void stopAINative_CPP() {
+        if (aiEngine) {
+            aiEngine->stop();
+            delete aiEngine;
+            aiEngine = nullptr;
+        }
+    }
+
 }

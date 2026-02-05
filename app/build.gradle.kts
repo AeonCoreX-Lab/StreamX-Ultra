@@ -14,9 +14,9 @@ android {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4 
+        versionCode = 4
         versionName = "1.2.1"
-        
+      
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         vectorDrawables {
@@ -26,14 +26,17 @@ android {
         // --- C++ NATIVE CONFIG ---
         externalNativeBuild {
             cmake {
-                // লিঙ্কার ওয়ার্নিং ফিক্স এবং C++17 স্ট্যান্ডার্ড
                 cppFlags("-std=c++17", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0")
 
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
                 val envNdk = System.getenv("ANDROID_NDK_HOME")
                 val ndkPath = if (!envNdk.isNullOrBlank()) envNdk else android.ndkDirectory.absolutePath
 
-                println("StreamX Build: Using NDK Path -> $ndkPath")
+                // FIX: Point to the actual build output of the Rust plugin
+                val rustLibPath = "${project.layout.buildDirectory.get().asFile.absolutePath}/rustJniLibs/android"
+
+                println("StreamX Build: NDK Path -> $ndkPath")
+                println("StreamX Build: Rust Libs -> $rustLibPath")
 
                 arguments(
                     "-DANDROID_STL=c++_shared",
@@ -43,8 +46,9 @@ android {
                     "-DANDROID_ABI=arm64-v8a",
                     "-DANDROID_PLATFORM=android-24",
                     "-D_FORTIFY_SOURCE=0",
-                    // Whisper AI Optimization Flag
-                    "-DWHISPER_NO_AVX=ON"
+                    "-DWHISPER_NO_AVX=ON",
+                    // Pass the path to CMake so it can find the .so file
+                    "-DRUST_LIB_PATH=$rustLibPath"
                 )
 
                 abiFilters("arm64-v8a")
@@ -52,12 +56,12 @@ android {
         }
         
         // --- RUST BUILD CONFIG (The Brain) ---
-    cargo {
-        module = "src/main/rust" // Rust ফোল্ডারের লোকেশন
-        libname = "streamx_core" // জেনারেট হবে: libstreamx_core.so
-        targets = listOf("arm64")
-        profile = "release" // ম্যাক্সিমাম স্পিড
-    }
+        cargo {
+            module = "src/main/rust" 
+            libname = "streamx_core" 
+            targets = listOf("arm64")
+            profile = "release" 
+        }
 
         val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\""
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
@@ -71,7 +75,6 @@ android {
     }
 
     // --- AI MODEL PROTECTION ---
-    // মডেল ফাইল কম্প্রেস না করার নির্দেশ, যাতে C++ ইঞ্জিন এটি লোড করতে পারে
     aaptOptions {
         noCompress("bin")
     }
@@ -127,9 +130,16 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/DEPENDENCIES"
             excludes += "META-INF/INDEX.LIST"
-            // লিঙ্কার কনফ্লিক্ট ফিক্স: shared library ডুপ্লিকেশন এড়াতে
             pickFirsts += "lib/**/libc++_shared.so"
+            pickFirsts += "lib/**/libstreamx_core.so"
         }
+    }
+}
+
+// FIX: Force Rust build to happen before CMake linkage
+afterEvaluate {
+    tasks.withType(com.android.build.gradle.tasks.ExternalNativeBuildTask::class.java).configureEach {
+        dependsOn("cargoBuild")
     }
 }
 

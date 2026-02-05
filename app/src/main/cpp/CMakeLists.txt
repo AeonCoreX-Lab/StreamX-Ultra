@@ -5,7 +5,7 @@ project("streamx-native")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# --- 1. Whisper.cpp (AI Engine) Fetch করা ---
+# --- 1. Whisper.cpp (AI Engine) Fetch ---
 include(FetchContent)
 FetchContent_Declare(
     whisper_cpp
@@ -16,11 +16,18 @@ FetchContent_MakeAvailable(whisper_cpp)
 
 add_compile_options(-Wno-macro-redefined)
 
-# --- 2. Rust Library Import (Crucial Change) ---
-# Rust যে .so ফাইল তৈরি করবে (libstreamx_core.so), সেটি এখানে লিঙ্ক করতে হবে
+# --- 2. Rust Library Import (FIXED) ---
+# If RUST_LIB_PATH isn't passed from Gradle, try to guess it (fallback)
+if (NOT DEFINED RUST_LIB_PATH)
+    message(WARNING "RUST_LIB_PATH not defined via Gradle! Guessing path...")
+    set(RUST_LIB_PATH "${CMAKE_BINARY_DIR}/../../../rustJniLibs/android")
+endif()
+
+message(STATUS "Linking Rust Library from: ${RUST_LIB_PATH}/${ANDROID_ABI}/libstreamx_core.so")
+
 add_library(streamx_core SHARED IMPORTED)
 set_target_properties(streamx_core PROPERTIES IMPORTED_LOCATION 
-    ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libstreamx_core.so)
+    ${RUST_LIB_PATH}/${ANDROID_ABI}/libstreamx_core.so)
 
 # --- 3. Define C++ Libraries ---
 add_library(
@@ -31,7 +38,7 @@ add_library(
         ai_engine.cpp
 )
 
-# Dependencies খোঁজা
+# Find Dependencies
 find_package(LibtorrentRasterbar CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
@@ -40,13 +47,13 @@ find_package(Boost REQUIRED COMPONENTS system)
 target_link_libraries(
         streamx-native
         PRIVATE
-        streamx_core        # Rust লাইব্রেরি লিঙ্ক করা হলো
+        streamx_core        # Linked Rust Library
         LibtorrentRasterbar::torrent-rasterbar
         OpenSSL::SSL
         OpenSSL::Crypto
         Boost::system
-        whisper             # Whisper AI লিঙ্ক করা হলো
+        whisper
         log
-        android             # অডিও প্রসেসিং এর জন্য
+        android
         atomic
 )
