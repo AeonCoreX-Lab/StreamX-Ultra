@@ -28,8 +28,16 @@ jobs:
 
       - name: Set NDK Env
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
-          
-      # UPDATE: Cache key bumped to 'v5' for clean AI library build
+
+      # --- NEW STEP: INSTALL RUST TARGETS ---
+      - name: Install Rust Targets
+        run: |
+          rustup target add aarch64-linux-android
+          rustup target add armv7-linux-androideabi
+          rustup target add x86_64-linux-android
+          rustup target add i686-linux-android
+
+      # Cache for C++ builds
       - name: Restore vcpkg artifacts
         uses: actions/cache@v3
         with:
@@ -45,7 +53,6 @@ jobs:
         run: |
           LATEST_ID=$(git ls-remote https://github.com/microsoft/vcpkg.git HEAD | awk '{ print $1 }')
           echo "commit_id=$LATEST_ID" >> $GITHUB_OUTPUT
-          echo "Latest vcpkg ID: $LATEST_ID"
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
@@ -68,8 +75,8 @@ jobs:
       - name: Build Debug APK
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
-        run: ./gradlew assembleDebug
-
+        run: ./gradlew assembleDebug --stacktrace
+      
       - name: Generate and Print Signing Keys
         run: |
           echo "===================================================================="

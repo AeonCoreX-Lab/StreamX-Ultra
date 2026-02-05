@@ -3,6 +3,7 @@ package com.aeoncorex.streamx
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -19,11 +20,18 @@ import com.aeoncorex.streamx.ui.theme.ThemeViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Edge-to-Edge enable for Android 15 full immersion
+        enableEdgeToEdge()
+        
         super.onCreate(savedInstanceState)
         
         // --- 1. SMART CACHE CLEAN ON STARTUP ---
         // Removes old temp files if the app crashed previously
-        TorrentEngine.clearCache(applicationContext)
+        try {
+            TorrentEngine.clearCache(applicationContext)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         
         // --- Music Player Initialize ---
         MusicManager.initialize(applicationContext)
@@ -53,6 +61,10 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         MusicManager.release()
         // --- 2. AUTO CLEAR CACHE ON EXIT ---
-        TorrentEngine.clearCache(applicationContext)
+        try {
+            TorrentEngine.clearCache(applicationContext)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }
