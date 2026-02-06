@@ -3,7 +3,6 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services")
-    // FIX: Removed broken mozilla rust plugin
 }
 
 android {
@@ -31,9 +30,10 @@ android {
                 // এনভায়রনমেন্ট ভেরিয়েবল হ্যান্ডলিং
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
                 val envNdk = System.getenv("ANDROID_NDK_HOME")
+                // NDK পাথ ফিক্স
                 val ndkPath = if (!envNdk.isNullOrBlank()) envNdk else android.ndkDirectory.absolutePath
                 
-                // Rust Output Directory (যেখানে আমরা কপি করে রাখব)
+                // Rust Output Directory
                 val rustBuildDir = File(project.layout.buildDirectory.get().asFile, "rust/targets").absolutePath
 
                 arguments += listOf(
@@ -44,7 +44,7 @@ android {
                     "-DANDROID_ABI=arm64-v8a",
                     "-DANDROID_PLATFORM=android-26",
                     "-D_FORTIFY_SOURCE=0",
-                    "-DWHISPER_NO_AVX=ON",
+                    // Whisper AVX অপশনটি এখন CMakeLists.txt এ হ্যান্ডেল করা হচ্ছে, তাই এখান থেকে সরানো হলো বা রাখা হলেও সমস্যা নেই
                     "-DRUST_BUILD_DIR=$rustBuildDir"
                 )
 
@@ -64,7 +64,6 @@ android {
     }
 
     aaptOptions {
-        // Fix for deprecated noCompress
         ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~"
     }
     packaging {
@@ -121,7 +120,7 @@ android {
 }
 
 // ============================================================================
-// FIX: Custom Rust Build Task (Replaces Mozilla Plugin)
+// Custom Rust Build Task
 // ============================================================================
 tasks.register("cargoBuild") {
     description = "Builds the Rust library using cargo-ndk"
@@ -129,7 +128,6 @@ tasks.register("cargoBuild") {
     val rustRoot = file("src/main/rust")
     val buildDir = layout.buildDirectory.get().asFile
     
-    // Map Android ABI to Rust Target Triple
     val targets = listOf(
         "arm64-v8a" to "aarch64-linux-android",
         "armeabi-v7a" to "armv7-linux-androideabi",
@@ -141,18 +139,11 @@ tasks.register("cargoBuild") {
         targets.forEach { (androidAbi, rustTarget) ->
             println("🔨 Building Rust for $androidAbi ($rustTarget)...")
             
-            // 1. Run Cargo NDK Build
             exec {
                 workingDir = rustRoot
-                // Note: We assume cargo-ndk is installed (added in YML)
-                // We force --release for smaller APK size even in debug
                 commandLine("cargo", "ndk", "-t", androidAbi, "-o", "$rustRoot/jniLibs", "build", "--release")
             }
 
-            // 2. Copy the static .a library to where CMake expects it
-            // Cargo output: src/main/rust/target/<triple>/release/libstreamx_core.a
-            // Destination: app/build/rust/targets/<triple>/release/libstreamx_core.a
-            
             val sourceFile = File(rustRoot, "target/$rustTarget/release/libstreamx_core.a")
             val destDir = File(buildDir, "rust/targets/$rustTarget/release")
             
@@ -167,7 +158,6 @@ tasks.register("cargoBuild") {
     }
 }
 
-// Ensure Rust is built before CMake runs
 afterEvaluate {
     tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configureEach {
         dependsOn("cargoBuild")
