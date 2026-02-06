@@ -28,21 +28,21 @@ android {
             cmake {
                 cppFlags("-std=c++17", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0")
 
-                // এনভায়রনমেন্ট ভেরিয়েবল হ্যান্ডলিং (VCPKG এবং অন্যান্য)
+                // এনভায়রনমেন্ট ভেরিয়েবল হ্যান্ডলিং
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
                 val envNdk = System.getenv("ANDROID_NDK_HOME")
                 val ndkPath = if (!envNdk.isNullOrBlank()) envNdk else android.ndkDirectory.absolutePath
-
+                
                 // FIX: Rust বিল্ড ডিরেক্টরি পাথ সঠিক করা হলো
-                val rustBuildDir = "${project.layout.buildDirectory.get().asFile.absolutePath}/rust/targets"
+                val rustBuildDir = File(project.layout.buildDirectory.get().asFile, "rust/targets").absolutePath
 
-                arguments(
+                arguments += listOf(
                     "-DANDROID_STL=c++_shared",
                     "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake",
                     "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ndkPath/build/cmake/android.toolchain.cmake",
                     "-DVCPKG_TARGET_TRIPLET=arm64-android",
                     "-DANDROID_ABI=arm64-v8a",
-                    "-DANDROID_PLATFORM=android-26", // minSdk এর সাথে মিল রাখা ভালো
+                    "-DANDROID_PLATFORM=android-26",
                     "-D_FORTIFY_SOURCE=0",
                     "-DWHISPER_NO_AVX=ON",
                     // CMake-কে Rust এর লাইব্রেরি পাথ চিনিয়ে দেওয়া
@@ -121,18 +121,20 @@ android {
     }
 }
 
-// FIX: Cargo/Rust Configuration moved OUTSIDE the android block
-cargo {
-    module = "src/main/rust" // নিশ্চিত করুন এই ফোল্ডারে Cargo.toml আছে
+// FIX: Cargo/Rust Configuration (Robust Kotlin DSL)
+configure<org.mozilla.rust.android.gradle.RustAndroidExtension> {
+    module = "src/main/rust" // আপনার Cargo.toml এখানে আছে
     libname = "streamx_core"
-    targets = listOf("arm64", "arm", "x86_64")
-    profile = "release"
+    targets = listOf("arm64", "arm", "x86", "x86_64")
+    
+    // টার্গেট ডিরেক্টরি স্পেসিফাই করা হলো যাতে CMake খুঁজে পায়
+    targetDirectory = File(layout.buildDirectory.get().asFile, "rust/targets")
 }
 
-// FIX: Ensure Rust builds before C++ triggers
-// Gradle tasks গ্রাফে cargoBuild কে externalNativeBuild এর আগে রান করানো হচ্ছে
+// FIX: Ensure Rust builds BEFORE C++ triggers
 afterEvaluate {
-    tasks.withType(com.android.build.gradle.tasks.ExternalNativeBuildTask::class.java).configureEach {
+    // এই অংশটি নিশ্চিত করে যে 'externalNativeBuild' (CMake) শুরু হওয়ার আগে 'cargoBuild' শেষ হবে
+    tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configureEach {
         dependsOn("cargoBuild")
     }
 }

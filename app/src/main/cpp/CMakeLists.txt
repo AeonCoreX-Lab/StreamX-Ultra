@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.22.1)
-
 project("streamx-native")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -16,7 +15,8 @@ FetchContent_MakeAvailable(whisper_cpp)
 
 add_compile_options(-Wno-macro-redefined)
 
-# --- 2. Rust Library Import (FIXED) ---
+# --- 2. Rust Library Import (FIXED & DYNAMIC) ---
+
 # Map Android ABI to Rust Triple
 if(${ANDROID_ABI} STREQUAL "arm64-v8a")
     set(RUST_TARGET_ARCH "aarch64-linux-android")
@@ -24,20 +24,52 @@ elseif(${ANDROID_ABI} STREQUAL "armeabi-v7a")
     set(RUST_TARGET_ARCH "armv7-linux-androideabi")
 elseif(${ANDROID_ABI} STREQUAL "x86_64")
     set(RUST_TARGET_ARCH "x86_64-linux-android")
+elseif(${ANDROID_ABI} STREQUAL "x86")
+    set(RUST_TARGET_ARCH "i686-linux-android")
 else()
     message(FATAL_ERROR "Unsupported Architecture: ${ANDROID_ABI}")
 endif()
 
-# Rust output path from build.gradle argument
-set(RUST_LIB_FILE "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/release/libstreamx_core.a")
-
-# Check if file exists to give better error message
-if(NOT EXISTS "${RUST_LIB_FILE}")
-    message(WARNING "Rust library not found at: ${RUST_LIB_FILE}. Make sure 'cargoBuild' task runs before CMake.")
+# Check for RUST_BUILD_DIR from Gradle
+if (NOT DEFINED RUST_BUILD_DIR)
+    message(FATAL_ERROR "RUST_BUILD_DIR is not defined. Check build.gradle.kts")
 endif()
 
-message(STATUS "Linking Rust Static Lib: ${RUST_LIB_FILE}")
+# --- SMART PATH DETECTION ---
+# আমরা চেক করব এখন Debug নাকি Release বিল্ড চলছে
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(RUST_PROFILE "debug")
+else()
+    set(RUST_PROFILE "release")
+endif()
 
+# সম্ভাব্য পাথগুলো সেট করা
+set(RUST_LIB_PATH_CURRENT "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/${RUST_PROFILE}/libstreamx_core.a")
+set(RUST_LIB_PATH_RELEASE "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/release/libstreamx_core.a")
+set(RUST_LIB_PATH_DEBUG   "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/debug/libstreamx_core.a")
+
+# লজিক: 
+# ১. বর্তমান প্রোফাইল (Debug/Release) অনুযায়ী খুঁজবে।
+# ২. না পেলে Release ফোল্ডারে খুঁজবে (Fallback)।
+# ৩. তাও না পেলে Debug ফোল্ডারে খুঁজবে।
+
+if(EXISTS "${RUST_LIB_PATH_CURRENT}")
+    set(RUST_LIB_FILE "${RUST_LIB_PATH_CURRENT}")
+elseif(EXISTS "${RUST_LIB_PATH_RELEASE}")
+    message(STATUS "Requested ${RUST_PROFILE} lib not found, falling back to Release lib.")
+    set(RUST_LIB_FILE "${RUST_LIB_PATH_RELEASE}")
+elseif(EXISTS "${RUST_LIB_PATH_DEBUG}")
+    message(STATUS "Requested ${RUST_PROFILE} lib not found, falling back to Debug lib.")
+    set(RUST_LIB_FILE "${RUST_LIB_PATH_DEBUG}")
+else()
+    # যদি কিছুই না পাওয়া যায়, তবে এরর দেখানোর জন্য ডিফল্ট পাথ সেট করি
+    set(RUST_LIB_FILE "${RUST_LIB_PATH_CURRENT}")
+    message(WARNING "Could not find rust library at ${RUST_LIB_FILE}. Build might fail.")
+endif()
+
+message(STATUS "Looking for Rust Lib at: ${RUST_LIB_FILE}")
+
+# Import the library
 add_library(streamx_core STATIC IMPORTED)
 set_target_properties(streamx_core PROPERTIES IMPORTED_LOCATION "${RUST_LIB_FILE}")
 
@@ -46,7 +78,6 @@ add_library(
         streamx-native
         SHARED
         native-lib.cpp
-        torrent-engine.cpp
         ai_engine.cpp
 )
 
@@ -59,15 +90,14 @@ find_package(Boost REQUIRED COMPONENTS system)
 target_link_libraries(
         streamx-native
         PRIVATE
-        # Force include all symbols from Rust static lib to avoid stripping JNI functions
+        # Force include Rust symbols
         -Wl,--whole-archive streamx_core -Wl,--no-whole-archive
         
-        LibtorrentRasterbar::torrent-rasterbar
-        OpenSSL::SSL
-        OpenSSL::Crypto
-        Boost::system
         whisper
         log
         android
-        atomic
+        LibtorrentRasterbar::libtorrent-rasterbar
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        Boost::system
 )

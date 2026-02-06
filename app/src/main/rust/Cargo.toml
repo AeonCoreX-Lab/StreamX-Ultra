@@ -6,14 +6,13 @@ authors = ["AeonCoreX Team"]
 publish = false
 
 [lib]
-# FIX: 'cdylib' (Shared) এর বদলে 'staticlib' ব্যবহার করতে হবে
-# কারণ আমরা C++ এর সাথে এই লাইব্রেরিটি মার্জ করব।
+# FIX: C++ এর সাথে লিঙ্ক করার জন্য 'staticlib' বাধ্যতামূলক
 crate-type = ["staticlib"]
 
 [dependencies]
 jni = "0.21"
 lazy_static = "1.4"
-once_cell = "1.18"
+# once_cell = "1.18" # যদি লাগে
 log = "0.4"
 android_logger = "0.13"
 anyhow = "1.0"
