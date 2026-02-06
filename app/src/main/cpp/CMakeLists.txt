@@ -15,7 +15,7 @@ FetchContent_MakeAvailable(whisper_cpp)
 
 add_compile_options(-Wno-macro-redefined)
 
-# --- 2. Rust Library Import (FIXED & DYNAMIC) ---
+# --- 2. Rust Library Import (FIXED) ---
 
 # Map Android ABI to Rust Triple
 if(${ANDROID_ABI} STREQUAL "arm64-v8a")
@@ -30,44 +30,18 @@ else()
     message(FATAL_ERROR "Unsupported Architecture: ${ANDROID_ABI}")
 endif()
 
-# Check for RUST_BUILD_DIR from Gradle
 if (NOT DEFINED RUST_BUILD_DIR)
     message(FATAL_ERROR "RUST_BUILD_DIR is not defined. Check build.gradle.kts")
 endif()
 
-# --- SMART PATH DETECTION ---
-# আমরা চেক করব এখন Debug নাকি Release বিল্ড চলছে
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(RUST_PROFILE "debug")
-else()
-    set(RUST_PROFILE "release")
-endif()
-
-# সম্ভাব্য পাথগুলো সেট করা
-set(RUST_LIB_PATH_CURRENT "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/${RUST_PROFILE}/libstreamx_core.a")
-set(RUST_LIB_PATH_RELEASE "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/release/libstreamx_core.a")
-set(RUST_LIB_PATH_DEBUG   "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/debug/libstreamx_core.a")
-
-# লজিক: 
-# ১. বর্তমান প্রোফাইল (Debug/Release) অনুযায়ী খুঁজবে।
-# ২. না পেলে Release ফোল্ডারে খুঁজবে (Fallback)।
-# ৩. তাও না পেলে Debug ফোল্ডারে খুঁজবে।
-
-if(EXISTS "${RUST_LIB_PATH_CURRENT}")
-    set(RUST_LIB_FILE "${RUST_LIB_PATH_CURRENT}")
-elseif(EXISTS "${RUST_LIB_PATH_RELEASE}")
-    message(STATUS "Requested ${RUST_PROFILE} lib not found, falling back to Release lib.")
-    set(RUST_LIB_FILE "${RUST_LIB_PATH_RELEASE}")
-elseif(EXISTS "${RUST_LIB_PATH_DEBUG}")
-    message(STATUS "Requested ${RUST_PROFILE} lib not found, falling back to Debug lib.")
-    set(RUST_LIB_FILE "${RUST_LIB_PATH_DEBUG}")
-else()
-    # যদি কিছুই না পাওয়া যায়, তবে এরর দেখানোর জন্য ডিফল্ট পাথ সেট করি
-    set(RUST_LIB_FILE "${RUST_LIB_PATH_CURRENT}")
-    message(WARNING "Could not find rust library at ${RUST_LIB_FILE}. Build might fail.")
-endif()
+# আমরা Gradle এ সবসময় 'release' মুডে বিল্ড করছি ফাইলের সাইজ ছোট রাখার জন্য
+set(RUST_LIB_FILE "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/release/libstreamx_core.a")
 
 message(STATUS "Looking for Rust Lib at: ${RUST_LIB_FILE}")
+
+if(NOT EXISTS "${RUST_LIB_FILE}")
+    message(WARNING "Rust library not found at ${RUST_LIB_FILE}. CMake might fail linking.")
+endif()
 
 # Import the library
 add_library(streamx_core STATIC IMPORTED)

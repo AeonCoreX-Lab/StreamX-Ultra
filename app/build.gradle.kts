@@ -3,7 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services")
-    id("org.mozilla.rust-android-gradle.rust-android") version "0.9.3"
+    // FIX: Removed broken mozilla rust plugin
 }
 
 android {
@@ -33,7 +33,7 @@ android {
                 val envNdk = System.getenv("ANDROID_NDK_HOME")
                 val ndkPath = if (!envNdk.isNullOrBlank()) envNdk else android.ndkDirectory.absolutePath
                 
-                // FIX: Rust বিল্ড ডিরেক্টরি পাথ সঠিক করা হলো
+                // Rust Output Directory (যেখানে আমরা কপি করে রাখব)
                 val rustBuildDir = File(project.layout.buildDirectory.get().asFile, "rust/targets").absolutePath
 
                 arguments += listOf(
@@ -45,11 +45,10 @@ android {
                     "-DANDROID_PLATFORM=android-26",
                     "-D_FORTIFY_SOURCE=0",
                     "-DWHISPER_NO_AVX=ON",
-                    // CMake-কে Rust এর লাইব্রেরি পাথ চিনিয়ে দেওয়া
                     "-DRUST_BUILD_DIR=$rustBuildDir"
                 )
 
-                abiFilters("arm64-v8a", "armeabi-v7a", "x86_64")
+                abiFilters("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
             }
         }
 
@@ -65,7 +64,16 @@ android {
     }
 
     aaptOptions {
-        noCompress("bin")
+        // Fix for deprecated noCompress
+        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~"
+    }
+    packaging {
+        resources {
+             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+             excludes += "META-INF/DEPENDENCIES"
+             excludes += "META-INF/INDEX.LIST"
+             pickFirsts += "lib/**/libc++_shared.so"
+        }
     }
 
     signingConfigs {
@@ -110,30 +118,57 @@ android {
         compose = true
         buildConfig = true
     }
+}
 
-    packaging {
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            excludes += "META-INF/DEPENDENCIES"
-            excludes += "META-INF/INDEX.LIST"
-            pickFirsts += "lib/**/libc++_shared.so"
+// ============================================================================
+// FIX: Custom Rust Build Task (Replaces Mozilla Plugin)
+// ============================================================================
+tasks.register("cargoBuild") {
+    description = "Builds the Rust library using cargo-ndk"
+    
+    val rustRoot = file("src/main/rust")
+    val buildDir = layout.buildDirectory.get().asFile
+    
+    // Map Android ABI to Rust Target Triple
+    val targets = listOf(
+        "arm64-v8a" to "aarch64-linux-android",
+        "armeabi-v7a" to "armv7-linux-androideabi",
+        "x86_64" to "x86_64-linux-android",
+        "x86" to "i686-linux-android"
+    )
+
+    doLast {
+        targets.forEach { (androidAbi, rustTarget) ->
+            println("🔨 Building Rust for $androidAbi ($rustTarget)...")
+            
+            // 1. Run Cargo NDK Build
+            exec {
+                workingDir = rustRoot
+                // Note: We assume cargo-ndk is installed (added in YML)
+                // We force --release for smaller APK size even in debug
+                commandLine("cargo", "ndk", "-t", androidAbi, "-o", "$rustRoot/jniLibs", "build", "--release")
+            }
+
+            // 2. Copy the static .a library to where CMake expects it
+            // Cargo output: src/main/rust/target/<triple>/release/libstreamx_core.a
+            // Destination: app/build/rust/targets/<triple>/release/libstreamx_core.a
+            
+            val sourceFile = File(rustRoot, "target/$rustTarget/release/libstreamx_core.a")
+            val destDir = File(buildDir, "rust/targets/$rustTarget/release")
+            
+            if (sourceFile.exists()) {
+                destDir.mkdirs()
+                sourceFile.copyTo(File(destDir, "libstreamx_core.a"), overwrite = true)
+                println("✅ Copied Rust lib to: ${destDir.absolutePath}")
+            } else {
+                throw GradleException("❌ Rust build failed. File not found: ${sourceFile.absolutePath}")
+            }
         }
     }
 }
 
-// FIX: Cargo/Rust Configuration (Robust Kotlin DSL)
-configure<org.mozilla.rust.android.gradle.RustAndroidExtension> {
-    module = "src/main/rust" // আপনার Cargo.toml এখানে আছে
-    libname = "streamx_core"
-    targets = listOf("arm64", "arm", "x86", "x86_64")
-    
-    // টার্গেট ডিরেক্টরি স্পেসিফাই করা হলো যাতে CMake খুঁজে পায়
-    targetDirectory = File(layout.buildDirectory.get().asFile, "rust/targets")
-}
-
-// FIX: Ensure Rust builds BEFORE C++ triggers
+// Ensure Rust is built before CMake runs
 afterEvaluate {
-    // এই অংশটি নিশ্চিত করে যে 'externalNativeBuild' (CMake) শুরু হওয়ার আগে 'cargoBuild' শেষ হবে
     tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configureEach {
         dependsOn("cargoBuild")
     }
@@ -185,5 +220,6 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
     implementation("com.valentinilk.shimmer:compose-shimmer:1.3.0")
+    
     implementation("androidx.compose.material:material-icons-extended:1.6.7")
 }

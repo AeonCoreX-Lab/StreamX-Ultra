@@ -34,13 +34,15 @@ jobs:
       - name: Set NDK Env
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
 
-      # --- NEW STEP: INSTALL RUST TARGETS ---
-      - name: Install Rust Targets
+      # --- FIX: INSTALL RUST & CARGO-NDK ---
+      # cargo-ndk ইন্সটল না করলে রিলিজ বিল্ড ফেইল করবে কারণ Gradle স্ক্রিপ্ট এটি খোঁজে
+      - name: Install Rust and Cargo-NDK
         run: |
           rustup target add aarch64-linux-android
           rustup target add armv7-linux-androideabi
           rustup target add x86_64-linux-android
           rustup target add i686-linux-android
+          cargo install cargo-ndk
 
       - name: Restore vcpkg artifacts
         uses: actions/cache@v3
