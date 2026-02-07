@@ -11,9 +11,11 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/ggerganov/whisper.cpp.git
     GIT_TAG master
 )
+
 # Whisper অপশনগুলো আগেই সেট করে দিন যাতে ওয়ার্নিং না আসে
 set(WHISPER_BUILD_TESTS OFF CACHE BOOL "Whisper tests" FORCE)
 set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "Whisper examples" FORCE)
+
 if(ANDROID_ABI MATCHES "arm64-v8a|armeabi-v7a")
     set(WHISPER_NO_AVX ON CACHE BOOL "Disable AVX" FORCE)
     set(WHISPER_NO_AVX2 ON CACHE BOOL "Disable AVX2" FORCE)
@@ -26,8 +28,6 @@ FetchContent_MakeAvailable(whisper_cpp)
 add_compile_options(-Wno-macro-redefined)
 
 # --- 2. Rust Library Import ---
-
-# Map Android ABI to Rust Triple
 if(${ANDROID_ABI} STREQUAL "arm64-v8a")
     set(RUST_TARGET_ARCH "aarch64-linux-android")
 elseif(${ANDROID_ABI} STREQUAL "armeabi-v7a")
@@ -44,16 +44,9 @@ if (NOT DEFINED RUST_BUILD_DIR)
     message(FATAL_ERROR "RUST_BUILD_DIR is not defined. Check build.gradle.kts")
 endif()
 
-# আমরা Gradle এ সবসময় 'release' মুডে বিল্ড করছি
 set(RUST_LIB_FILE "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/release/libstreamx_core.a")
-
 message(STATUS "Looking for Rust Lib at: ${RUST_LIB_FILE}")
 
-if(NOT EXISTS "${RUST_LIB_FILE}")
-    message(WARNING "Rust library not found at ${RUST_LIB_FILE}. CMake might fail linking.")
-endif()
-
-# Import the library
 add_library(streamx_core STATIC IMPORTED)
 set_target_properties(streamx_core PROPERTIES IMPORTED_LOCATION "${RUST_LIB_FILE}")
 
@@ -63,6 +56,7 @@ add_library(
         SHARED
         native-lib.cpp
         ai_engine.cpp
+        torrent-engine.cpp  # <--- FIX: এই লাইনটি যোগ করা হয়েছে
 )
 
 # Find Dependencies
@@ -80,7 +74,7 @@ target_link_libraries(
         whisper
         log
         android
-        # FIX: লিবটরেন্টের সঠিক টার্গেট নাম ব্যবহার করা হলো
+        # Libtorrent Target
         LibtorrentRasterbar::torrent-rasterbar
         OpenSSL::SSL
         OpenSSL::Crypto
