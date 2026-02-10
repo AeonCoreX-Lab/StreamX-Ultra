@@ -1,7 +1,7 @@
 package com.aeoncorex.streamx.ui.movie
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.* // FIXED: Added for animation specs
+import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.*
@@ -23,7 +23,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset // FIXED: Added for Offset
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
@@ -84,7 +84,7 @@ fun MovieScreen(
             // 1. BACKGROUND
             CyberMeshBackground()
 
-            // 2. MAIN CONTENT
+            // 2. MAIN CONTENT (Scrollable)
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = primaryColor)
@@ -93,7 +93,8 @@ fun MovieScreen(
                 LazyColumn(
                     state = scrollState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = 80.dp, bottom = 100.dp) 
+                    // Added more top padding to accommodate the Floating Header + Status Bar
+                    contentPadding = PaddingValues(top = 110.dp, bottom = 100.dp) 
                 ) {
                     featuredMovie?.let { movie ->
                         item { HeroSection(movie = movie, onPlayClick = { openDetails(movie) }) }
@@ -106,17 +107,19 @@ fun MovieScreen(
                 }
             }
 
-            // 3. HEADER (Floating with Search Trigger)
+            // 3. HEADER (Floating & Fixed Logic)
             if (!isSearchActive) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
+                        .windowInsetsPadding(WindowInsets.statusBars) // ANDROID 15 FIX
                         .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .height(64.dp)
                         .clip(RoundedCornerShape(24.dp))
                         .background(GlassWhite)
                         .border(1.dp, Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f))), RoundedCornerShape(24.dp))
-                        .zIndex(1f)
+                        .zIndex(2f) // Ensures it stays on top
                 ) {
                     CenterAlignedTopAppBar(
                         title = {
@@ -145,17 +148,18 @@ fun MovieScreen(
                 }
             }
 
-            // 4. SEARCH OVERLAY (Functional)
+            // 4. SEARCH OVERLAY (Fixed for Android 15)
             AnimatedVisibility(
                 visible = isSearchActive,
                 enter = fadeIn(),
                 exit = fadeOut(),
-                modifier = Modifier.zIndex(2f)
+                modifier = Modifier.zIndex(3f) // Highest Z-Index
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color.Black.copy(alpha = 0.95f))
+                        .windowInsetsPadding(WindowInsets.statusBars) // ANDROID 15 FIX
                 ) {
                     Column(Modifier.fillMaxSize()) {
                         SearchBar(
@@ -179,7 +183,7 @@ fun MovieScreen(
                                     cursorColor = primaryColor
                                 )
                             ),
-                            modifier = Modifier.fillMaxWidth() // SearchBar takes full width in active mode
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             // Search Results
                             if (searchResults.isEmpty() && searchQuery.isNotEmpty()) {
@@ -209,7 +213,7 @@ fun MovieScreen(
     }
 }
 
-// --- SUB COMPONENTS ---
+// --- SUB COMPONENTS (UNCHANGED) ---
 
 @Composable
 fun HeroSection(movie: Movie, onPlayClick: () -> Unit) {
@@ -320,7 +324,6 @@ fun MovieCard(movie: Movie, isPortrait: Boolean, onClick: () -> Unit) {
     }
 }
 
-// Background Component
 @Composable
 fun CyberMeshBackground() {
     val infiniteTransition = rememberInfiniteTransition(label = "bg")

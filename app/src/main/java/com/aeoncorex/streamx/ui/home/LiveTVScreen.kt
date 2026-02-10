@@ -210,14 +210,12 @@ fun LiveTVScreen(navController: NavController) {
         // ULTRA BACKGROUND
         CyberMeshBackground()
 
-        // Using Box to layer content
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .nestedScroll(pullRefreshState.nestedScrollConnection)
         ) {
-            
-            // 1. Content Area
+
             val filteredChannels = remember(searchQuery, selectedCategory, allChannels.value, favoriteIds) {
                 allChannels.value.filter { channel ->
                     val matchesSearch = channel.name.contains(searchQuery, ignoreCase = true)
@@ -229,11 +227,17 @@ fun LiveTVScreen(navController: NavController) {
                     matchesSearch && matchesCategory
                 }
             }
-            
+
             if (isSearchActive) {
-                // Full Screen Search Overlay
-                Box(modifier = Modifier.fillMaxSize().background(backgroundColor.copy(0.95f)).zIndex(2f)) {
-                     SearchBar(
+                // --- FULL SCREEN SEARCH OVERLAY ---
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(0.95f))
+                        .zIndex(3f)
+                        .windowInsetsPadding(WindowInsets.statusBars)
+                ) {
+                    SearchBar(
                         query = searchQuery,
                         onQueryChange = { searchQuery = it },
                         onSearch = { isSearchActive = false },
@@ -285,19 +289,19 @@ fun LiveTVScreen(navController: NavController) {
                     }
                 }
             } else {
-                // Main List Content
+                // --- MAIN CONTENT AREA (SCROLLABLE) ---
                 if (isLoading) {
-                     // Add some top padding to avoid overlap with TopBar since Scaffold is gone
-                    Box(modifier = Modifier.padding(top = 80.dp)) {
-                         LoadingShimmerEffect()
+                    Box(modifier = Modifier.padding(top = 140.dp)) {
+                        LoadingShimmerEffect()
                     }
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         state = rememberLazyListState(),
-                        contentPadding = PaddingValues(top = 80.dp, bottom = 100.dp) // Added top padding for custom TopBar
+                        // Top Padding: Header (approx 64) + Categories (approx 60) + Buffer = 140.dp
+                        contentPadding = PaddingValues(top = 140.dp, bottom = 100.dp)
                     ) {
-                        // 1. Featured Section
+                        // 1. Featured Section (Now part of the scrollable list)
                         val featured = allChannels.value.filter { it.isFeatured }
                         if (featured.isNotEmpty()) {
                             item {
@@ -316,22 +320,7 @@ fun LiveTVScreen(navController: NavController) {
                             }
                         }
 
-                        // 2. Category Selector (FIXED: Changed stickyHeader to item)
-                        item {
-                            Surface(
-                                color = Color.Black.copy(0.8f),
-                                modifier = Modifier.fillMaxWidth().animateContentSize()
-                            ) {
-                                ModernCategorySelector(
-                                    categories = categories.value,
-                                    selected = selectedCategory,
-                                    counts = categoryCounts,
-                                    onSelect = { selectedCategory = it }
-                                )
-                            }
-                        }
-
-                        // 3. Channel Grid
+                        // 2. Channel Grid
                         if (filteredChannels.isEmpty()) {
                             item { EmptyState(isFavorites = selectedCategory == "Favorites") }
                         } else {
@@ -367,51 +356,70 @@ fun LiveTVScreen(navController: NavController) {
                         }
                     }
                 }
-            }
 
-            // 2. Custom Top Bar (Floating Overlay)
-            // Removed Scaffold topBar, placed manually here
-            if (!isSearchActive) {
-                Box(modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(GlassWhite)
-                    .border(1.dp, Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f))), RoundedCornerShape(24.dp))
-                    .zIndex(1f) // Ensure it's on top of list
+                // --- FIXED TOP AREA (HEADER + CATEGORIES) ---
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .windowInsetsPadding(WindowInsets.statusBars) // Android 15 Fix
+                        .zIndex(2f) // Sit on top of LazyColumn
                 ) {
-                    CenterAlignedTopAppBar(
-                        title = {
-                            Text(
-                                "STREAMX",
-                                style = TextStyle(
-                                    fontFamily = MaterialTheme.typography.displayMedium.fontFamily,
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 22.sp,
-                                    letterSpacing = 2.sp,
-                                    brush = Brush.horizontalGradient(listOf(primaryColor, secondaryColor))
+                    // A. Header (Floating Glass)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(GlassWhite)
+                            .border(1.dp, Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f))), RoundedCornerShape(24.dp))
+                    ) {
+                        CenterAlignedTopAppBar(
+                            title = {
+                                Text(
+                                    "STREAMX",
+                                    style = TextStyle(
+                                        fontFamily = MaterialTheme.typography.displayMedium.fontFamily,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 22.sp,
+                                        letterSpacing = 2.sp,
+                                        brush = Brush.horizontalGradient(listOf(primaryColor, secondaryColor))
+                                    )
                                 )
-                            )
-                        },
-                        navigationIcon = {
-                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                Icon(Icons.Default.Menu, "Menu", tint = Color.White)
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { isSearchActive = true }) {
-                                Icon(Icons.Default.Search, "Search", tint = Color.White)
-                            }
-                        },
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
-                    )
+                            },
+                            navigationIcon = {
+                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                    Icon(Icons.Default.Menu, "Menu", tint = Color.White)
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { isSearchActive = true }) {
+                                    Icon(Icons.Default.Search, "Search", tint = Color.White)
+                                }
+                            },
+                            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                        )
+                    }
+
+                    // B. Categories (Fixed below Header)
+                    // Added background to prevent content overlap issues when scrolling
+                    Surface(
+                        color = Color.Black.copy(0.6f), // Semi-transparent black
+                        modifier = Modifier.fillMaxWidth().animateContentSize()
+                    ) {
+                        ModernCategorySelector(
+                            categories = categories.value,
+                            selected = selectedCategory,
+                            counts = categoryCounts,
+                            onSelect = { selectedCategory = it }
+                        )
+                    }
                 }
             }
         }
     }
 
-    // Dialogs
+    // Dialogs (Logic unchanged)
     if (showLinkSelectorDialog && selectedChannelForLinks != null) {
         LinkSelectorDialog(selectedChannelForLinks!!, { showLinkSelectorDialog = false }) { selectedUrl ->
             showLinkSelectorDialog = false
@@ -446,7 +454,7 @@ fun LiveTVScreen(navController: NavController) {
 }
 
 // ----------------------------------------------------------------------------------
-// COMPONENTS
+// COMPONENTS (No changes needed, keeping them for completeness)
 // ----------------------------------------------------------------------------------
 
 @Composable
