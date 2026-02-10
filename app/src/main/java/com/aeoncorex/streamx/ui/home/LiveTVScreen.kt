@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -76,6 +77,8 @@ private val Context.dataStore by preferencesDataStore(name = "favorites_prefs")
 private val FAVORITES_KEY = stringSetPreferencesKey("favorite_ids")
 
 val GlassWhite = Color(0x1AFFFFFF)
+// New Solid Background Color matching the CyberMesh Theme to fix transparency issue
+val HeaderBackground = Color(0xFF0F0F15) 
 
 interface IPTVApi {
     @GET("index.json")
@@ -100,7 +103,6 @@ fun LiveTVScreen(navController: NavController) {
     // THEME COLORS (Dynamic)
     val primaryColor = MaterialTheme.colorScheme.primary
     val secondaryColor = MaterialTheme.colorScheme.secondary
-    val backgroundColor = MaterialTheme.colorScheme.background
     val surfaceColor = MaterialTheme.colorScheme.surface
 
     // State
@@ -290,18 +292,20 @@ fun LiveTVScreen(navController: NavController) {
                 }
             } else {
                 // --- MAIN CONTENT AREA (SCROLLABLE) ---
+                // Added slightly more bottom padding for better scroll experience
                 if (isLoading) {
-                    Box(modifier = Modifier.padding(top = 140.dp)) {
+                    Box(modifier = Modifier.padding(top = 150.dp)) {
                         LoadingShimmerEffect()
                     }
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         state = rememberLazyListState(),
-                        // Top Padding: Header (approx 64) + Categories (approx 60) + Buffer = 140.dp
-                        contentPadding = PaddingValues(top = 140.dp, bottom = 100.dp)
+                        // Top Padding: Header (~80) + Categories (~60) = ~140.dp
+                        // This ensures the first item starts below the header
+                        contentPadding = PaddingValues(top = 145.dp, bottom = 100.dp)
                     ) {
-                        // 1. Featured Section (Now part of the scrollable list)
+                        // 1. Featured Section
                         val featured = allChannels.value.filter { it.isFeatured }
                         if (featured.isNotEmpty()) {
                             item {
@@ -358,61 +362,67 @@ fun LiveTVScreen(navController: NavController) {
                 }
 
                 // --- FIXED TOP AREA (HEADER + CATEGORIES) ---
-                Column(
+                // FIX: Added a Surface with solid background to prevent scrolling content from showing underneath
+                Surface(
+                    color = HeaderBackground, // Solid Dark Color (Matches BG)
+                    shadowElevation = 8.dp,   // Slight shadow to separate from content
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
-                        .windowInsetsPadding(WindowInsets.statusBars) // Android 15 Fix
-                        .zIndex(2f) // Sit on top of LazyColumn
+                        .zIndex(2f) // Ensures it sits on top of LazyColumn
                 ) {
-                    // A. Header (Floating Glass)
-                    Box(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(GlassWhite)
-                            .border(1.dp, Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f))), RoundedCornerShape(24.dp))
+                            .windowInsetsPadding(WindowInsets.statusBars) // Android 15 Fix applied here
                     ) {
-                        CenterAlignedTopAppBar(
-                            title = {
-                                Text(
-                                    "STREAMX",
-                                    style = TextStyle(
-                                        fontFamily = MaterialTheme.typography.displayMedium.fontFamily,
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 22.sp,
-                                        letterSpacing = 2.sp,
-                                        brush = Brush.horizontalGradient(listOf(primaryColor, secondaryColor))
+                        // A. Header
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(Color(0xFF1E1E24)) // Slightly lighter than bg for contrast
+                                .border(1.dp, Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f))), RoundedCornerShape(24.dp))
+                        ) {
+                            CenterAlignedTopAppBar(
+                                title = {
+                                    Text(
+                                        "STREAMX",
+                                        style = TextStyle(
+                                            fontFamily = MaterialTheme.typography.displayMedium.fontFamily,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 22.sp,
+                                            letterSpacing = 2.sp,
+                                            brush = Brush.horizontalGradient(listOf(primaryColor, secondaryColor))
+                                        )
                                     )
-                                )
-                            },
-                            navigationIcon = {
-                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(Icons.Default.Menu, "Menu", tint = Color.White)
-                                }
-                            },
-                            actions = {
-                                IconButton(onClick = { isSearchActive = true }) {
-                                    Icon(Icons.Default.Search, "Search", tint = Color.White)
-                                }
-                            },
-                            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
-                        )
-                    }
+                                },
+                                navigationIcon = {
+                                    IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                        Icon(Icons.Default.Menu, "Menu", tint = Color.White)
+                                    }
+                                },
+                                actions = {
+                                    IconButton(onClick = { isSearchActive = true }) {
+                                        Icon(Icons.Default.Search, "Search", tint = Color.White)
+                                    }
+                                },
+                                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                            )
+                        }
 
-                    // B. Categories (Fixed below Header)
-                    // Added background to prevent content overlap issues when scrolling
-                    Surface(
-                        color = Color.Black.copy(0.6f), // Semi-transparent black
-                        modifier = Modifier.fillMaxWidth().animateContentSize()
-                    ) {
-                        ModernCategorySelector(
-                            categories = categories.value,
-                            selected = selectedCategory,
-                            counts = categoryCounts,
-                            onSelect = { selectedCategory = it }
-                        )
+                        // B. Categories (Fixed below Header)
+                        Box(
+                            modifier = Modifier.fillMaxWidth().animateContentSize()
+                        ) {
+                            ModernCategorySelector(
+                                categories = categories.value,
+                                selected = selectedCategory,
+                                counts = categoryCounts,
+                                onSelect = { selectedCategory = it }
+                            )
+                        }
                     }
                 }
             }

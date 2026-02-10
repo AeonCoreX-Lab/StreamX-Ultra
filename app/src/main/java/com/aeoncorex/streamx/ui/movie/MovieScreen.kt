@@ -39,6 +39,8 @@ import kotlinx.coroutines.launch
 
 // Color Definition
 val GlassWhite = Color(0x1AFFFFFF)
+// New Solid Background Color (Matching LiveTVScreen)
+val HeaderBackground = Color(0xFF0F0F15)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,8 +95,8 @@ fun MovieScreen(
                 LazyColumn(
                     state = scrollState,
                     modifier = Modifier.fillMaxSize(),
-                    // Added more top padding to accommodate the Floating Header + Status Bar
-                    contentPadding = PaddingValues(top = 110.dp, bottom = 100.dp) 
+                    // Adjusted padding so content starts below the solid header
+                    contentPadding = PaddingValues(top = 100.dp, bottom = 100.dp) 
                 ) {
                     featuredMovie?.let { movie ->
                         item { HeroSection(movie = movie, onPlayClick = { openDetails(movie) }) }
@@ -107,44 +109,54 @@ fun MovieScreen(
                 }
             }
 
-            // 3. HEADER (Floating & Fixed Logic)
+            // 3. HEADER (Fixed & Solid Background)
             if (!isSearchActive) {
-                Box(
+                Surface(
+                    color = HeaderBackground, // Solid Dark Color
+                    shadowElevation = 8.dp,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
-                        .windowInsetsPadding(WindowInsets.statusBars) // ANDROID 15 FIX
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .height(64.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(GlassWhite)
-                        .border(1.dp, Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f))), RoundedCornerShape(24.dp))
                         .zIndex(2f) // Ensures it stays on top
                 ) {
-                    CenterAlignedTopAppBar(
-                        title = {
-                            Text(
-                                "STREAMX", 
-                                style = TextStyle(
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 22.sp,
-                                    letterSpacing = 2.sp,
-                                    brush = Brush.horizontalGradient(listOf(primaryColor, secondaryColor))
-                                )
+                    Column(
+                        modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .height(64.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(Color(0xFF1E1E24)) // Slightly lighter box for contrast
+                                .border(1.dp, Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f))), RoundedCornerShape(24.dp))
+                        ) {
+                            CenterAlignedTopAppBar(
+                                title = {
+                                    Text(
+                                        "STREAMX", 
+                                        style = TextStyle(
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 22.sp,
+                                            letterSpacing = 2.sp,
+                                            brush = Brush.horizontalGradient(listOf(primaryColor, secondaryColor))
+                                        )
+                                    )
+                                },
+                                navigationIcon = {
+                                    IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                        Icon(Icons.Default.Menu, "Menu", tint = Color.White)
+                                    }
+                                },
+                                actions = {
+                                    IconButton(onClick = { viewModel.onSearchActiveChange(true) }) {
+                                        Icon(Icons.Default.Search, "Search", tint = Color.White)
+                                    }
+                                },
+                                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
                             )
-                        },
-                        navigationIcon = {
-                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                Icon(Icons.Default.Menu, "Menu", tint = Color.White)
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { viewModel.onSearchActiveChange(true) }) {
-                                Icon(Icons.Default.Search, "Search", tint = Color.White)
-                            }
-                        },
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
-                    )
+                        }
+                    }
                 }
             }
 
