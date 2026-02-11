@@ -292,18 +292,16 @@ fun LiveTVScreen(navController: NavController) {
                 }
             } else {
                 // --- MAIN CONTENT AREA (SCROLLABLE) ---
-                // Added slightly more bottom padding for better scroll experience
                 if (isLoading) {
-                    Box(modifier = Modifier.padding(top = 150.dp)) {
+                    Box(modifier = Modifier.padding(top = 180.dp)) { // Loading position adjusted
                         LoadingShimmerEffect()
                     }
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         state = rememberLazyListState(),
-                        // Top Padding: Header (~80) + Categories (~60) = ~140.dp
-                        // This ensures the first item starts below the header
-                        contentPadding = PaddingValues(top = 145.dp, bottom = 100.dp)
+                        // FIX: Increased Top Padding to 180.dp to prevent overlap with Header + Categories
+                        contentPadding = PaddingValues(top = 180.dp, bottom = 100.dp)
                     ) {
                         // 1. Featured Section
                         val featured = allChannels.value.filter { it.isFeatured }
@@ -362,19 +360,18 @@ fun LiveTVScreen(navController: NavController) {
                 }
 
                 // --- FIXED TOP AREA (HEADER + CATEGORIES) ---
-                // FIX: Added a Surface with solid background to prevent scrolling content from showing underneath
                 Surface(
-                    color = HeaderBackground, // Solid Dark Color (Matches BG)
-                    shadowElevation = 8.dp,   // Slight shadow to separate from content
+                    color = HeaderBackground, 
+                    shadowElevation = 8.dp,   
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
-                        .zIndex(2f) // Ensures it sits on top of LazyColumn
+                        .zIndex(2f) 
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .windowInsetsPadding(WindowInsets.statusBars) // Android 15 Fix applied here
+                            .windowInsetsPadding(WindowInsets.statusBars)
                     ) {
                         // A. Header
                         Box(
@@ -382,7 +379,7 @@ fun LiveTVScreen(navController: NavController) {
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 8.dp)
                                 .clip(RoundedCornerShape(24.dp))
-                                .background(Color(0xFF1E1E24)) // Slightly lighter than bg for contrast
+                                .background(Color(0xFF1E1E24)) 
                                 .border(1.dp, Brush.horizontalGradient(listOf(Color.White.copy(0.1f), Color.White.copy(0.05f))), RoundedCornerShape(24.dp))
                         ) {
                             CenterAlignedTopAppBar(
