@@ -5,7 +5,7 @@ plugins {
     id("com.android.library") version "8.7.3" apply false
     
     // Kotlin 2.0.21 (Latest with K2 compiler)
-    id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+    id("org.jetbrains.kotlin.android") version "2.3.10" apply false
 
     // *** Kotlin 2.0+ Compose Compiler Plugin ***
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
