@@ -1,1 +1,2 @@
 *.bin filter=lfs diff=lfs merge=lfs -text
+src/main/assets/vosk-model/** filter=lfs diff=lfs merge=lfs -text
