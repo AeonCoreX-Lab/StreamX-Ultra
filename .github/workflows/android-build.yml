@@ -24,10 +24,10 @@ jobs:
       - name: Setup Android NDK
         uses: android-actions/setup-android@v3
         with:
-          ndk-version: '25.2.9519653'
+          ndk-version: '27.3.13750724'
 
       - name: Set NDK Env
-        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> $GITHUB_ENV
 
       # --- FIX: INSTALL RUST & CARGO-NDK ---
       - name: Install Rust and Cargo-NDK
