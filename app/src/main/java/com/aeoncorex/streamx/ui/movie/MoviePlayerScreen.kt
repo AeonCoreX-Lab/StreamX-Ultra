@@ -24,7 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -45,7 +44,6 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import androidx.navigation.NavController
 import kotlinx.coroutines.Dispatchers
@@ -53,24 +51,43 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
 import java.net.URLDecoder
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.abs
 import kotlin.math.max
 
-// --- RUST BRIDGE (NEW) ---
+// --- RUST BRIDGE ---
 object StreamXCore {
     init {
-        // লোড অর্ডার ইম্পরট্যান্ট: Rust আগে, তারপর C++
         try { System.loadLibrary("streamx_core") } catch (e: Throwable) { e.printStackTrace() }
         try { System.loadLibrary("streamx-native") } catch (e: Throwable) { e.printStackTrace() }
     }
-
-    // Rust Functions (যেগুলো Rust ফাইলে ডিফাইন করা হয়েছে)
     external fun initAI(modelPath: String): Boolean
     external fun pushAudio(data: FloatArray)
     external fun getSubtitle(): String
     external fun stopAI()
+}
+
+// Utility function to copy Vosk Model Folder from assets
+fun copyAssetFolder(context: Context, sourceFolder: String, destinationFolder: File) {
+    if (!destinationFolder.exists()) destinationFolder.mkdirs()
+    val assets = context.assets.list(sourceFolder) ?: return
+    for (asset in assets) {
+        val sourcePath = "$sourceFolder/$asset"
+        val destFile = File(destinationFolder, asset)
+        val subAssets = context.assets.list(sourcePath)
+        if (!subAssets.isNullOrEmpty()) {
+            copyAssetFolder(context, sourcePath, destFile)
+        } else {
+            if (!destFile.exists()) {
+                context.assets.open(sourcePath).use { input ->
+                    FileOutputStream(destFile).use { output -> input.copyTo(output) }
+                }
+            }
+        }
+    }
 }
 
 @OptIn(UnstableApi::class)
@@ -81,11 +98,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     val decodedUrl = remember { try { URLDecoder.decode(encodedUrl, "UTF-8") } catch (e: Exception) { encodedUrl } }
     val scope = rememberCoroutineScope()
 
-    // --- State Management ---
     var videoPath by remember { mutableStateOf<String?>(null) }
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
 
-    // UI States
     var isPlaying by remember { mutableStateOf(true) }
     var isBuffering by remember { mutableStateOf(true) }
     var currentTime by remember { mutableLongStateOf(0L) }
@@ -94,7 +109,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var resizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var isLocked by remember { mutableStateOf(false) }
 
-    // AI States
     var isAiEnabled by remember { mutableStateOf(false) }
     var aiSubtitleText by remember { mutableStateOf("") }
     var isAiModelLoaded by remember { mutableStateOf(false) }
@@ -102,7 +116,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var subtitleFontSize by remember { mutableFloatStateOf(24f) }
     var showSubtitleSettings by remember { mutableStateOf(false) }
 
-    // Gesture States
     var volumeLevel by remember { mutableFloatStateOf(0.5f) }
     var brightnessLevel by remember { mutableFloatStateOf(0.5f) }
     var gestureIcon by remember { mutableStateOf<ImageVector?>(null) }
@@ -111,7 +124,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var forwardAnimAlpha by remember { mutableFloatStateOf(0f) }
     var rewindAnimAlpha by remember { mutableFloatStateOf(0f) }
 
-    // Torrent Info
     var statusMsg by remember { mutableStateOf("Initializing Core...") }
     var downloadSpeed by remember { mutableStateOf("0 KB/s") }
     var seeds by remember { mutableIntStateOf(0) }
@@ -119,7 +131,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
 
-    // --- SYSTEM UI SETUP ---
     DisposableEffect(Unit) {
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -129,44 +140,39 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         insetsController?.hide(WindowInsetsCompat.Type.systemBars())
         insetsController?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
+        // Get initial brightness
+        brightnessLevel = activity?.window?.attributes?.screenBrightness?.takeIf { it >= 0 } ?: 0.5f
+
         onDispose {
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             insetsController?.show(WindowInsetsCompat.Type.systemBars())
-            
-            // Clean up Engines
             TorrentEngine.stop()
             StreamXCore.stopAI()
         }
     }
 
-    // --- ROBUST AI INITIALIZATION (FIXED) ---
+    // --- VOSK AI INITIALIZATION ---
     LaunchedEffect(isAiEnabled) {
         if (isAiEnabled) {
             val success = withContext(Dispatchers.IO) {
-                val modelFile = File(context.filesDir, "ggml-tiny.bin")
-                
-                // Integrity Check: ফাইল আছে কিনা এবং সাইজ ১MB এর বেশি কিনা
-                if (!modelFile.exists() || modelFile.length() < 1024 * 1024) {
+                // Vosk Model Folder Path
+                val modelDir = File(context.filesDir, "vosk-model")
+                if (!modelDir.exists() || modelDir.listFiles()?.isEmpty() == true) {
                     try {
-                        context.assets.open("ggml-tiny.bin").use { input ->
-                            val tempFile = File(context.filesDir, "ggml-tiny.tmp")
-                            tempFile.outputStream().use { output -> input.copyTo(output) }
-                            // Atomic Rename (ফাইল করাপশন আটকায়)
-                            tempFile.renameTo(modelFile)
-                        }
+                        // Assuming you have placed an unzipped vosk model inside assets/vosk-model
+                        copyAssetFolder(context, "vosk-model", modelDir)
                     } catch (e: Exception) {
                         e.printStackTrace()
                         return@withContext false
                     }
                 }
-                // Call Rust Bridge
-                StreamXCore.initAI(modelFile.absolutePath)
+                StreamXCore.initAI(modelDir.absolutePath)
             }
             isAiModelLoaded = success
             if (!success) {
-                aiSubtitleText = "AI Init Failed: Check Model"
-                delay(2000)
+                aiSubtitleText = "AI Init Failed. Put Vosk model in assets/vosk-model"
+                delay(3000)
                 isAiEnabled = false
             }
         } else {
@@ -176,18 +182,16 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // --- HIGH SPEED SUBTITLE POLLING (RUST) ---
     LaunchedEffect(isAiEnabled, isAiModelLoaded) {
         if (isAiEnabled && isAiModelLoaded) {
             while (true) {
                 val sub = withContext(Dispatchers.Default) { StreamXCore.getSubtitle() }
                 if (sub.isNotEmpty()) aiSubtitleText = sub
-                delay(100) // 10Hz poll rate
+                delay(100) 
             }
         }
     }
 
-    // --- TORRENT ENGINE HANDLER ---
     LaunchedEffect(decodedUrl) {
         if (decodedUrl.startsWith("magnet:?")) {
             TorrentEngine.start(context, decodedUrl).collect { state ->
@@ -200,10 +204,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         seeds = state.seeds
                     }
                     is StreamState.Ready -> {
-                        if (videoPath != state.filePath) {
-                            videoPath = state.filePath
-                            // ভিডিও পাথ পাওয়ার পর অটো প্লে শুরু হবে Player ব্লকে
-                        }
+                        if (videoPath != state.filePath) videoPath = state.filePath
                         statusMsg = ""
                     }
                     is StreamState.Error -> statusMsg = "Error: ${state.message}"
@@ -216,7 +217,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // --- AUDIO SINK INTERCEPTOR ---
     val renderersFactory = remember {
         object : DefaultRenderersFactory(context) {
             override fun buildAudioSink(c: Context, enableFloat: Boolean, enableParams: Boolean): AudioSink {
@@ -228,13 +228,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 val size = bufferCopy.remaining() / 2
                                 if (size > 0) {
                                     val floats = FloatArray(size)
-                                    for (i in 0 until size) {
-                                        floats[i] = bufferCopy.short / 32768f
-                                    }
-                                    // Send to Rust (Fast & Safe)
+                                    for (i in 0 until size) floats[i] = bufferCopy.short / 32768f
                                     StreamXCore.pushAudio(floats)
                                 }
-                            } catch (e: Exception) { /* Ignore dropped frames */ }
+                            } catch (e: Exception) { }
                         }
                         return super.handleBuffer(buffer, timeUs, count)
                     }
@@ -243,10 +240,8 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // --- EXO PLAYER ---
     DisposableEffect(videoPath) {
         if (videoPath == null) return@DisposableEffect onDispose {}
-
         val player = ExoPlayer.Builder(context, renderersFactory).build().apply {
             setMediaItem(MediaItem.fromUri(Uri.parse(videoPath)))
             prepare()
@@ -259,7 +254,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 isPlaying = playing
                 if (playing) {
                     isBuffering = false
-                    // ৩ সেকেন্ড পর কন্ট্রোল হাইড
                     scope.launch { delay(3000); if(isPlaying) isControlsVisible = false }
                 }
             }
@@ -281,10 +275,8 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // --- UI COMPOSITION ---
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         
-        // 1. Video Layer
         if (videoPath != null) {
             AndroidView(
                 factory = { ctx ->
@@ -298,14 +290,16 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 update = { view ->
                     if (view.player != exoPlayer) view.player = exoPlayer
                     view.resizeMode = resizeMode
-                    // AI চালু থাকলে বিল্ট-ইন সাবটাইটেল বন্ধ রাখব
                     view.subtitleView?.visibility = if (isAiEnabled) android.view.View.GONE else android.view.View.VISIBLE
                 },
                 modifier = Modifier.fillMaxSize()
             )
         }
 
-        // 2. Gesture Detector Layer
+        // --- GESTURE FIX: Throttling & Accumulation logic ---
+        var lastUpdateTime by remember { mutableLongStateOf(0L) }
+        var dragAccumulator by remember { mutableFloatStateOf(0f) }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -328,34 +322,52 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 }
                 .pointerInput(Unit) {
                     detectVerticalDragGestures(
-                        onDragStart = { showGestureOverlay = true },
-                        onDragEnd = { scope.launch { delay(500); showGestureOverlay = false } }
+                        onDragStart = { 
+                            showGestureOverlay = true 
+                            dragAccumulator = 0f
+                        },
+                        onDragEnd = { 
+                            scope.launch { delay(500); showGestureOverlay = false } 
+                            dragAccumulator = 0f
+                        }
                     ) { change, dragAmount ->
                         if (isLocked) return@detectVerticalDragGestures
-                        val isRight = change.position.x > size.width / 2
-                        val delta = -dragAmount / (size.height / 2) // Invert drag
+                        
+                        dragAccumulator += dragAmount
+                        val currentTimeMs = System.currentTimeMillis()
+                        
+                        // Throttling: Update system UI at most once every 50ms & only if dragged enough
+                        if (currentTimeMs - lastUpdateTime > 50 && abs(dragAccumulator) > 5f) {
+                            lastUpdateTime = currentTimeMs
+                            val isRight = change.position.x > size.width / 2
+                            val delta = -dragAccumulator / (size.height / 2) // Invert drag
 
-                        if (isRight) { // Volume
-                            val volDelta = (delta * maxVolume).toInt()
-                            val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                            val newVol = (current + volDelta).coerceIn(0, maxVolume)
-                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
-                            volumeLevel = newVol / maxVolume.toFloat()
-                            gestureIcon = Icons.Rounded.VolumeUp
-                            gestureText = "${(volumeLevel * 100).toInt()}%"
-                        } else { // Brightness
-                            brightnessLevel = (brightnessLevel + delta).coerceIn(0f, 1f)
-                            val lp = activity?.window?.attributes
-                            lp?.screenBrightness = brightnessLevel
-                            activity?.window?.attributes = lp
-                            gestureIcon = Icons.Rounded.BrightnessMedium
-                            gestureText = "${(brightnessLevel * 100).toInt()}%"
+                            if (isRight) { // Volume
+                                val volDelta = (delta * maxVolume).toInt()
+                                if (volDelta != 0) {
+                                    val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                                    val newVol = (current + volDelta).coerceIn(0, maxVolume)
+                                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
+                                    volumeLevel = newVol / maxVolume.toFloat()
+                                    gestureIcon = Icons.Rounded.VolumeUp
+                                    gestureText = "${(volumeLevel * 100).toInt()}%"
+                                    dragAccumulator = 0f // reset after applying
+                                }
+                            } else { // Brightness
+                                brightnessLevel = (brightnessLevel + delta).coerceIn(0.01f, 1f)
+                                val lp = activity?.window?.attributes
+                                lp?.screenBrightness = brightnessLevel
+                                activity?.window?.attributes = lp
+                                gestureIcon = Icons.Rounded.BrightnessMedium
+                                gestureText = "${(brightnessLevel * 100).toInt()}%"
+                                dragAccumulator = 0f // reset after applying
+                            }
                         }
                     }
                 }
         )
 
-        // 3. Animation Overlays
+        // Overlays & Subtitles
         if (rewindAnimAlpha > 0) {
             Box(Modifier.align(Alignment.CenterStart).padding(50.dp).alpha(rewindAnimAlpha).background(Color.Black.copy(0.5f), CircleShape).padding(16.dp)) {
                 Icon(Icons.Rounded.FastRewind, null, tint = Color.White, modifier = Modifier.size(40.dp))
@@ -367,7 +379,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
 
-        // 4. AI Subtitles (Custom Render)
         if (isAiEnabled && aiSubtitleText.isNotBlank()) {
             Box(
                 modifier = Modifier
@@ -387,7 +398,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
 
-        // 5. Gesture Info Overlay
         if (showGestureOverlay) {
             Box(Modifier.align(Alignment.Center).background(Color.Black.copy(0.7f), RoundedCornerShape(16.dp)).padding(24.dp)) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -397,9 +407,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
 
-        // 6. Loading / Buffering UI
         if (isBuffering && videoPath == null) {
-            // Initial Load
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(color = Color.Cyan)
@@ -411,7 +419,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 }
             }
         } else {
-            // Player Controls
             AnimatedVisibility(
                 visible = isControlsVisible || isBuffering,
                 enter = fadeIn(),
@@ -424,7 +431,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
                     }
 
-                    // Top Bar
                     Row(Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopStart), horizontalArrangement = Arrangement.SpaceBetween) {
                         IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
                         
@@ -440,13 +446,12 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 colors = ButtonDefaults.buttonColors(containerColor = if(isAiEnabled) Color.Green else Color.DarkGray),
                                 modifier = Modifier.height(35.dp),
                                 contentPadding = PaddingValues(horizontal = 8.dp)
-                            ) { Text("AI", color = Color.Black) }
+                            ) { Text("Vosk AI", color = Color.Black) }
                             
                             IconButton(onClick = { showSubtitleSettings = true }) { Icon(Icons.Rounded.Palette, null, tint = Color.White) }
                         }
                     }
 
-                    // Center Controls
                     if (!isLocked && !isBuffering) {
                         Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(40.dp)) {
                             IconButton(onClick = { exoPlayer?.seekTo((exoPlayer?.currentPosition ?: 0) - 10000) }) {
@@ -461,7 +466,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         }
                     }
 
-                    // Lock Button
                     IconButton(
                         onClick = { isLocked = !isLocked },
                         modifier = Modifier.align(Alignment.CenterEnd).padding(32.dp)
@@ -469,7 +473,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         Icon(if(isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, null, tint = if(isLocked) Color.Red else Color.White) 
                     }
 
-                    // Bottom Seekbar
                     if (!isLocked) {
                         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -488,7 +491,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
 
-        // Settings Dialog
         if (showSubtitleSettings) {
             AlertDialog(
                 onDismissRequest = { showSubtitleSettings = false },

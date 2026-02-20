@@ -5,7 +5,7 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
-#include "whisper.h"
+#include "vosk_api.h" // Vosk Header
 
 class AIEngine {
 public:
@@ -18,14 +18,16 @@ public:
     void stop();
 
 private:
-    struct whisper_context* ctx = nullptr;
+    VoskModel* model = nullptr;
+    VoskRecognizer* recognizer = nullptr;
+    
     std::mutex audioMutex;
     std::vector<float> audioBuffer;
     std::atomic<bool> isRunning;
     std::string currentText;
     
-    // AI প্রসেসিং লুপ
     void processingLoop();
+    std::string extractTextFromJson(const std::string& json);
 };
 
 #endif

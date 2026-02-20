@@ -59,6 +59,7 @@ jobs:
         run: |
           LATEST_ID=$(git ls-remote https://github.com/microsoft/vcpkg.git HEAD | awk '{ print $1 }')
           echo "commit_id=$LATEST_ID" >> $GITHUB_OUTPUT
+          echo "Latest vcpkg ID: $LATEST_ID"
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11

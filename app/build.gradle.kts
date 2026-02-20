@@ -27,14 +27,14 @@ android {
             cmake {
                 cppFlags("-std=c++17", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0")
 
-                // এনভায়রনমেন্ট ভেরিয়েবল হ্যান্ডলিং
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
                 val envNdk = System.getenv("ANDROID_NDK_HOME")
-                // NDK পাথ ফিক্স
                 val ndkPath = if (!envNdk.isNullOrBlank()) envNdk else android.ndkDirectory.absolutePath
                 
-                // Rust Output Directory
                 val rustBuildDir = File(project.layout.buildDirectory.get().asFile, "rust/targets").absolutePath
+                
+                // --- FIX: FETCH GITHUB SECRET AND PASS TO CMAKE/RUST ---
+                val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "api_key_not_found"
 
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
@@ -44,16 +44,13 @@ android {
                     "-DANDROID_ABI=arm64-v8a",
                     "-DANDROID_PLATFORM=android-26",
                     "-D_FORTIFY_SOURCE=0",
-                    // Whisper AVX অপশনটি এখন CMakeLists.txt এ হ্যান্ডেল করা হচ্ছে, তাই এখান থেকে সরানো হলো বা রাখা হলেও সমস্যা নেই
-                    "-DRUST_BUILD_DIR=$rustBuildDir"
+                    "-DRUST_BUILD_DIR=$rustBuildDir",
+                    "-DTMDB_API_KEY=$tmdbApiKey" // <--- PASSING SECRET TO CMAKE
                 )
 
                 abiFilters("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
             }
         }
-
-        val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "\"\""
-        buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
     }
 
     externalNativeBuild {
@@ -63,14 +60,18 @@ android {
         }
     }
 
-    aaptOptions {
-        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~"
+    sourceSets {
+        getByName("main") {
+            assets.srcDirs("src/main/assets") // Vosk Model Folder
+        }
     }
+
     packaging {
         resources {
              excludes += "/META-INF/{AL2.0,LGPL2.1}"
              excludes += "META-INF/DEPENDENCIES"
              excludes += "META-INF/INDEX.LIST"
+             // --- FIX: RESOLVE VOSK + RUST LIBC++ CONFLICT ---
              pickFirsts += "lib/**/libc++_shared.so"
         }
     }
@@ -119,15 +120,11 @@ android {
     }
 }
 
-// ============================================================================
 // Custom Rust Build Task
-// ============================================================================
 tasks.register("cargoBuild") {
     description = "Builds the Rust library using cargo-ndk"
-    
     val rustRoot = file("src/main/rust")
     val buildDir = layout.buildDirectory.get().asFile
-    
     val targets = listOf(
         "arm64-v8a" to "aarch64-linux-android",
         "armeabi-v7a" to "armv7-linux-androideabi",
@@ -138,9 +135,11 @@ tasks.register("cargoBuild") {
     doLast {
         targets.forEach { (androidAbi, rustTarget) ->
             println("🔨 Building Rust for $androidAbi ($rustTarget)...")
-            
             exec {
                 workingDir = rustRoot
+                // Pass the TMDB API KEY to cargo build
+                val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "api_key_not_found"
+                environment("TMDB_API_KEY", tmdbApiKey)
                 commandLine("cargo", "ndk", "-t", androidAbi, "-o", "$rustRoot/jniLibs", "build", "--release")
             }
 
@@ -150,7 +149,6 @@ tasks.register("cargoBuild") {
             if (sourceFile.exists()) {
                 destDir.mkdirs()
                 sourceFile.copyTo(File(destDir, "libstreamx_core.a"), overwrite = true)
-                println("✅ Copied Rust lib to: ${destDir.absolutePath}")
             } else {
                 throw GradleException("❌ Rust build failed. File not found: ${sourceFile.absolutePath}")
             }

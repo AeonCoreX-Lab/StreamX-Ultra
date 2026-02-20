@@ -1,7 +1,6 @@
 package com.aeoncorex.streamx.ui.movie
 
 import android.util.Log
-import com.aeoncorex.streamx.BuildConfig 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import retrofit2.Retrofit
@@ -46,7 +45,9 @@ interface TmdbApi {
 }
 
 object MovieRepository {
-    private val API_KEY = BuildConfig.TMDB_API_KEY 
+    // --- SECURE KEY FETCH FROM RUST ---
+    private val API_KEY = StreamXCore.getTmdbKey() 
+    
     private const val IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
     private const val BACKDROP_BASE_URL = "https://image.tmdb.org/t/p/original"
     
@@ -70,7 +71,10 @@ object MovieRepository {
     }
 
     private suspend fun safeApiCall(call: suspend () -> TmdbResponse): List<Movie> = withContext(Dispatchers.IO) {
-        if (API_KEY.isEmpty()) return@withContext emptyList()
+        if (API_KEY.isEmpty() || API_KEY == "api_key_not_found") {
+            Log.e("MovieRepo", "Invalid API Key")
+            return@withContext emptyList()
+        }
         try {
             call().results.filter { it.posterPath != null }.map { mapToMovie(it) }
         } catch (e: Exception) {
@@ -114,7 +118,7 @@ object MovieRepository {
                 trailerKey = res.videos?.results?.find { it.site == "YouTube" && it.type == "Trailer" }?.key,
                 recommendations = res.recommendations?.results?.take(10)?.map { mapToMovie(it) } ?: emptyList(),
                 seasons = res.seasons ?: emptyList(),
-                imdbId = res.external_ids?.imdbId // Capture IMDB ID
+                imdbId = res.external_ids?.imdbId 
             )
         } catch (e: Exception) {
             Log.e("MovieRepo", "Detail Error: ${e.localizedMessage}")

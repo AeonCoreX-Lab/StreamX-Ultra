@@ -3,7 +3,6 @@
 
 use jni::JNIEnv;
 use jni::objects::{JClass, JString, JFloatArray};
-// FIX: unused 'jfloatArray' import removed
 use jni::sys::{jboolean, jstring};
 use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
@@ -35,14 +34,13 @@ extern "C" {
 
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initAI(
-    mut env: JNIEnv, // FIX: Added 'mut' here to fix E0596
+    mut env: JNIEnv, 
     _class: JClass,
-    model_path: JString,
+    model_path: JString
 ) -> jboolean {
-    // env.get_string requires mutable borrow
-    let path_str: String = env.get_string(&model_path).expect("Couldn't get java string").into();
-    let c_path = CString::new(path_str).unwrap();
-
+    let path: String = env.get_string(&model_path).expect("Invalid string").into();
+    let c_path = CString::new(path).unwrap();
+    
     let success = unsafe { initAINative_CPP(c_path.as_ptr()) };
     
     let mut ctx = CTX.lock().unwrap();
@@ -54,7 +52,7 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initAI(
 
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pushAudio(
-    mut env: JNIEnv, // FIX: Added 'mut'
+    mut env: JNIEnv, 
     _class: JClass,
     audio_data: JFloatArray, 
 ) {
@@ -64,7 +62,6 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pushAudio
     let len = env.get_array_length(&audio_data).unwrap();
     let mut buf = vec![0.0f32; len as usize];
     
-    // get_float_array_region requires mutable env
     env.get_float_array_region(&audio_data, 0, &mut buf).unwrap();
 
     unsafe {
@@ -74,7 +71,7 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pushAudio
 
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getSubtitle(
-    mut env: JNIEnv, // FIX: Added 'mut'
+    mut env: JNIEnv, 
     _class: JClass,
 ) -> jstring {
     let c_sub = unsafe { getSubtitleNative_CPP() };
@@ -84,18 +81,30 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getSubtit
     }
 
     let c_str = unsafe { CStr::from_ptr(c_sub) };
-    let output = c_str.to_str().unwrap_or("");
+    let sub_str = c_str.to_str().unwrap_or("");
     
-    // new_string requires mutable env
-    env.new_string(output).unwrap().into_raw()
+    env.new_string(sub_str).unwrap().into_raw()
 }
 
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_stopAI(
-    _env: JNIEnv, 
+    _env: JNIEnv,
     _class: JClass,
 ) {
     let mut ctx = CTX.lock().unwrap();
     ctx.is_running = false;
+    ctx.model_loaded = false;
+    
     unsafe { stopAINative_CPP(); }
+}
+
+// --- SECURE VAULT FOR TMDB API ---
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getTmdbKey(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    // Fetches the secret injected from GitHub Actions during cargo build
+    let secret_key = option_env!("TMDB_API_KEY").unwrap_or("api_key_not_found");
+    env.new_string(secret_key).expect("Failed to create JNI string").into_raw()
 }

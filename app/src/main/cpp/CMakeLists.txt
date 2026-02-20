@@ -4,30 +4,16 @@ project("streamx-native")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# --- 1. Whisper.cpp (AI Engine) Fetch ---
+# --- 1. Vosk API (AI Engine) Fetch ---
+# Vosk সরাসরি প্রি-বিল্ড Android লাইব্রেরি দেয়, তাই বিল্ড টাইম অনেক কম লাগবে
 include(FetchContent)
 FetchContent_Declare(
-    whisper_cpp
-    GIT_REPOSITORY https://github.com/ggerganov/whisper.cpp.git
-    GIT_TAG master
+    vosk_android
+    URL https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-android-lib-0.3.45.zip
 )
+FetchContent_MakeAvailable(vosk_android)
 
-# Whisper অপশনগুলো আগেই সেট করে দিন যাতে ওয়ার্নিং না আসে
-set(WHISPER_BUILD_TESTS OFF CACHE BOOL "Whisper tests" FORCE)
-set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "Whisper examples" FORCE)
-
-if(ANDROID_ABI MATCHES "arm64-v8a|armeabi-v7a")
-    set(WHISPER_NO_AVX ON CACHE BOOL "Disable AVX" FORCE)
-    set(WHISPER_NO_AVX2 ON CACHE BOOL "Disable AVX2" FORCE)
-    set(WHISPER_NO_FMA ON CACHE BOOL "Disable FMA" FORCE)
-    set(WHISPER_NO_F16C ON CACHE BOOL "Disable F16C" FORCE)
-endif()
-
-FetchContent_MakeAvailable(whisper_cpp)
-
-add_compile_options(-Wno-macro-redefined)
-
-# --- 2. Rust Library Import ---
+# --- 2. Rust Library Import (No Changes Here!) ---
 if(${ANDROID_ABI} STREQUAL "arm64-v8a")
     set(RUST_TARGET_ARCH "aarch64-linux-android")
 elseif(${ANDROID_ABI} STREQUAL "armeabi-v7a")
@@ -45,18 +31,31 @@ if (NOT DEFINED RUST_BUILD_DIR)
 endif()
 
 set(RUST_LIB_FILE "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/release/libstreamx_core.a")
-message(STATUS "Looking for Rust Lib at: ${RUST_LIB_FILE}")
-
 add_library(streamx_core STATIC IMPORTED)
 set_target_properties(streamx_core PROPERTIES IMPORTED_LOCATION "${RUST_LIB_FILE}")
 
-# --- 3. Define C++ Libraries ---
+
+# GitHub Secrets থেকে আসা TMDB_API_KEY-টি Rust-এর কাছে পাঠানো
+if (DEFINED TMDB_API_KEY)
+    # এটি Rust কম্পাইলারকে বলবে যে একটি এনভায়রনমেন্ট ভেরিয়েবল সেট করতে হবে
+    add_definitions(-DTMDB_API_KEY="${TMDB_API_KEY}")
+    message(STATUS "TMDB API Key injected into CMake")
+endif()
+
+# --- 3. Define Vosk Library Path ---
+set(VOSK_LIB_PATH "${vosk_android_SOURCE_DIR}/lib/${ANDROID_ABI}/libvosk.so")
+add_library(vosk SHARED IMPORTED)
+set_target_properties(vosk PROPERTIES IMPORTED_LOCATION ${VOSK_LIB_PATH})
+
+# --- 4. Define C++ Libraries ---
+include_directories("${vosk_android_SOURCE_DIR}/include")
+
 add_library(
         streamx-native
         SHARED
         native-lib.cpp
         ai_engine.cpp
-        torrent-engine.cpp  # <--- FIX: এই লাইনটি যোগ করা হয়েছে
+        torrent-engine.cpp 
 )
 
 # Find Dependencies
@@ -64,17 +63,14 @@ find_package(LibtorrentRasterbar CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
 
-# --- 4. Link Everything Together ---
+# --- 5. Link Everything Together ---
 target_link_libraries(
         streamx-native
         PRIVATE
-        # Force include Rust symbols
         -Wl,--whole-archive streamx_core -Wl,--no-whole-archive
-        
-        whisper
+        vosk   # <--- Link Vosk instead of Whisper
         log
         android
-        # Libtorrent Target
         LibtorrentRasterbar::torrent-rasterbar
         OpenSSL::SSL
         OpenSSL::Crypto
