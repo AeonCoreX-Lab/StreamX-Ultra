@@ -1,8 +1,6 @@
 # ১. গ্লোবাল সেটিংস: টেক্সট ফাইল অটো-ডিটেক্ট করা
 * text=auto
-
 # ২. অনিক্স মডেল ফাইল (Large File Storage হিসেবে গণ্য করা হবে)
 *.onnx filter=lfs diff=lfs merge=lfs -text
-
 # ৩. অ্যান্ড্রয়েড শেয়ারড লাইব্রেরি (.so ফাইল)
 *.so filter=lfs diff=lfs merge=lfs -text

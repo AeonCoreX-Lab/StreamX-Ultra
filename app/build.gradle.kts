@@ -71,8 +71,14 @@ android {
              excludes += "/META-INF/{AL2.0,LGPL2.1}"
              excludes += "META-INF/DEPENDENCIES"
              excludes += "META-INF/INDEX.LIST"
-             // --- FIX: RESOLVE VOSK + RUST LIBC++ CONFLICT ---
-             pickFirsts += "lib/**/libc++_shared.so"
+        }
+        jniLibs {
+             // --- FIX: RESOLVE JNI vs CMAKE IMPORTED DUPLICATE CONFLICTS ---
+             pickFirsts += setOf(
+                 "**/libc++_shared.so",
+                 "**/libonnxruntime.so",
+                 "**/libsherpa-onnx-c-api.so"
+             )
         }
     }
 
@@ -187,7 +193,6 @@ dependencies {
     implementation("androidx.compose.foundation:foundation:1.6.7")
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
-    
     // Firebase
     implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
     implementation("com.google.firebase:firebase-auth-ktx")
