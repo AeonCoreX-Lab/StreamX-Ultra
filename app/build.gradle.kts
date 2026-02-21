@@ -186,7 +186,7 @@ dependencies {
 
     implementation("androidx.compose.foundation:foundation:1.6.7")
     implementation("androidx.navigation:navigation-compose:2.7.7")
-    implementation("com.alphacephei:vosk-android:0.3.50")
+
     
     // Firebase
     implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
