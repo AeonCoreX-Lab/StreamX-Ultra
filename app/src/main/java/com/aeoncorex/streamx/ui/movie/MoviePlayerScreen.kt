@@ -68,6 +68,9 @@ object StreamXCore {
     external fun pushAudio(data: FloatArray)
     external fun getSubtitle(): String
     external fun stopAI()
+    
+    // --- FIX IS HERE: Added missing JNI function declaration ---
+    external fun getTmdbKey(): String 
 }
 
 // Utility function to copy Sherpa Model Folder from assets
