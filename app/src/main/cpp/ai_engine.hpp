@@ -5,7 +5,7 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
-#include "vosk_api.h" // Vosk Header
+#include "sherpa-onnx/c-api/c-api.h" // Sherpa-ONNX Header
 
 class AIEngine {
 public:
@@ -18,8 +18,8 @@ public:
     void stop();
 
 private:
-    VoskModel* model = nullptr;
-    VoskRecognizer* recognizer = nullptr;
+    SherpaOnnxOnlineRecognizer* recognizer = nullptr;
+    SherpaOnnxOnlineStream* stream = nullptr;
     
     std::mutex audioMutex;
     std::vector<float> audioBuffer;
@@ -27,7 +27,6 @@ private:
     std::string currentText;
     
     void processingLoop();
-    std::string extractTextFromJson(const std::string& json);
 };
 
 #endif

@@ -70,7 +70,7 @@ object StreamXCore {
     external fun stopAI()
 }
 
-// Utility function to copy Vosk Model Folder from assets
+// Utility function to copy Sherpa Model Folder from assets
 fun copyAssetFolder(context: Context, sourceFolder: String, destinationFolder: File) {
     if (!destinationFolder.exists()) destinationFolder.mkdirs()
     val assets = context.assets.list(sourceFolder) ?: return
@@ -152,16 +152,16 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // --- VOSK AI INITIALIZATION ---
+    // --- SHERPA AI INITIALIZATION ---
     LaunchedEffect(isAiEnabled) {
         if (isAiEnabled) {
             val success = withContext(Dispatchers.IO) {
-                // Vosk Model Folder Path
-                val modelDir = File(context.filesDir, "vosk-model")
+                // Sherpa Model Folder Path
+                val modelDir = File(context.filesDir, "sherpa-model")
                 if (!modelDir.exists() || modelDir.listFiles()?.isEmpty() == true) {
                     try {
-                        // Assuming you have placed an unzipped vosk model inside assets/vosk-model
-                        copyAssetFolder(context, "vosk-model", modelDir)
+                        // Copying from assets/sherpa-model
+                        copyAssetFolder(context, "sherpa-model", modelDir)
                     } catch (e: Exception) {
                         e.printStackTrace()
                         return@withContext false
@@ -171,7 +171,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
             isAiModelLoaded = success
             if (!success) {
-                aiSubtitleText = "AI Init Failed. Put Vosk model in assets/vosk-model"
+                aiSubtitleText = "AI Init Failed. Put Sherpa model in assets/sherpa-model"
                 delay(3000)
                 isAiEnabled = false
             }
@@ -446,7 +446,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 colors = ButtonDefaults.buttonColors(containerColor = if(isAiEnabled) Color.Green else Color.DarkGray),
                                 modifier = Modifier.height(35.dp),
                                 contentPadding = PaddingValues(horizontal = 8.dp)
-                            ) { Text("Vosk AI", color = Color.Black) }
+                            ) { Text("Sherpa AI", color = Color.Black) }
                             
                             IconButton(onClick = { showSubtitleSettings = true }) { Icon(Icons.Rounded.Palette, null, tint = Color.White) }
                         }

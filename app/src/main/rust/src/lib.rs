@@ -2,12 +2,12 @@
 // Dependencies: jni = "0.21", lazy_static = "1.4"
 
 use jni::JNIEnv;
-use jni::objects::{JClass, JString, JFloatArray};
+use jni::objects::{JFloatArray, JObject, JString};
 use jni::sys::{jboolean, jstring};
-use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
-use std::ffi::{CString, CStr};
+use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
+use std::sync::{Arc, Mutex};
 
 // Global State wrapper (Thread Safe)
 struct AiContext {
@@ -33,10 +33,10 @@ extern "C" {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initAI(
-    mut env: JNIEnv, 
-    _class: JClass,
-    model_path: JString
+pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initAI<'local>(
+    mut env: JNIEnv<'local>, 
+    _class: JObject<'local>,
+    model_path: JString<'local>
 ) -> jboolean {
     let path: String = env.get_string(&model_path).expect("Invalid string").into();
     let c_path = CString::new(path).unwrap();
@@ -51,10 +51,10 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initAI(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pushAudio(
-    mut env: JNIEnv, 
-    _class: JClass,
-    audio_data: JFloatArray, 
+pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pushAudio<'local>(
+    env: JNIEnv<'local>, 
+    _class: JObject<'local>,
+    audio_data: JFloatArray<'local>, 
 ) {
     let ctx = CTX.lock().unwrap();
     if !ctx.is_running { return; }
@@ -70,9 +70,9 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pushAudio
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getSubtitle(
-    mut env: JNIEnv, 
-    _class: JClass,
+pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getSubtitle<'local>(
+    mut env: JNIEnv<'local>, 
+    _class: JObject<'local>,
 ) -> jstring {
     let c_sub = unsafe { getSubtitleNative_CPP() };
     
@@ -87,9 +87,9 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getSubtit
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_stopAI(
-    _env: JNIEnv,
-    _class: JClass,
+pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_stopAI<'local>(
+    _env: JNIEnv<'local>,
+    _class: JObject<'local>,
 ) {
     let mut ctx = CTX.lock().unwrap();
     ctx.is_running = false;
@@ -100,9 +100,9 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_stopAI(
 
 // --- SECURE VAULT FOR TMDB API ---
 #[no_mangle]
-pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getTmdbKey(
-    mut env: JNIEnv,
-    _class: JClass,
+pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getTmdbKey<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JObject<'local>,
 ) -> jstring {
     // Fetches the secret injected from GitHub Actions during cargo build
     let secret_key = option_env!("TMDB_API_KEY").unwrap_or("api_key_not_found");
