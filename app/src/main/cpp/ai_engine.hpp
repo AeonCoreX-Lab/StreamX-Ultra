@@ -18,8 +18,9 @@ public:
     void stop();
 
 private:
-    SherpaOnnxOnlineRecognizer* recognizer = nullptr;
-    SherpaOnnxOnlineStream* stream = nullptr;
+    // ---> FIX: Added 'const' to match the return type of Sherpa C-API <---
+    const SherpaOnnxOnlineRecognizer* recognizer = nullptr;
+    const SherpaOnnxOnlineStream* stream = nullptr;
     
     std::mutex audioMutex;
     std::vector<float> audioBuffer;
