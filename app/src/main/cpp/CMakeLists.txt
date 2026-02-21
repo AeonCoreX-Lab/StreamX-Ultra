@@ -4,26 +4,16 @@ project("streamx-native")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-<<<<<<< HEAD
-# --- 1. Vosk API (AI Engine) Fetch ---
-# Vosk সরাসরি প্রি-বিল্ড Android লাইব্রেরি দেয়, তাই বিল্ড টাইম অনেক কম লাগবে
-include(FetchContent)
-FetchContent_Declare(
-    vosk_android
-    URL https://github.com/alphacep/vosk-api/releases/download/0.3.50/vosk-android-lib-0.3.50.zip
-)
-FetchContent_MakeAvailable(vosk_android)
-=======
 # ১. Sherpa-ONNX C-API লাইব্রেরি লোড করা
 add_library(sherpa-onnx-c SHARED IMPORTED)
 set_target_properties(sherpa-onnx-c PROPERTIES IMPORTED_LOCATION 
     "${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libsherpa-onnx-c-api.so")
 
+
 # ২. ONNX Runtime লাইব্রেরি লোড করা
 add_library(onnxruntime SHARED IMPORTED)
 set_target_properties(onnxruntime PROPERTIES IMPORTED_LOCATION 
     "${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libonnxruntime.so")
->>>>>>> 2c69217 (feat: integrate Sherpa-ONNX AI engine with Rust security bridge)
 
 # --- 2. Rust Library Import (No Changes Here!) ---
 if(${ANDROID_ABI} STREQUAL "arm64-v8a")
