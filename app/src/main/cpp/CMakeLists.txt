@@ -41,7 +41,7 @@ if (DEFINED TMDB_API_KEY)
     message(STATUS "TMDB API Key injected into CMake")
 endif()
 
-# ৪. Define C++ Libraries (আপনার লেখা C++ ফাইলগুলো)
+# ৪. Define C++ Libraries
 add_library(
         streamx-native
         SHARED
@@ -49,6 +49,9 @@ add_library(
         ai_engine.cpp
         torrent-engine.cpp 
 )
+
+# ---> FIX: C++ কে হেডার ফাইলের লোকেশন বলে দেওয়া <---
+target_include_directories(streamx-native PRIVATE ${CMAKE_SOURCE_DIR})
 
 # ৫. Find vcpkg Dependencies (Torrent, Boost, OpenSSL)
 find_package(LibtorrentRasterbar CONFIG REQUIRED)
