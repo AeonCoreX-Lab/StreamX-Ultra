@@ -68,12 +68,9 @@ object StreamXCore {
     external fun pushAudio(data: FloatArray)
     external fun getSubtitle(): String
     external fun stopAI()
-    
-    // --- FIX IS HERE: Added missing JNI function declaration ---
     external fun getTmdbKey(): String 
 }
 
-// Utility function to copy Sherpa Model Folder from assets
 fun copyAssetFolder(context: Context, sourceFolder: String, destinationFolder: File) {
     if (!destinationFolder.exists()) destinationFolder.mkdirs()
     val assets = context.assets.list(sourceFolder) ?: return
@@ -104,7 +101,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var videoPath by remember { mutableStateOf<String?>(null) }
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
 
-    var isPlaying by remember { mutableStateOf(true) }
+    var isPlaying by remember { mutableStateOf(false) }
     var isBuffering by remember { mutableStateOf(true) }
     var currentTime by remember { mutableLongStateOf(0L) }
     var totalDuration by remember { mutableLongStateOf(0L) }
@@ -134,6 +131,16 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
 
+    // --- REAL-TIME TIMER FIX (YouTube Style) ---
+    LaunchedEffect(isPlaying, isBuffering) {
+        while (isPlaying && !isBuffering) {
+            exoPlayer?.let {
+                currentTime = it.currentPosition
+            }
+            delay(500) // Update UI every half second
+        }
+    }
+
     DisposableEffect(Unit) {
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -143,15 +150,17 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         insetsController?.hide(WindowInsetsCompat.Type.systemBars())
         insetsController?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
-        // Get initial brightness
         brightnessLevel = activity?.window?.attributes?.screenBrightness?.takeIf { it >= 0 } ?: 0.5f
 
         onDispose {
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             insetsController?.show(WindowInsetsCompat.Type.systemBars())
-            TorrentEngine.stop()
+            
+            // FIX: Ensure complete cleanup to prevent black screen & crashes on next play
             StreamXCore.stopAI()
+            TorrentEngine.stop()
+            TorrentEngine.clearCache(context) // Clear previous movie cache
         }
     }
 
@@ -159,11 +168,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     LaunchedEffect(isAiEnabled) {
         if (isAiEnabled) {
             val success = withContext(Dispatchers.IO) {
-                // Sherpa Model Folder Path
                 val modelDir = File(context.filesDir, "sherpa-model")
                 if (!modelDir.exists() || modelDir.listFiles()?.isEmpty() == true) {
                     try {
-                        // Copying from assets/sherpa-model
                         copyAssetFolder(context, "sherpa-model", modelDir)
                     } catch (e: Exception) {
                         e.printStackTrace()
@@ -174,7 +181,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
             isAiModelLoaded = success
             if (!success) {
-                aiSubtitleText = "AI Init Failed. Put Sherpa model in assets/sherpa-model"
+                aiSubtitleText = "AI Init Failed."
                 delay(3000)
                 isAiEnabled = false
             }
@@ -195,7 +202,16 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
+    // --- LOAD NEW MOVIE ---
     LaunchedEffect(decodedUrl) {
+        // Reset states for new movie
+        videoPath = null
+        isPlaying = false
+        isBuffering = true
+        currentTime = 0L
+        TorrentEngine.stop()
+        TorrentEngine.clearCache(context)
+
         if (decodedUrl.startsWith("magnet:?")) {
             TorrentEngine.start(context, decodedUrl).collect { state ->
                 when (state) {
@@ -207,10 +223,15 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         seeds = state.seeds
                     }
                     is StreamState.Ready -> {
-                        if (videoPath != state.filePath) videoPath = state.filePath
+                        if (videoPath != state.filePath) {
+                            videoPath = state.filePath
+                        }
                         statusMsg = ""
                     }
-                    is StreamState.Error -> statusMsg = "Error: ${state.message}"
+                    is StreamState.Error -> {
+                        statusMsg = "Error: ${state.message}"
+                        isBuffering = false
+                    }
                 }
             }
         } else {
@@ -245,6 +266,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 
     DisposableEffect(videoPath) {
         if (videoPath == null) return@DisposableEffect onDispose {}
+        
         val player = ExoPlayer.Builder(context, renderersFactory).build().apply {
             setMediaItem(MediaItem.fromUri(Uri.parse(videoPath)))
             prepare()
@@ -257,16 +279,19 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 isPlaying = playing
                 if (playing) {
                     isBuffering = false
+                    totalDuration = player.duration
                     scope.launch { delay(3000); if(isPlaying) isControlsVisible = false }
                 }
             }
             override fun onPlaybackStateChanged(state: Int) {
                 isBuffering = state == Player.STATE_BUFFERING
-                if (state == Player.STATE_ENDED) isControlsVisible = true
-            }
-            override fun onEvents(p: Player, e: Player.Events) {
-                currentTime = p.currentPosition
-                totalDuration = p.duration
+                if (state == Player.STATE_ENDED) {
+                    isControlsVisible = true
+                    isPlaying = false
+                }
+                if (state == Player.STATE_READY) {
+                    totalDuration = player.duration
+                }
             }
         }
         player.addListener(listener)
@@ -299,7 +324,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             )
         }
 
-        // --- GESTURE FIX: Throttling & Accumulation logic ---
         var lastUpdateTime by remember { mutableLongStateOf(0L) }
         var dragAccumulator by remember { mutableFloatStateOf(0f) }
 
@@ -313,7 +337,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             if (isLocked) return@detectTapGestures
                             val isForward = offset.x > size.width / 2
                             exoPlayer?.let { 
-                                it.seekTo(it.currentPosition + if(isForward) 10000 else -10000)
+                                val newPos = (it.currentPosition + if(isForward) 10000 else -10000).coerceIn(0, it.duration)
+                                it.seekTo(newPos)
+                                currentTime = newPos // Update UI immediately
                                 if (isForward) {
                                     forwardAnimAlpha = 1f; scope.launch { delay(500); forwardAnimAlpha = 0f }
                                 } else {
@@ -339,13 +365,12 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         dragAccumulator += dragAmount
                         val currentTimeMs = System.currentTimeMillis()
                         
-                        // Throttling: Update system UI at most once every 50ms & only if dragged enough
                         if (currentTimeMs - lastUpdateTime > 50 && abs(dragAccumulator) > 5f) {
                             lastUpdateTime = currentTimeMs
                             val isRight = change.position.x > size.width / 2
-                            val delta = -dragAccumulator / (size.height / 2) // Invert drag
+                            val delta = -dragAccumulator / (size.height / 2)
 
-                            if (isRight) { // Volume
+                            if (isRight) {
                                 val volDelta = (delta * maxVolume).toInt()
                                 if (volDelta != 0) {
                                     val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
@@ -354,16 +379,16 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                     volumeLevel = newVol / maxVolume.toFloat()
                                     gestureIcon = Icons.Rounded.VolumeUp
                                     gestureText = "${(volumeLevel * 100).toInt()}%"
-                                    dragAccumulator = 0f // reset after applying
+                                    dragAccumulator = 0f
                                 }
-                            } else { // Brightness
+                            } else {
                                 brightnessLevel = (brightnessLevel + delta).coerceIn(0.01f, 1f)
                                 val lp = activity?.window?.attributes
                                 lp?.screenBrightness = brightnessLevel
                                 activity?.window?.attributes = lp
                                 gestureIcon = Icons.Rounded.BrightnessMedium
                                 gestureText = "${(brightnessLevel * 100).toInt()}%"
-                                dragAccumulator = 0f // reset after applying
+                                dragAccumulator = 0f
                             }
                         }
                     }
@@ -457,13 +482,25 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 
                     if (!isLocked && !isBuffering) {
                         Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(40.dp)) {
-                            IconButton(onClick = { exoPlayer?.seekTo((exoPlayer?.currentPosition ?: 0) - 10000) }) {
+                            IconButton(onClick = { 
+                                exoPlayer?.let {
+                                    val newPos = (it.currentPosition - 10000).coerceAtLeast(0)
+                                    it.seekTo(newPos)
+                                    currentTime = newPos
+                                }
+                            }) {
                                 Icon(Icons.Rounded.Replay10, null, tint = Color.White, modifier = Modifier.size(48.dp))
                             }
                             IconButton(onClick = { if (isPlaying) exoPlayer?.pause() else exoPlayer?.play() }) {
                                 Icon(if(isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(64.dp))
                             }
-                            IconButton(onClick = { exoPlayer?.seekTo((exoPlayer?.currentPosition ?: 0) + 10000) }) {
+                            IconButton(onClick = { 
+                                exoPlayer?.let {
+                                    val newPos = (it.currentPosition + 10000).coerceAtMost(it.duration)
+                                    it.seekTo(newPos)
+                                    currentTime = newPos
+                                }
+                            }) {
                                 Icon(Icons.Rounded.Forward10, null, tint = Color.White, modifier = Modifier.size(48.dp))
                             }
                         }
@@ -484,7 +521,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             }
                             Slider(
                                 value = currentTime.toFloat(),
-                                onValueChange = { exoPlayer?.seekTo(it.toLong()) },
+                                onValueChange = { 
+                                    exoPlayer?.seekTo(it.toLong())
+                                    currentTime = it.toLong()
+                                },
                                 valueRange = 0f..max(1f, totalDuration.toFloat()),
                                 colors = SliderDefaults.colors(thumbColor = Color.Cyan, activeTrackColor = Color.Cyan)
                             )
@@ -511,7 +551,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 }
 
 fun formatTime(ms: Long): String {
-    val totalSeconds = ms / 1000
+    val totalSeconds = max(0, ms / 1000)
     val m = (totalSeconds / 60) % 60
     val s = totalSeconds % 60
     val h = totalSeconds / 3600
