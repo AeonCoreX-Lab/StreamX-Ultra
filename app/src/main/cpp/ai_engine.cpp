@@ -1,5 +1,4 @@
 #include "ai_engine.hpp"
-#include <thread>
 #include <android/log.h>
 #include <unistd.h>
 
@@ -13,7 +12,9 @@ AIEngine::AIEngine() : isRunning(false), recognizer(nullptr), stream(nullptr) {
     audioBuffer.reserve(16000 * 10); 
 }
 
-AIEngine::~AIEngine() { stop(); }
+AIEngine::~AIEngine() { 
+    stop(); 
+}
 
 bool AIEngine::init(const std::string& modelPath) {
     if (access(modelPath.c_str(), R_OK) != 0) {
@@ -24,7 +25,6 @@ bool AIEngine::init(const std::string& modelPath) {
     SherpaOnnxOnlineRecognizerConfig config;
     memset(&config, 0, sizeof(config));
 
-    // Sherpa-ONNX Zipformer Model Paths setup
     std::string encoder = modelPath + "/encoder.onnx";
     std::string decoder = modelPath + "/decoder.onnx";
     std::string joiner = modelPath + "/joiner.onnx";
@@ -34,7 +34,7 @@ bool AIEngine::init(const std::string& modelPath) {
     config.model_config.transducer.decoder = decoder.c_str();
     config.model_config.transducer.joiner = joiner.c_str();
     config.model_config.tokens = tokens.c_str();
-    config.model_config.num_threads = 2; // অপ্টিমাইজড পারফরম্যান্সের জন্য
+    config.model_config.num_threads = 2; 
     config.model_config.provider = "cpu";
     
     config.feat_config.sample_rate = 16000;
@@ -51,11 +51,13 @@ bool AIEngine::init(const std::string& modelPath) {
     LOGD("Sherpa-ONNX AI Engine Initialized Successfully.");
     isRunning = true;
     
-    std::thread(&AIEngine::processingLoop, this).detach();
+    // FIX: Using joinable thread instead of detach()
+    workerThread = std::thread(&AIEngine::processingLoop, this);
     return true;
 }
 
 void AIEngine::pushAudio(const std::vector<float>& pcm32) {
+    if (!isRunning) return;
     std::lock_guard<std::mutex> lock(audioMutex);
     
     if (audioBuffer.size() + pcm32.size() > MAX_AUDIO_BUFFER_SIZE) {
@@ -67,22 +69,20 @@ void AIEngine::pushAudio(const std::vector<float>& pcm32) {
 }
 
 void AIEngine::processingLoop() {
-    pthread_setname_np(pthread_self(), "StreamX_Sherpa_Worker");
+    pthread_setname_np(pthread_self(), "StreamX_Sherpa");
 
     while (isRunning) {
         std::vector<float> processBuffer;
         
         {
             std::lock_guard<std::mutex> lock(audioMutex);
-            // ০.৫ সেকেন্ড ডাটা পেলেই প্রসেস শুরু
             if (audioBuffer.size() >= 16000 * 0.5) { 
-                processBuffer = audioBuffer;
+                processBuffer = std::move(audioBuffer); // FIX: Faster data transfer
                 audioBuffer.clear();
             }
         }
 
         if (!processBuffer.empty() && stream && recognizer) {
-            // Sherpa-ONNX সরাসরি Float রিসিভ করে, তাই কনভার্সনের দরকার নেই!
             SherpaOnnxOnlineStreamAcceptWaveform(stream, 16000, processBuffer.data(), processBuffer.size());
             
             while (SherpaOnnxIsOnlineStreamReady(recognizer, stream)) {
@@ -91,13 +91,14 @@ void AIEngine::processingLoop() {
             
             const SherpaOnnxOnlineRecognizerResult* result = SherpaOnnxGetOnlineStreamResult(recognizer, stream);
             if (result && result->text) {
-                currentText = result->text;
-                LOGD("Sherpa Subtitle: %s", currentText.c_str());
+                if (strlen(result->text) > 0) {
+                    currentText = result->text;
+                }
                 SherpaOnnxDestroyOnlineRecognizerResult(result);
             }
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 }
 
@@ -106,9 +107,17 @@ std::string AIEngine::getCurrentSubtitle() {
 }
 
 void AIEngine::stop() {
+    if (!isRunning) return;
     LOGD("Stopping Sherpa-ONNX AI Engine...");
-    isRunning = false;
     
+    isRunning = false; // ১. লুপ বন্ধ করা হলো
+    
+    // ২. থ্রেডটিকে নিরাপদে শেষ হতে দেওয়া হলো
+    if (workerThread.joinable()) {
+        workerThread.join();
+    }
+    
+    // ৩. মেমোরি রিলিজ
     if (stream) { SherpaOnnxDestroyOnlineStream(stream); stream = nullptr; }
     if (recognizer) { SherpaOnnxDestroyOnlineRecognizer(recognizer); recognizer = nullptr; }
 }

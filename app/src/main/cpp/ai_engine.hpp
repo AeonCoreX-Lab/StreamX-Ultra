@@ -5,7 +5,8 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
-#include "sherpa-onnx/c-api/c-api.h" // Sherpa-ONNX Header
+#include <thread> // <-- Thread header added
+#include "sherpa-onnx/c-api/c-api.h"
 
 class AIEngine {
 public:
@@ -18,7 +19,6 @@ public:
     void stop();
 
 private:
-    // ---> FIX: Added 'const' to match the return type of Sherpa C-API <---
     const SherpaOnnxOnlineRecognizer* recognizer = nullptr;
     const SherpaOnnxOnlineStream* stream = nullptr;
     
@@ -26,6 +26,8 @@ private:
     std::vector<float> audioBuffer;
     std::atomic<bool> isRunning;
     std::string currentText;
+    
+    std::thread workerThread; // <-- Worker thread added for safe shutdown
     
     void processingLoop();
 };

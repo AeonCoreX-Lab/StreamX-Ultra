@@ -147,10 +147,12 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             insetsController?.show(WindowInsetsCompat.Type.systemBars())
             
-            // FIX 1: Safely stop all engines and clean cache on exit to prevent crashes and old files sticking around
-            TorrentEngine.stop()
-            StreamXCore.stopAI()
-            TorrentEngine.clearCache(context)
+            // FIX: সঠিক অর্ডারে শাটডাউন করা (নইলে ক্র্যাশ করবে)
+            StreamXCore.stopAI()          // ১. সবার আগে AI থ্রেড বন্ধ
+            exoPlayer?.stop()             
+            exoPlayer?.release()          // ২. এরপর প্লেয়ার বন্ধ
+            TorrentEngine.stop()          // ৩. টরেন্ট ইঞ্জিন এবং ফাইল ডিলিট
+            TorrentEngine.clearCache(context) // ৪. এক্সট্রা সেফটির জন্য ফোল্ডার ক্লিয়ার
         }
     }
 

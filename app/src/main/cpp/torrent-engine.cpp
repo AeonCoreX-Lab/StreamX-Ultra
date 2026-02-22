@@ -7,15 +7,13 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 
 TorrentSystem::TorrentSystem() : isRunning(false) {
-    // সেশন সেটিংস কনফিগার করা
     lt::settings_pack pack;
     pack.set_int(lt::settings_pack::alert_mask, 
         lt::alert::status_notification | 
         lt::alert::storage_notification | 
         lt::alert::error_notification);
     
-    // ডাউনলোড স্পিড অপ্টিমাইজেশন
-    pack.set_int(lt::settings_pack::download_rate_limit, 0); // Unlimited
+    pack.set_int(lt::settings_pack::download_rate_limit, 0); 
     pack.set_int(lt::settings_pack::upload_rate_limit, 0);
     
     ses = new lt::session(pack);
@@ -28,9 +26,13 @@ TorrentSystem::~TorrentSystem() {
 }
 
 void TorrentSystem::start(const std::string& magnet, const std::string& saveDir) {
-    if (isRunning) stop();
+    if (isRunning) stop(); // আগের সেশন থাকলে বন্ধ হবে
     
     LOGD("Starting Engine for: %s", magnet.c_str());
+
+    // FIX: State Reset for New Movie
+    finalFilePath = ""; 
+    memset(&currentStatus, 0, sizeof(EngineStatus));
 
     lt::add_torrent_params p;
     lt::error_code ec;
@@ -42,8 +44,6 @@ void TorrentSystem::start(const std::string& magnet, const std::string& saveDir)
     }
 
     p.save_path = saveDir;
-    
-    // CRITICAL FOR STREAMING: ক্রম অনুসারে ডাউনলোড করা
     p.flags |= lt::torrent_flags::sequential_download;
     
     handle = ses->add_torrent(p);
@@ -56,11 +56,6 @@ void TorrentSystem::updateLoop() {
     while (isRunning) {
         std::vector<lt::alert*> alerts;
         ses->pop_alerts(&alerts);
-
-        for (lt::alert const* a : alerts) {
-            // ডিবাগিং এর জন্য লগ
-            // LOGD("Alert: %s", a->message().c_str());
-        }
 
         if (!handle.is_valid()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -75,17 +70,14 @@ void TorrentSystem::updateLoop() {
         currentStatus.seeds = s.num_seeds;
         currentStatus.peers = s.num_peers;
 
-        // স্টেট ম্যানেজমেন্ট
         if (s.state == lt::torrent_status::checking_files || s.state == lt::torrent_status::downloading_metadata) {
-            currentStatus.state = 1; // Preparing
+            currentStatus.state = 1; 
         } 
         else if (s.state == lt::torrent_status::downloading || s.state == lt::torrent_status::finished) {
             
-            // ফাইলের নাম/পাথ বের করা (একবার মেটাডাটা ডাউনলোড হলে)
             if (finalFilePath.empty() && s.has_metadata) {
                 auto info = s.torrent_file.lock();
                 if (info) {
-                    // সবচেয়ে বড় ফাইলটি ভিডিও হিসেবে ধরে নেওয়া হচ্ছে
                     lt::file_index_t largestFileIdx;
                     std::int64_t maxSize = 0;
                     
@@ -97,26 +89,17 @@ void TorrentSystem::updateLoop() {
                     }
                     
                     std::string relPath = info->files().file_path(largestFileIdx);
-                    
-                    // --- FIX START ---
-                    // পুরাতন কোড: finalFilePath = handle.save_path() + "/" + relPath;
-                    // নতুন কোড: s.save_path ব্যবহার করা হয়েছে
                     finalFilePath = s.save_path + "/" + relPath;
-                    // --- FIX END ---
                     
                     strncpy(currentStatus.videoPath, finalFilePath.c_str(), 511);
-                    LOGD("Video File Path Identified: %s", finalFilePath.c_str());
-                    
-                    // নির্দিষ্ট ভিডিও ফাইলের প্রায়োরিটি সর্বোচ্চ করা
                     handle.file_priority(largestFileIdx, lt::default_priority);
                 }
             }
 
-            // বাফার লজিক: ৫% ডাউনলোড হলেই ভিডিও প্লে শুরু
             if (currentStatus.progress >= 5 && !finalFilePath.empty()) {
-                currentStatus.state = 3; // Ready to Play
+                currentStatus.state = 3; 
             } else {
-                currentStatus.state = 2; // Downloading
+                currentStatus.state = 2; 
             }
         } 
         else {
@@ -130,8 +113,10 @@ void TorrentSystem::updateLoop() {
 void TorrentSystem::stop() {
     isRunning = false;
     if (workerThread.joinable()) workerThread.join();
+    
     if (handle.is_valid()) {
-        ses->remove_torrent(handle);
+        // FIX: Remove Torrent AND Delete Files to prevent conflict with next movie
+        ses->remove_torrent(handle, lt::session::delete_files); 
     }
 }
 
