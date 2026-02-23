@@ -51,7 +51,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
 import java.net.URLDecoder
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -69,25 +68,6 @@ object StreamXCore {
     external fun getSubtitle(): String
     external fun stopAI()
     external fun getTmdbKey(): String 
-}
-
-fun copyAssetFolder(context: Context, sourceFolder: String, destinationFolder: File) {
-    if (!destinationFolder.exists()) destinationFolder.mkdirs()
-    val assets = context.assets.list(sourceFolder) ?: return
-    for (asset in assets) {
-        val sourcePath = "$sourceFolder/$asset"
-        val destFile = File(destinationFolder, asset)
-        val subAssets = context.assets.list(sourcePath)
-        if (!subAssets.isNullOrEmpty()) {
-            copyAssetFolder(context, sourcePath, destFile)
-        } else {
-            if (!destFile.exists()) {
-                context.assets.open(sourcePath).use { input ->
-                    FileOutputStream(destFile).use { output -> input.copyTo(output) }
-                }
-            }
-        }
-    }
 }
 
 @OptIn(UnstableApi::class)
@@ -160,17 +140,24 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         if (isAiEnabled) {
             val success = withContext(Dispatchers.IO) {
                 val modelDir = File(context.filesDir, "sherpa-model")
-                if (!modelDir.exists() || modelDir.listFiles()?.isEmpty() == true) {
-                    try { copyAssetFolder(context, "sherpa-model", modelDir) } 
-                    catch (e: Exception) { return@withContext false }
+                val essentialFiles = listOf("encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt")
+                
+                // চেক করা হচ্ছে ফাইলগুলো ব্যাকগ্রাউন্ডে এক্সট্র্যাক্ট হয়েছে কি না
+                val allFilesExist = essentialFiles.all { File(modelDir, it).exists() }
+                
+                if (!allFilesExist) {
+                    false // ফাইল নেই, তাই ফলস রিটার্ন করবে
+                } else {
+                    StreamXCore.initAI(modelDir.absolutePath)
                 }
-                StreamXCore.initAI(modelDir.absolutePath)
             }
+            
             isAiModelLoaded = success
             if (!success) {
-                aiSubtitleText = "AI Init Failed."
+                aiSubtitleText = "AI Models are extracting or missing. Please try again later."
                 delay(3000)
                 isAiEnabled = false
+                aiSubtitleText = ""
             }
         } else {
             StreamXCore.stopAI()
@@ -273,7 +260,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 isBuffering = state == Player.STATE_BUFFERING
                 if (state == Player.STATE_ENDED) isControlsVisible = true
             }
-            // onEvents removed for time updating, as it's now handled by the LaunchedEffect ticker
         }
         player.addListener(listener)
 

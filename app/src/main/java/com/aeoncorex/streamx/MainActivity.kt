@@ -1,9 +1,11 @@
 package com.aeoncorex.streamx
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -25,33 +27,41 @@ import com.aeoncorex.streamx.ui.theme.StreamXUltraTheme
 import com.aeoncorex.streamx.ui.theme.ThemeViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
 
 class MainActivity : ComponentActivity() {
 
-    // নোটিফিকেশন পারমিশন রিকোয়েস্ট করার জন্য লঞ্চার
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        // পারমিশন না দিলেও অ্যাপ চলবে, তবে নোটিফিকেশন কন্ট্রোল দেখা যাবে না
-    }
+    ) { isGranted: Boolean -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Android 15 এর জন্য এজ-টু-এজ সাপোর্ট
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         
-        // --- ১. ব্যাকগ্রাউন্ডে স্মার্ট ক্যাশ ক্লিন (পারফরম্যান্স অপ্টিমাইজেশন) ---
+        // --- ব্যাকগ্রাউন্ড অপ্টিমাইজেশন ও AI মডেল এক্সট্রাকশন ---
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 TorrentEngine.clearCache(applicationContext)
+                
+                // অ্যাপ ওপেন হওয়ার সাথে সাথেই মডেল এক্সট্র্যাক্ট করা শুরু হবে
+                val modelDir = File(filesDir, "sherpa-model")
+                val essentialFiles = listOf("encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt")
+                
+                val allFilesExist = essentialFiles.all { File(modelDir, it).exists() }
+                
+                if (!allFilesExist) {
+                    Log.d("StreamX_AI", "Extracting AI models in background...")
+                    copyAssetFolder(applicationContext, "sherpa-model", modelDir)
+                    Log.d("StreamX_AI", "AI models extraction complete.")
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
 
-        // নোটিফিকেশন পারমিশন চেক করা
         checkNotificationPermission()
-
         MusicManager.initialize(applicationContext)
 
         setContent {
@@ -87,13 +97,31 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         MusicManager.release()
-        
-        // অ্যাপ বন্ধ হওয়ার সময়ও ব্যাকগ্রাউন্ডে ক্যাশ ক্লিয়ার করা
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 TorrentEngine.clearCache(applicationContext)
             } catch (e: Exception) {
                 e.printStackTrace()
+            }
+        }
+    }
+
+    // Asset কপি করার ইউটিলিটি ফাংশন
+    private fun copyAssetFolder(context: Context, sourceFolder: String, destinationFolder: File) {
+        if (!destinationFolder.exists()) destinationFolder.mkdirs()
+        val assets = context.assets.list(sourceFolder) ?: return
+        for (asset in assets) {
+            val sourcePath = "$sourceFolder/$asset"
+            val destFile = File(destinationFolder, asset)
+            val subAssets = context.assets.list(sourcePath)
+            if (!subAssets.isNullOrEmpty()) {
+                copyAssetFolder(context, sourcePath, destFile)
+            } else {
+                if (!destFile.exists()) {
+                    context.assets.open(sourcePath).use { input ->
+                        FileOutputStream(destFile).use { output -> input.copyTo(output) }
+                    }
+                }
             }
         }
     }

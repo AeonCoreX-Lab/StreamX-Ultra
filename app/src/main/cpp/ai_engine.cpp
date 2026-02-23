@@ -17,18 +17,20 @@ AIEngine::~AIEngine() {
 }
 
 bool AIEngine::init(const std::string& modelPath) {
-    if (access(modelPath.c_str(), R_OK) != 0) {
-        LOGE("Critical Error: Sherpa Model folder not found at: %s", modelPath.c_str());
-        return false;
-    }
-
-    SherpaOnnxOnlineRecognizerConfig config;
-    memset(&config, 0, sizeof(config));
-
+    // --- ULTIMATE SAFETY CHECK: File Existence ---
     std::string encoder = modelPath + "/encoder.onnx";
     std::string decoder = modelPath + "/decoder.onnx";
     std::string joiner = modelPath + "/joiner.onnx";
     std::string tokens = modelPath + "/tokens.txt";
+
+    if (access(encoder.c_str(), R_OK) != 0 || access(decoder.c_str(), R_OK) != 0 || 
+        access(joiner.c_str(), R_OK) != 0 || access(tokens.c_str(), R_OK) != 0) {
+        LOGE("Critical Error: Essential Sherpa Model files are MISSING in: %s", modelPath.c_str());
+        return false; // Return false cleanly instead of crashing
+    }
+
+    SherpaOnnxOnlineRecognizerConfig config;
+    memset(&config, 0, sizeof(config));
 
     config.model_config.transducer.encoder = encoder.c_str();
     config.model_config.transducer.decoder = decoder.c_str();
@@ -42,16 +44,21 @@ bool AIEngine::init(const std::string& modelPath) {
 
     recognizer = SherpaOnnxCreateOnlineRecognizer(&config);
     if (!recognizer) {
-        LOGE("Fatal: Failed to load Sherpa-ONNX Model.");
+        LOGE("Fatal: Failed to load Sherpa-ONNX Model internally.");
         return false;
     }
     
     stream = SherpaOnnxCreateOnlineStream(recognizer);
+    if (!stream) {
+        LOGE("Fatal: Failed to create Sherpa-ONNX Stream.");
+        SherpaOnnxDestroyOnlineRecognizer(recognizer);
+        recognizer = nullptr;
+        return false;
+    }
     
     LOGD("Sherpa-ONNX AI Engine Initialized Successfully.");
     isRunning = true;
     
-    // FIX: Using joinable thread instead of detach()
     workerThread = std::thread(&AIEngine::processingLoop, this);
     return true;
 }
@@ -77,7 +84,7 @@ void AIEngine::processingLoop() {
         {
             std::lock_guard<std::mutex> lock(audioMutex);
             if (audioBuffer.size() >= 16000 * 0.5) { 
-                processBuffer = std::move(audioBuffer); // FIX: Faster data transfer
+                processBuffer = std::move(audioBuffer); 
                 audioBuffer.clear();
             }
         }
@@ -110,14 +117,15 @@ void AIEngine::stop() {
     if (!isRunning) return;
     LOGD("Stopping Sherpa-ONNX AI Engine...");
     
-    isRunning = false; // ১. লুপ বন্ধ করা হলো
+    isRunning = false; 
     
-    // ২. থ্রেডটিকে নিরাপদে শেষ হতে দেওয়া হলো
     if (workerThread.joinable()) {
         workerThread.join();
     }
     
-    // ৩. মেমোরি রিলিজ
+    // Memory release with safety checks
     if (stream) { SherpaOnnxDestroyOnlineStream(stream); stream = nullptr; }
     if (recognizer) { SherpaOnnxDestroyOnlineRecognizer(recognizer); recognizer = nullptr; }
+    
+    currentText = "";
 }
