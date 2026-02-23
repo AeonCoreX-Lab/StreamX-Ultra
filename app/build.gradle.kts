@@ -194,7 +194,7 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
     // Firebase
-    implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
+    implementation(platform("com.google.firebase:firebase-bom:34.9.0"))
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx") {
         exclude(group = "com.google.firebase", module = "protolite-well-known-types")
