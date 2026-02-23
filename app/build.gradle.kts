@@ -200,7 +200,7 @@ dependencies {
         exclude(group = "com.google.firebase", module = "protolite-well-known-types")
         exclude(group = "com.google.protobuf", module = "protobuf-lite")
     }
-    implementation("com.google.android.gms:play-services-auth:21.1.1")
+    implementation("com.google.android.gms:play-services-auth:21.5.1")
 
     // Media3 (ExoPlayer)
     implementation("androidx.media3:media3-exoplayer:1.3.1")
