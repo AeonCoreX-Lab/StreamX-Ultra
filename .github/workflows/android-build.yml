@@ -1,4 +1,4 @@
-name: StreamX-Ultra APK & Keys
+name: Debug Build & Test
 
 on:
   push:
@@ -78,14 +78,6 @@ jobs:
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: ./gradlew assembleDebug --stacktrace
-      
-      - name: Generate and Print Signing Keys
-        run: |
-          echo "===================================================================="
-          echo "🔑 GENERATING ALL SIGNING FINGERPRINTS..."
-          echo "===================================================================="
-          ./gradlew signingReport
-          echo "===================================================================="
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4

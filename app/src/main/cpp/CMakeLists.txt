@@ -18,10 +18,8 @@ set(RUST_LIB_FILE "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/release/libstreamx_core
 add_library(streamx_core STATIC IMPORTED)
 set_target_properties(streamx_core PROPERTIES IMPORTED_LOCATION "${RUST_LIB_FILE}")
 
-# GitHub Secrets থেকে আসা TMDB_API_KEY-টি Rust-এর কাছে পাঠানো
 if (DEFINED TMDB_API_KEY)
     add_definitions(-DTMDB_API_KEY="${TMDB_API_KEY}")
-    message(STATUS "TMDB API Key injected into CMake")
 endif()
 
 add_library(
@@ -36,13 +34,20 @@ target_include_directories(streamx-native PRIVATE ${CMAKE_SOURCE_DIR})
 find_package(LibtorrentRasterbar CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
+find_package(mpv CONFIG REQUIRED)
+
+find_library(log-lib log)
+find_library(android-lib android)
+find_library(vulkan-lib vulkan)
 
 target_link_libraries(
         streamx-native
         PRIVATE
         -Wl,--whole-archive streamx_core -Wl,--no-whole-archive
-        log
-        android
+        ${log-lib}
+        ${android-lib}
+        ${vulkan-lib}
+        mpv
         LibtorrentRasterbar::torrent-rasterbar
         OpenSSL::SSL
         OpenSSL::Crypto
