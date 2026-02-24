@@ -207,5 +207,5 @@ dependencies {
     
     implementation("androidx.compose.material:material-icons-extended:1.6.7")
      // --- NEW: Google ML Kit Translation ---
-    implementation("com.google.mlkit:translation:17.0.3")
+    implementation 'com.google.mlkit:translate:17.0.3'
 }
