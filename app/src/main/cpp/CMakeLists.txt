@@ -18,6 +18,12 @@ set(RUST_LIB_FILE "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/release/libstreamx_core
 add_library(streamx_core STATIC IMPORTED)
 set_target_properties(streamx_core PROPERTIES IMPORTED_LOCATION "${RUST_LIB_FILE}")
 
+# GitHub Secrets থেকে আসা TMDB_API_KEY-টি Rust-এর কাছে পাঠানো
+if (DEFINED TMDB_API_KEY)
+    add_definitions(-DTMDB_API_KEY="${TMDB_API_KEY}")
+    message(STATUS "TMDB API Key injected into CMake")
+endif()
+
 add_library(
         streamx-native
         SHARED
