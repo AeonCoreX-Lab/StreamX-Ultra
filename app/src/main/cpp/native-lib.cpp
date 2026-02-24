@@ -1,11 +1,7 @@
 #include <jni.h>
-#include <sys/socket.h>
-#include <sys/types.h>
 #include <android/log.h>
-#include <vector>
 #include <string>
 #include "torrent_system.hpp"
-#include "ai_engine.hpp" 
 
 #define TAG "StreamX_JNI"
 
@@ -17,7 +13,6 @@ extern "C" {
 }
 
 static TorrentSystem* torrentEngine = nullptr;
-static AIEngine* aiEngine = nullptr;
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_initNative(JNIEnv* env, jobject) {
@@ -38,7 +33,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_stopNative(JNIEnv* env, jobject) {
     if (torrentEngine) {
         torrentEngine->stop();
-        delete torrentEngine; // FIX: Completely destroy old engine instance
+        delete torrentEngine;
         torrentEngine = nullptr;
     }
 }
@@ -57,32 +52,4 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getFilePathNative(JNIEnv* env, jobject) {
     if (!torrentEngine) return env->NewStringUTF("");
     return env->NewStringUTF(torrentEngine->getFilePath().c_str());
-}
-
-extern "C" {
-    bool initAINative_CPP(const char* path) {
-        if (!aiEngine) aiEngine = new AIEngine();
-        return aiEngine->init(path);
-    }
-
-    void pushAudioNative_CPP(const float* data, int size) {
-        if (!aiEngine) return;
-        std::vector<float> pcm(data, data + size);
-        aiEngine->pushAudio(pcm);
-    }
-
-    const char* getSubtitleNative_CPP() {
-        if (!aiEngine) return "";
-        static std::string lastSub; 
-        lastSub = aiEngine->getCurrentSubtitle();
-        return lastSub.c_str();
-    }
-
-    void stopAINative_CPP() {
-        if (aiEngine) {
-            aiEngine->stop();
-            delete aiEngine; // FIX: Completely destroy AI engine safely
-            aiEngine = nullptr;
-        }
-    }
 }

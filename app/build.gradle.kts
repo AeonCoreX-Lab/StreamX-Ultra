@@ -60,12 +60,6 @@ android {
         }
     }
 
-    sourceSets {
-        getByName("main") {
-            assets.srcDirs("src/main/assets") // Vosk Model Folder
-        }
-    }
-
     packaging {
         resources {
              excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -73,12 +67,8 @@ android {
              excludes += "META-INF/INDEX.LIST"
         }
         jniLibs {
-             // --- FIX: RESOLVE JNI vs CMAKE IMPORTED DUPLICATE CONFLICTS ---
-             pickFirsts += setOf(
-                 "**/libc++_shared.so",
-                 "**/libonnxruntime.so",
-                 "**/libsherpa-onnx-c-api.so"
-             )
+             // Sherpa-ONNX removed, keeping only libc++
+             pickFirsts += setOf("**/libc++_shared.so")
         }
     }
 
@@ -216,4 +206,6 @@ dependencies {
     implementation("com.valentinilk.shimmer:compose-shimmer:1.3.0")
     
     implementation("androidx.compose.material:material-icons-extended:1.6.7")
+     // --- NEW: Google ML Kit Translation ---
+    implementation("com.google.mlkit:translation:17.0.3")
 }

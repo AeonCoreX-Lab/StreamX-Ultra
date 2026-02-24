@@ -1,11 +1,9 @@
 package com.aeoncorex.streamx
 
 import android.Manifest
-import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -27,41 +25,22 @@ import com.aeoncorex.streamx.ui.theme.StreamXUltraTheme
 import com.aeoncorex.streamx.ui.theme.ThemeViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.io.File
-import java.io.FileOutputStream
 
 class MainActivity : ComponentActivity() {
 
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean -> }
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         
-        // --- ব্যাকগ্রাউন্ড অপ্টিমাইজেশন ও AI মডেল এক্সট্রাকশন ---
         lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                TorrentEngine.clearCache(applicationContext)
-                
-                // অ্যাপ ওপেন হওয়ার সাথে সাথেই মডেল এক্সট্র্যাক্ট করা শুরু হবে
-                val modelDir = File(filesDir, "sherpa-model")
-                val essentialFiles = listOf("encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt")
-                
-                val allFilesExist = essentialFiles.all { File(modelDir, it).exists() }
-                
-                if (!allFilesExist) {
-                    Log.d("StreamX_AI", "Extracting AI models in background...")
-                    copyAssetFolder(applicationContext, "sherpa-model", modelDir)
-                    Log.d("StreamX_AI", "AI models extraction complete.")
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            TorrentEngine.clearCache(applicationContext)
         }
 
-        checkNotificationPermission()
+        checkPermissions()
         MusicManager.initialize(applicationContext)
 
         setContent {
@@ -85,12 +64,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun checkNotificationPermission() {
+    private fun checkPermissions() {
+        val permissions = mutableListOf(Manifest.permission.RECORD_AUDIO) // Added for Subtitles
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != 
-                PackageManager.PERMISSION_GRANTED) {
-                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        val notGranted = permissions.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (notGranted.isNotEmpty()) {
+            permissionLauncher.launch(notGranted.toTypedArray())
         }
     }
 
@@ -98,31 +79,7 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         MusicManager.release()
         lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                TorrentEngine.clearCache(applicationContext)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-    }
-
-    // Asset কপি করার ইউটিলিটি ফাংশন
-    private fun copyAssetFolder(context: Context, sourceFolder: String, destinationFolder: File) {
-        if (!destinationFolder.exists()) destinationFolder.mkdirs()
-        val assets = context.assets.list(sourceFolder) ?: return
-        for (asset in assets) {
-            val sourcePath = "$sourceFolder/$asset"
-            val destFile = File(destinationFolder, asset)
-            val subAssets = context.assets.list(sourcePath)
-            if (!subAssets.isNullOrEmpty()) {
-                copyAssetFolder(context, sourcePath, destFile)
-            } else {
-                if (!destFile.exists()) {
-                    context.assets.open(sourcePath).use { input ->
-                        FileOutputStream(destFile).use { output -> input.copyTo(output) }
-                    }
-                }
-            }
+            TorrentEngine.clearCache(applicationContext)
         }
     }
 }

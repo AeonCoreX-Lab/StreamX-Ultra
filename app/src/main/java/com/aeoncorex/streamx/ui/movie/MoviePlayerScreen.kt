@@ -2,9 +2,14 @@ package com.aeoncorex.streamx.ui.movie
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.net.Uri
+import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.annotation.OptIn
@@ -39,34 +44,27 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.DefaultRenderersFactory
-import androidx.media3.exoplayer.audio.AudioSink
-import androidx.media3.exoplayer.audio.DefaultAudioSink
-import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.navigation.NavController
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.TranslatorOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.net.URLDecoder
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.max
 
-// --- RUST BRIDGE ---
+// --- RUST BRIDGE (Only TMDB left) ---
 object StreamXCore {
     init {
         try { System.loadLibrary("streamx_core") } catch (e: Throwable) { e.printStackTrace() }
         try { System.loadLibrary("streamx-native") } catch (e: Throwable) { e.printStackTrace() }
     }
-    external fun initAI(modelPath: String): Boolean
-    external fun pushAudio(data: FloatArray)
-    external fun getSubtitle(): String
-    external fun stopAI()
     external fun getTmdbKey(): String 
 }
 
@@ -89,13 +87,16 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var resizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var isLocked by remember { mutableStateOf(false) }
 
+    // --- Subtitle Next-Level States ---
     var isAiEnabled by remember { mutableStateOf(false) }
-    var aiSubtitleText by remember { mutableStateOf("") }
-    var isAiModelLoaded by remember { mutableStateOf(false) }
+    var rawText by remember { mutableStateOf("") }
+    var translatedSubtitle by remember { mutableStateOf("") }
+    var subtitleFontSize by remember { mutableFloatStateOf(20f) }
     var subtitleColor by remember { mutableStateOf(Color.Yellow) }
-    var subtitleFontSize by remember { mutableFloatStateOf(24f) }
+    var targetLanguage by remember { mutableStateOf(TranslateLanguage.BENGALI) }
     var showSubtitleSettings by remember { mutableStateOf(false) }
 
+    // Other UI States
     var volumeLevel by remember { mutableFloatStateOf(0.5f) }
     var brightnessLevel by remember { mutableFloatStateOf(0.5f) }
     var gestureIcon by remember { mutableStateOf<ImageVector?>(null) }
@@ -104,14 +105,69 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var forwardAnimAlpha by remember { mutableFloatStateOf(0f) }
     var rewindAnimAlpha by remember { mutableFloatStateOf(0f) }
 
-    var statusMsg by remember { mutableStateOf("Initializing Core...") }
+    var statusMsg by remember { mutableStateOf("Preparing...") }
     var downloadSpeed by remember { mutableStateOf("0 KB/s") }
     var seeds by remember { mutableIntStateOf(0) }
 
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
 
+    // --- ML Kit Translator Setup ---
+    val translator = remember(targetLanguage) {
+        val options = TranslatorOptions.Builder()
+            .setSourceLanguage(TranslateLanguage.ENGLISH)
+            .setTargetLanguage(targetLanguage)
+            .build()
+        Translation.getClient(options)
+    }
+
+    LaunchedEffect(targetLanguage) {
+        val conditions = DownloadConditions.Builder().build()
+        translator.downloadModelIfNeeded(conditions)
+    }
+
+    // --- Native Speech Recognizer Setup ---
+    val speechRecognizer = remember { SpeechRecognizer.createSpeechRecognizer(context) }
+    val recognizerIntent = remember {
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        }
+    }
+
     DisposableEffect(Unit) {
+        val listener = object : RecognitionListener {
+            override fun onResults(results: Bundle?) {
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                if (!matches.isNullOrEmpty()) {
+                    rawText = matches[0]
+                    translator.translate(rawText).addOnSuccessListener { translatedSubtitle = it }
+                }
+                if (isAiEnabled) speechRecognizer.startListening(recognizerIntent)
+            }
+            override fun onPartialResults(partialResults: Bundle?) {
+                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                if (!matches.isNullOrEmpty()) {
+                    rawText = matches[0]
+                    translator.translate(rawText).addOnSuccessListener { translatedSubtitle = it }
+                }
+            }
+            override fun onError(error: Int) {
+                if (isAiEnabled) {
+                    scope.launch { delay(500); speechRecognizer.startListening(recognizerIntent) }
+                }
+            }
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        }
+
+        speechRecognizer.setRecognitionListener(listener)
+
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val window = activity?.window
@@ -123,64 +179,31 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         brightnessLevel = activity?.window?.attributes?.screenBrightness?.takeIf { it >= 0 } ?: 0.5f
 
         onDispose {
+            speechRecognizer.destroy()
+            translator.close()
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             insetsController?.show(WindowInsetsCompat.Type.systemBars())
             
-            // FIX: সঠিক অর্ডারে শাটডাউন করা (নইলে ক্র্যাশ করবে)
-            StreamXCore.stopAI()          // ১. সবার আগে AI থ্রেড বন্ধ
             exoPlayer?.stop()             
-            exoPlayer?.release()          // ২. এরপর প্লেয়ার বন্ধ
-            TorrentEngine.stop()          // ৩. টরেন্ট ইঞ্জিন এবং ফাইল ডিলিট
-            TorrentEngine.clearCache(context) // ৪. এক্সট্রা সেফটির জন্য ফোল্ডার ক্লিয়ার
+            exoPlayer?.release()          
+            TorrentEngine.stop()          
+            TorrentEngine.clearCache(context)
         }
     }
 
     LaunchedEffect(isAiEnabled) {
         if (isAiEnabled) {
-            val success = withContext(Dispatchers.IO) {
-                val modelDir = File(context.filesDir, "sherpa-model")
-                val essentialFiles = listOf("encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt")
-                
-                // চেক করা হচ্ছে ফাইলগুলো ব্যাকগ্রাউন্ডে এক্সট্র্যাক্ট হয়েছে কি না
-                val allFilesExist = essentialFiles.all { File(modelDir, it).exists() }
-                
-                if (!allFilesExist) {
-                    false // ফাইল নেই, তাই ফলস রিটার্ন করবে
-                } else {
-                    StreamXCore.initAI(modelDir.absolutePath)
-                }
-            }
-            
-            isAiModelLoaded = success
-            if (!success) {
-                aiSubtitleText = "AI Models are extracting or missing. Please try again later."
-                delay(3000)
-                isAiEnabled = false
-                aiSubtitleText = ""
-            }
+            speechRecognizer.startListening(recognizerIntent)
         } else {
-            StreamXCore.stopAI()
-            aiSubtitleText = ""
-            isAiModelLoaded = false
-        }
-    }
-
-    LaunchedEffect(isAiEnabled, isAiModelLoaded) {
-        if (isAiEnabled && isAiModelLoaded) {
-            while (true) {
-                val sub = withContext(Dispatchers.Default) { StreamXCore.getSubtitle() }
-                if (sub.isNotEmpty()) aiSubtitleText = sub
-                delay(100) 
-            }
+            speechRecognizer.stopListening()
+            translatedSubtitle = ""
         }
     }
 
     LaunchedEffect(decodedUrl) {
         if (decodedUrl.startsWith("magnet:?")) {
-            // FIX 2: Clear cache before starting a new download to avoid conflict with the previous movie
             withContext(Dispatchers.IO) { TorrentEngine.clearCache(context) }
-            
             TorrentEngine.start(context, decodedUrl).collect { state ->
                 when (state) {
                     is StreamState.Preparing -> statusMsg = state.message
@@ -204,7 +227,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // FIX 3: Ticker loop to update UI progress every second continuously, like YouTube
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
             exoPlayer?.let { player ->
@@ -215,33 +237,11 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    val renderersFactory = remember {
-        object : DefaultRenderersFactory(context) {
-            override fun buildAudioSink(c: Context, enableFloat: Boolean, enableParams: Boolean): AudioSink {
-                return object : ForwardingAudioSink(DefaultAudioSink.Builder(c).build()) {
-                    override fun handleBuffer(buffer: ByteBuffer, timeUs: Long, count: Int): Boolean {
-                        if (isAiEnabled && isAiModelLoaded) {
-                            try {
-                                val bufferCopy = buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN)
-                                val size = bufferCopy.remaining() / 2
-                                if (size > 0) {
-                                    val floats = FloatArray(size)
-                                    for (i in 0 until size) floats[i] = bufferCopy.short / 32768f
-                                    StreamXCore.pushAudio(floats)
-                                }
-                            } catch (e: Exception) { }
-                        }
-                        return super.handleBuffer(buffer, timeUs, count)
-                    }
-                }
-            }
-        }
-    }
-
     DisposableEffect(videoPath) {
         if (videoPath == null) return@DisposableEffect onDispose {}
         
-        val player = ExoPlayer.Builder(context, renderersFactory).build().apply {
+        // --- ExoPlayer is now much lighter without custom audio sink ---
+        val player = ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(Uri.parse(videoPath)))
             prepare()
             playWhenReady = true
@@ -265,8 +265,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 
         onDispose {
             player.removeListener(listener)
-            player.stop()
-            player.release() // Properly release to prevent memory leaks and crashes
             exoPlayer = null
         }
     }
@@ -286,7 +284,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 update = { view ->
                     if (view.player != exoPlayer) view.player = exoPlayer
                     view.resizeMode = resizeMode
-                    view.subtitleView?.visibility = if (isAiEnabled) android.view.View.GONE else android.view.View.VISIBLE
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -372,7 +369,8 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
 
-        if (isAiEnabled && aiSubtitleText.isNotBlank()) {
+        // --- THE NEW CUSTOM SUBTITLE UI ---
+        if (isAiEnabled && translatedSubtitle.isNotBlank()) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -382,7 +380,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                     .padding(16.dp)
             ) {
                 Text(
-                    text = aiSubtitleText,
+                    text = translatedSubtitle,
                     color = subtitleColor,
                     fontSize = subtitleFontSize.sp,
                     fontWeight = FontWeight.Bold,
@@ -414,8 +412,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         } else {
             AnimatedVisibility(
                 visible = isControlsVisible || isBuffering,
-                enter = fadeIn(),
-                exit = fadeOut(),
+                enter = fadeIn(), exit = fadeOut(),
                 modifier = Modifier.fillMaxSize()
             ) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(0.4f))) {
@@ -439,9 +436,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 colors = ButtonDefaults.buttonColors(containerColor = if(isAiEnabled) Color.Green else Color.DarkGray),
                                 modifier = Modifier.height(35.dp),
                                 contentPadding = PaddingValues(horizontal = 8.dp)
-                            ) { Text("Sherpa AI", color = Color.Black) }
+                            ) { Text("Auto Subs", color = Color.Black) }
                             
-                            IconButton(onClick = { showSubtitleSettings = true }) { Icon(Icons.Rounded.Palette, null, tint = Color.White) }
+                            IconButton(onClick = { showSubtitleSettings = true }) { Icon(Icons.Rounded.Subtitles, null, tint = Color.White) }
                         }
                     }
 
@@ -459,10 +456,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         }
                     }
 
-                    IconButton(
-                        onClick = { isLocked = !isLocked },
-                        modifier = Modifier.align(Alignment.CenterEnd).padding(32.dp)
-                    ) { 
+                    IconButton(onClick = { isLocked = !isLocked }, modifier = Modifier.align(Alignment.CenterEnd).padding(32.dp)) { 
                         Icon(if(isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, null, tint = if(isLocked) Color.Red else Color.White) 
                     }
 
@@ -484,26 +478,57 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
 
+        // --- SUBTITLE SETTINGS DIALOG ---
         if (showSubtitleSettings) {
             AlertDialog(
                 onDismissRequest = { showSubtitleSettings = false },
-                title = { Text("Subtitle Settings") },
+                containerColor = Color.DarkGray,
+                title = { Text("Subtitle Settings", color = Color.White) },
                 text = {
-                    Column {
-                        Text("Size: ${subtitleFontSize.toInt()}")
-                        Slider(value = subtitleFontSize, onValueChange = { subtitleFontSize = it }, valueRange = 16f..40f)
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        
+                        // Language Selection
+                        Text("Language", color = Color.LightGray)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val langs = mapOf("Bengali" to TranslateLanguage.BENGALI, "Hindi" to TranslateLanguage.HINDI, "English" to TranslateLanguage.ENGLISH)
+                            langs.forEach { (name, code) ->
+                                FilterChip(
+                                    selected = targetLanguage == code,
+                                    onClick = { targetLanguage = code },
+                                    label = { Text(name, color = if(targetLanguage == code) Color.Black else Color.White) },
+                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color.Cyan)
+                                )
+                            }
+                        }
+
+                        // Size Selection
+                        Text("Size: ${subtitleFontSize.toInt()}", color = Color.LightGray)
+                        Slider(
+                            value = subtitleFontSize, 
+                            onValueChange = { subtitleFontSize = it }, 
+                            valueRange = 16f..40f,
+                            colors = SliderDefaults.colors(thumbColor = Color.Cyan, activeTrackColor = Color.Cyan)
+                        )
+
+                        // Color Selection
+                        Text("Color", color = Color.LightGray)
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            val colors = listOf(Color.White, Color.Yellow, Color.Cyan, Color.Green)
+                            colors.forEach { col ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .background(col, CircleShape)
+                                        .clickable { subtitleColor = col }
+                                )
+                            }
+                        }
                     }
                 },
-                confirmButton = { TextButton(onClick = { showSubtitleSettings = false }) { Text("Done") } }
+                confirmButton = { 
+                    TextButton(onClick = { showSubtitleSettings = false }) { Text("Done", color = Color.Cyan) } 
+                }
             )
         }
     }
-}
-
-fun formatTime(ms: Long): String {
-    val totalSeconds = ms / 1000
-    val m = (totalSeconds / 60) % 60
-    val s = totalSeconds % 60
-    val h = totalSeconds / 3600
-    return if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
 }
