@@ -69,6 +69,18 @@ jobs:
           vcpkgGitURL: https://github.com/microsoft/vcpkg.git
           vcpkgGitCommitId: ${{ steps.vcpkg-git.outputs.commit_id }}
           doNotUpdateVcpkg: false
+        
+      - name: Build mpv-android (Vulkan Support)
+        run: |
+          sudo apt update && sudo apt install -y meson ninja-build yasm nasm python3-pip
+          git clone --recursive https://github.com/mpv-android/mpv-android.git
+          cd mpv-android
+          export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.3.13750724
+          ./buildall.sh --arch arm64-v8a
+          mkdir -p ../app/src/main/jniLibs/arm64-v8a
+          cp ./libmpv/build/android/arm64-v8a/libmpv.so ../app/src/main/jniLibs/arm64-v8a/
+          mkdir -p ../app/src/main/cpp/include/mpv
+          cp ./mpv/libmpv/*.h ../app/src/main/cpp/include/mpv/
 
       - name: Decode Keystore
         run: |

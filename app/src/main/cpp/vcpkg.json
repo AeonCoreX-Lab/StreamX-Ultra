@@ -1,13 +1,12 @@
 {
   "name": "streamx-native",
   "version-string": "1.0.0",
-  "builtin-baseline": "b42b19a62b63514ed9fa2a81e07ce75e613c83c0",
+  "builtin-baseline": "26283ac5e8a068561a718ce18b169bfad84c7dab",
   "dependencies": [
     "libtorrent",
     "boost-system",
     "boost-date-time",
     "boost-random",
-    "openssl",
-    "mpv"
+    "openssl"
   ]
 }

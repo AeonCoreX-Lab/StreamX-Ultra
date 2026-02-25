@@ -22,6 +22,9 @@ if (DEFINED TMDB_API_KEY)
     add_definitions(-DTMDB_API_KEY="${TMDB_API_KEY}")
 endif()
 
+# MPV Headers Path (Copied during GitHub Actions or manually)
+include_directories(${CMAKE_SOURCE_DIR}/include)
+
 add_library(
         streamx-native
         SHARED
@@ -31,10 +34,14 @@ add_library(
 
 target_include_directories(streamx-native PRIVATE ${CMAKE_SOURCE_DIR})
 
+# Manual libmpv setup
+add_library(libmpv SHARED IMPORTED)
+set_target_properties(libmpv PROPERTIES IMPORTED_LOCATION 
+    ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libmpv.so)
+
 find_package(LibtorrentRasterbar CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
-find_package(mpv CONFIG REQUIRED)
 
 find_library(log-lib log)
 find_library(android-lib android)
@@ -47,7 +54,7 @@ target_link_libraries(
         ${log-lib}
         ${android-lib}
         ${vulkan-lib}
-        mpv
+        libmpv
         LibtorrentRasterbar::torrent-rasterbar
         OpenSSL::SSL
         OpenSSL::Crypto
