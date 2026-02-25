@@ -39,6 +39,16 @@ add_library(libmpv SHARED IMPORTED)
 set_target_properties(libmpv PROPERTIES IMPORTED_LOCATION 
     ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libmpv.so)
 
+# ২. FFmpeg ডিপেন্ডেন্সিগুলো লিঙ্ক করা (খুবই জরুরি)
+# libmpv চলার জন্য এই ফাইলগুলো দরকার হয়
+set(FFMPEG_LIBS avcodec avdevice avfilter avformat avutil swresample swscale)
+foreach(LIB ${FFMPEG_LIBS})
+    add_library(lib${LIB} SHARED IMPORTED)
+    set_target_properties(lib${LIB} PROPERTIES IMPORTED_LOCATION 
+        ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/lib${LIB}.so)
+    list(APPEND FFMPEG_ALL_LIBS lib${LIB})
+endforeach()
+
 find_package(LibtorrentRasterbar CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
@@ -55,6 +65,7 @@ target_link_libraries(
         ${android-lib}
         ${vulkan-lib}
         libmpv
+        ${FFMPEG_ALL_LIBS}
         LibtorrentRasterbar::torrent-rasterbar
         OpenSSL::SSL
         OpenSSL::Crypto
