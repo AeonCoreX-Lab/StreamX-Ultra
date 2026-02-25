@@ -40,7 +40,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.navigation.NavController
-import kotlinx.coroutines.CoroutineScope // FIX: Added this import
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -61,18 +61,24 @@ object StreamXCore {
     }
     external fun getTmdbKey(): String 
     
-    // MPV Native Functions
+    // Core Functions
     external fun initMpvEngine()
     external fun playMpvVideo(path: String)
     external fun setMpvSurface(surface: Surface)
     external fun toggleVulkanFSR(enable: Boolean)
-    external fun switchMpvAudio(lang: String)
     external fun seekMpvVideo(seconds: Double)
     external fun pauseMpvVideo(pause: Boolean)
     external fun getMpvTime(): Double
     external fun getMpvDuration(): Double
-    external fun setSubtitleNative(url: String)
-    external fun setMpvPropertyString(name: String, value: String) // For Real-time Quality Change
+    
+    // NEW: Generic Bridges
+    external fun commandNative(cmd: Array<String>)
+    external fun setPropertyStringNative(name: String, value: String)
+    
+    // Helpers
+    fun cycleSubtitles() = commandNative(arrayOf("cycle", "sub"))
+    fun cycleAudio() = commandNative(arrayOf("cycle", "audio"))
+    fun addExternalSubtitle(url: String) = commandNative(arrayOf("sub-add", url, "select"))
 }
 
 @Composable
@@ -92,9 +98,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var isLocked by remember { mutableStateOf(false) }
     var isVulkanEnabled by remember { mutableStateOf(false) }
 
-    // Settings Menu States (YouTube Style)
+    // Settings Menu States
     var showSettingsMenu by remember { mutableStateOf(false) }
-    var activeSettingPage by remember { mutableStateOf("Main") } // "Main", "Quality", "Subtitles"
+    var activeSettingPage by remember { mutableStateOf("Main") } 
     var isSearchingSub by remember { mutableStateOf(false) }
     var selectedQuality by remember { mutableStateOf("Auto") }
 
@@ -193,7 +199,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 SurfaceView(ctx).apply {
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(holder: SurfaceHolder) {
-                            StreamXCore.setMpvSurface(holder.surface)
+                            if(holder.surface.isValid) {
+                                StreamXCore.setMpvSurface(holder.surface)
+                            }
                         }
                         override fun surfaceChanged(h: SurfaceHolder, format: Int, w: Int, height: Int) {}
                         override fun surfaceDestroyed(h: SurfaceHolder) {}
@@ -259,7 +267,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 }
         )
 
-        // Gesture Overlay
         if (showGestureOverlay) {
             Box(Modifier.align(Alignment.Center).background(Color.Black.copy(0.7f), RoundedCornerShape(16.dp)).padding(24.dp)) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -269,7 +276,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
 
-        // Double Tap Animations
         if (rewindAnimAlpha > 0) { Box(Modifier.align(Alignment.CenterStart).padding(50.dp).alpha(rewindAnimAlpha).background(Color.Black.copy(0.5f), CircleShape).padding(16.dp)) { Icon(Icons.Rounded.FastRewind, null, tint = Color.White, modifier = Modifier.size(40.dp)) } }
         if (forwardAnimAlpha > 0) { Box(Modifier.align(Alignment.CenterEnd).padding(50.dp).alpha(forwardAnimAlpha).background(Color.Black.copy(0.5f), CircleShape).padding(16.dp)) { Icon(Icons.Rounded.FastForward, null, tint = Color.White, modifier = Modifier.size(40.dp)) } }
 
@@ -287,7 +293,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             AnimatedVisibility(visible = isControlsVisible && !showSettingsMenu, enter = fadeIn(), exit = fadeOut()) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(0.4f))) {
                     
-                    // Top Bar
                     Row(Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopStart), horizontalArrangement = Arrangement.SpaceBetween) {
                         IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
                         
@@ -298,7 +303,15 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                     Text("S: $seeds", color = Color.LightGray, fontSize = 10.sp)
                                 }
                             }
-                            // YouTube Style Settings Button
+                            
+                            // SUBTITLE FAST TOGGLE (mpv-android style)
+                            IconButton(onClick = { 
+                                StreamXCore.cycleSubtitles()
+                                Toast.makeText(context, "Changing Subtitle Track...", Toast.LENGTH_SHORT).show()
+                            }) { 
+                                Icon(Icons.Rounded.Subtitles, "Toggle Subs", tint = Color.White, modifier = Modifier.size(28.dp)) 
+                            }
+                            
                             IconButton(onClick = { 
                                 showSettingsMenu = true 
                                 activeSettingPage = "Main"
@@ -308,7 +321,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         }
                     }
 
-                    // Center Play/Pause
                     if (!isLocked) {
                         Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(40.dp)) {
                             IconButton(onClick = { StreamXCore.seekMpvVideo(-10.0) }) { Icon(Icons.Rounded.Replay10, null, tint = Color.White, modifier = Modifier.size(48.dp)) }
@@ -317,10 +329,8 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         }
                     }
 
-                    // Lock Button
                     IconButton(onClick = { isLocked = !isLocked }, modifier = Modifier.align(Alignment.CenterEnd).padding(32.dp)) { Icon(if(isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, null, tint = if(isLocked) Color.Red else Color.White) }
 
-                    // Bottom Bar (Seekbar)
                     if (!isLocked) {
                         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -354,7 +364,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                     .padding(16.dp)
             ) {
                 Column {
-                    // Header
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 16.dp)) {
                         if (activeSettingPage != "Main") {
                             IconButton(onClick = { activeSettingPage = "Main" }, modifier = Modifier.size(24.dp)) {
@@ -368,13 +377,11 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         )
                     }
 
-                    // Main Menu
                     if (activeSettingPage == "Main") {
                         SettingsItem(icon = Icons.Rounded.HighQuality, title = "Quality", subtitle = selectedQuality) { activeSettingPage = "Quality" }
-                        SettingsItem(icon = Icons.Rounded.Subtitles, title = "Subtitles", subtitle = "OpenSubtitles") { activeSettingPage = "Subtitles" }
-                        SettingsItem(icon = Icons.Rounded.Speed, title = "Playback Speed", subtitle = "Normal") { /* Optional Future Update */ }
+                        SettingsItem(icon = Icons.Rounded.Subtitles, title = "Subtitles", subtitle = "Control Panel") { activeSettingPage = "Subtitles" }
+                        SettingsItem(icon = Icons.Rounded.LibraryMusic, title = "Audio Track", subtitle = "Change Audio") { StreamXCore.cycleAudio(); showSettingsMenu = false }
                         
-                        // Vulkan Toggle inside settings
                         Row(Modifier.fillMaxWidth().clickable { 
                             isVulkanEnabled = !isVulkanEnabled; StreamXCore.toggleVulkanFSR(isVulkanEnabled) 
                         }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -385,7 +392,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         }
                     }
                     
-                    // Quality Menu
                     else if (activeSettingPage == "Quality") {
                         val qualities = listOf("Auto", "1080p", "720p", "480p", "360p")
                         LazyColumn {
@@ -393,9 +399,8 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth().clickable {
                                         selectedQuality = quality
-                                        // Send Command to MPV based on selection
                                         val ytdlFormat = if (quality == "Auto") "bestvideo+bestaudio/best" else "bestvideo[height<=?${quality.replace("p","")}]+bestaudio/best"
-                                        StreamXCore.setMpvPropertyString("ytdl-format", ytdlFormat)
+                                        StreamXCore.setPropertyStringNative("ytdl-format", ytdlFormat)
                                         showSettingsMenu = false
                                     }.padding(vertical = 12.dp)
                                 ) {
@@ -405,14 +410,12 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         }
                     }
 
-                    // Subtitles Menu
                     else if (activeSettingPage == "Subtitles") {
                         Column {
                             Button(
                                 onClick = { 
                                     if(!isSearchingSub) {
                                         isSearchingSub = true
-                                        // "movieTitle" should be passed as argument ideally, here we extract from URL or use placeholder
                                         val title = "Movie" 
                                         fetchAndApplySubtitle(title, context) {
                                             isSearchingSub = false
@@ -424,20 +427,20 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
                             ) {
                                 if(isSearchingSub) CircularProgressIndicator(color = Color.Cyan, modifier = Modifier.size(20.dp))
-                                else Text("Search Auto (OpenSubtitles)", color = Color.White)
+                                else Text("Download Online Subtitle", color = Color.White)
                             }
                             
                             Spacer(Modifier.height(16.dp))
-                            Text("Or change Subtitle Track:", color = Color.LightGray, fontSize = 14.sp)
+                            Text("Internal Subtitle Tracks:", color = Color.LightGray, fontSize = 14.sp)
                             LazyColumn(modifier = Modifier.padding(top = 8.dp)) {
-                                items(listOf("Disable", "Track 1", "Track 2")) { track ->
+                                items(listOf("Disable", "Track 1", "Track 2", "Track 3")) { track ->
                                     Text(
                                         text = track,
                                         color = Color.White,
                                         fontSize = 16.sp,
                                         modifier = Modifier.fillMaxWidth().clickable {
                                             val sid = if (track == "Disable") "no" else track.last().toString()
-                                            StreamXCore.setMpvPropertyString("sid", sid)
+                                            StreamXCore.setPropertyStringNative("sid", sid)
                                             showSettingsMenu = false
                                         }.padding(vertical = 12.dp)
                                     )
@@ -483,7 +486,7 @@ private fun fetchAndApplySubtitle(movieTitle: String, context: Context, onComple
                 if (jsonArray.length() > 0) {
                     val subUrl = jsonArray.getJSONObject(0).getString("SubDownloadLink")
                     withContext(Dispatchers.Main) {
-                        StreamXCore.setSubtitleNative(subUrl)
+                        StreamXCore.addExternalSubtitle(subUrl)
                         Toast.makeText(context, "Subtitle Loaded Successfully!", Toast.LENGTH_SHORT).show()
                     }
                 } else {

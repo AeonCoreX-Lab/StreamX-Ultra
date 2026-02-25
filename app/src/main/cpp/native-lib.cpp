@@ -2,6 +2,7 @@
 #include <android/log.h>
 #include <android/native_window_jni.h>
 #include <string>
+#include <locale.h>
 #include <mpv/client.h>
 #include "torrent_system.hpp"
 
@@ -20,12 +21,21 @@ static mpv_handle* mpv_ctx = nullptr;
 // --- MPV & Vulkan Setup ---
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initMpvEngine(JNIEnv* env, jobject thiz) {
+    // FIX: Locale C setup for proper subtitle parsing and timing
+    setlocale(LC_NUMERIC, "C");
+
     if (!mpv_ctx) {
         mpv_ctx = mpv_create();
         if (mpv_ctx) {
             mpv_set_option_string(mpv_ctx, "vo", "gpu");
             mpv_set_option_string(mpv_ctx, "gpu-api", "vulkan"); // Hardware Vulkan Output
             mpv_set_option_string(mpv_ctx, "hwdec", "auto");
+            
+            // Subtitle Engine Setup (mpv-android defaults)
+            mpv_set_option_string(mpv_ctx, "sub-auto", "fuzzy"); 
+            mpv_set_option_string(mpv_ctx, "sub-ass-override", "force"); // Better styling
+            mpv_set_option_string(mpv_ctx, "sub-font-size", "45");
+            
             mpv_initialize(mpv_ctx);
             __android_log_print(ANDROID_LOG_DEBUG, TAG, "MPV Engine Initialized");
         }
@@ -66,14 +76,6 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_toggleVulkanFSR(JNIEnv* env, job
     }
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_switchMpvAudio(JNIEnv* env, jobject thiz, jstring lang) {
-    if (!mpv_ctx) return;
-    const char* l = env->GetStringUTFChars(lang, nullptr);
-    mpv_set_property_string(mpv_ctx, "alang", l);
-    env->ReleaseStringUTFChars(lang, l);
-}
-
 extern "C" JNIEXPORT jdouble JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvTime(JNIEnv* env, jobject thiz) {
     if (!mpv_ctx) return 0.0;
@@ -105,19 +107,30 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pauseMpvVideo(JNIEnv* env, jobje
     mpv_set_property(mpv_ctx, "pause", MPV_FORMAT_FLAG, &pause_val);
 }
 
-// --- NEW FEATURES (SUBTITLES & QUALITY SETTINGS) ---
+// --- NEW GENERIC BRIDGES (from mpv-android) ---
+
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setSubtitleNative(JNIEnv* env, jobject thiz, jstring url) {
-    if (mpv_ctx) {
-        const char* sub_url = env->GetStringUTFChars(url, nullptr);
-        const char* cmd[] = {"sub-add", sub_url, "select", nullptr};
-        mpv_command(mpv_ctx, cmd);
-        env->ReleaseStringUTFChars(url, sub_url);
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_commandNative(JNIEnv* env, jobject thiz, jobjectArray jarray) {
+    if (!mpv_ctx) return;
+    int len = env->GetArrayLength(jarray);
+    const char *arguments[128] = {0};
+    
+    for (int i = 0; i < len && i < 127; ++i) {
+        jstring str = (jstring)env->GetObjectArrayElement(jarray, i);
+        arguments[i] = env->GetStringUTFChars(str, NULL);
+    }
+    
+    mpv_command(mpv_ctx, arguments);
+    
+    for (int i = 0; i < len && i < 127; ++i) {
+        jstring str = (jstring)env->GetObjectArrayElement(jarray, i);
+        env->ReleaseStringUTFChars(str, arguments[i]);
+        env->DeleteLocalRef(str);
     }
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvPropertyString(JNIEnv* env, jobject thiz, jstring name, jstring value) {
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setPropertyStringNative(JNIEnv* env, jobject thiz, jstring name, jstring value) {
     if (mpv_ctx) {
         const char* prop_name = env->GetStringUTFChars(name, nullptr);
         const char* prop_value = env->GetStringUTFChars(value, nullptr);

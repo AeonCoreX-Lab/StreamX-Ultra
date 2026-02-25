@@ -71,17 +71,20 @@ jobs:
           sudo apt update && sudo apt install -y meson ninja-build yasm nasm python3-pip pkg-config
           
           # ২. সোর্স ক্লোন
-          git clone --recursive https://github.com/mpv-android/mpv-android.git
-          cd mpv-android
+          git clone https://github.com/mpv-android/mpv-android.git
+          cd mpv-android/buildscripts
           
-          # ৩. NDK টুলচেইন পাথ সেটআপ (যাতে clang খুঁজে পায়)
+          # ৩. NDK টুলচেইন পাথ সেটআপ
           export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.3.13750724
           export PATH=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
           
-          cd buildscripts
           chmod +x *.sh
           
-          # ৪. বিল্ড লুপ (স্ক্রিপ্ট অনুযায়ী সঠিক নাম ব্যবহার করে)
+          # ৪. 🚨 FIX: সোর্স কোড এবং ডিপেন্ডেন্সি ডাউনলোড করা (mpv, ffmpeg, libass)
+          echo "📥 Downloading sources..."
+          ./download.sh
+          
+          # ৫. বিল্ড লুপ (স্ক্রিপ্ট অনুযায়ী সঠিক নাম ব্যবহার করে)
           # Supported: armv7l, arm64, x86, x86_64
           for arch in arm64 armv7l x86 x86_64; do
             echo "----------------------------------------"
@@ -96,16 +99,16 @@ jobs:
             else ABI="$arch"; fi
             
             # তৈরি হওয়া .so ফাইল কপি করা
-            # ডিরেক্টরি স্ট্রাকচার অনুযায়ী পাথ: ../libmpv/build/android/$arch/
             mkdir -p ../../app/src/main/jniLibs/$ABI
             cp ../libmpv/build/android/$arch/libmpv.so ../../app/src/main/jniLibs/$ABI/
           done
           
-          # ৫. হেডার ফাইল কপি (Native C++ কোডের জন্য)
+          # ৬. হেডার ফাইল কপি (Native C++ কোডের জন্য)
           mkdir -p ../../app/src/main/cpp/include/mpv
           cp ../mpv/libmpv/*.h ../../app/src/main/cpp/include/mpv/
           
           echo "✅ All architectures built successfully!"
+
 
 
 
