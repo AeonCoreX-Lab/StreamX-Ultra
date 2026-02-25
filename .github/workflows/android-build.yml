@@ -68,39 +68,44 @@ jobs:
       - name: Build mpv-android (Universal Support)
         run: |
           # ১. প্রয়োজনীয় টুলস ইনস্টল
-          sudo apt update && sudo apt install -y meson ninja-build yasm nasm python3-pip
+          sudo apt update && sudo apt install -y meson ninja-build yasm nasm python3-pip pkg-config
           
-          # ২. সোর্স ক্লোন (রিকার্সিভ ভাবে সাব-মডিউলসহ)
+          # ২. সোর্স ক্লোন
           git clone --recursive https://github.com/mpv-android/mpv-android.git
           cd mpv-android
           
-          # ৩. NDK এবং পরিবেশ সেটআপ
+          # ৩. NDK টুলচেইন পাথ সেটআপ (যাতে clang খুঁজে পায়)
           export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.3.13750724
+          export PATH=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
           
-          # buildscripts ডিরেক্টরিতে গিয়ে পারমিশন ঠিক করা
           cd buildscripts
           chmod +x *.sh
           
-          # ৪. সব আর্কিটেকচারের জন্য বিল্ড লুপ
-          for arch in arm64-v8a armeabi-v7a x86 x86_64; do
+          # ৪. বিল্ড লুপ (স্ক্রিপ্ট অনুযায়ী সঠিক নাম ব্যবহার করে)
+          # Supported: armv7l, arm64, x86, x86_64
+          for arch in arm64 armv7l x86 x86_64; do
             echo "----------------------------------------"
-            echo "🚀 Building mpv for architecture: $arch"
+            echo "🚀 Building mpv for: $arch"
             echo "----------------------------------------"
             
             ./buildall.sh --arch $arch
             
-            # তৈরি হওয়া .so ফাইলটি তোমার অ্যাপের jniLibs-এ কপি করা
-            # ডাবল ডট (../..) ব্যবহার করা হয়েছে কারণ আমরা এখন 'mpv-android/buildscripts' ফোল্ডারে আছি
-            mkdir -p ../../app/src/main/jniLibs/$arch
-            cp ./libmpv/build/android/$arch/libmpv.so ../../app/src/main/jniLibs/$arch/
+            # অ্যান্ড্রয়েড স্ট্যান্ডার্ড ABI নাম ম্যাপিং
+            if [ "$arch" = "arm64" ]; then ABI="arm64-v8a";
+            elif [ "$arch" = "armv7l" ]; then ABI="armeabi-v7a";
+            else ABI="$arch"; fi
+            
+            # তৈরি হওয়া .so ফাইল কপি করা
+            # ডিরেক্টরি স্ট্রাকচার অনুযায়ী পাথ: ../libmpv/build/android/$arch/
+            mkdir -p ../../app/src/main/jniLibs/$ABI
+            cp ../libmpv/build/android/$arch/libmpv.so ../../app/src/main/jniLibs/$ABI/
           done
           
-          # ৫. হেডার ফাইল কপি করা (যাতে native-lib.cpp থেকে এক্সেস করা যায়)
-          # mpv-android/mpv/libmpv ফোল্ডারে হেডারগুলো থাকে
+          # ৫. হেডার ফাইল কপি (Native C++ কোডের জন্য)
           mkdir -p ../../app/src/main/cpp/include/mpv
           cp ../mpv/libmpv/*.h ../../app/src/main/cpp/include/mpv/
           
-          echo "✅ All architectures built and libraries copied successfully!"
+          echo "✅ All architectures built successfully!"
 
 
 
