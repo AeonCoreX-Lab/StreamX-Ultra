@@ -27,7 +27,7 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initMpvEngine(JNIEnv* env, jobje
             mpv_set_option_string(mpv_ctx, "gpu-api", "vulkan"); // Hardware Vulkan Output
             mpv_set_option_string(mpv_ctx, "hwdec", "auto");
             mpv_initialize(mpv_ctx);
-            __android_log_print(ANDROID_LOG_DEBUG, TAG, "MPV Engine Initialized with Vulkan");
+            __android_log_print(ANDROID_LOG_DEBUG, TAG, "MPV Engine Initialized");
         }
     }
 }
@@ -74,11 +74,56 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_switchMpvAudio(JNIEnv* env, jobj
     env->ReleaseStringUTFChars(lang, l);
 }
 
+extern "C" JNIEXPORT jdouble JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvTime(JNIEnv* env, jobject thiz) {
+    if (!mpv_ctx) return 0.0;
+    double time_pos = 0.0;
+    mpv_get_property(mpv_ctx, "time-pos", MPV_FORMAT_DOUBLE, &time_pos);
+    return time_pos;
+}
+
+extern "C" JNIEXPORT jdouble JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvDuration(JNIEnv* env, jobject thiz) {
+    if (!mpv_ctx) return 0.0;
+    double duration = 0.0;
+    mpv_get_property(mpv_ctx, "duration", MPV_FORMAT_DOUBLE, &duration);
+    return duration;
+}
+
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_destroyMpv(JNIEnv* env, jobject thiz) {
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_seekMpvVideo(JNIEnv* env, jobject thiz, jdouble seconds) {
+    if (!mpv_ctx) return;
+    std::string sec_str = std::to_string(seconds);
+    const char* cmd[] = {"seek", sec_str.c_str(), "relative", NULL};
+    mpv_command(mpv_ctx, cmd);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pauseMpvVideo(JNIEnv* env, jobject thiz, jboolean pause) {
+    if (!mpv_ctx) return;
+    int pause_val = pause ? 1 : 0;
+    mpv_set_property(mpv_ctx, "pause", MPV_FORMAT_FLAG, &pause_val);
+}
+
+// --- NEW FEATURES (SUBTITLES & QUALITY SETTINGS) ---
+extern "C" JNIEXPORT void JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setSubtitleNative(JNIEnv* env, jobject thiz, jstring url) {
     if (mpv_ctx) {
-        mpv_terminate_destroy(mpv_ctx);
-        mpv_ctx = nullptr;
+        const char* sub_url = env->GetStringUTFChars(url, nullptr);
+        const char* cmd[] = {"sub-add", sub_url, "select", nullptr};
+        mpv_command(mpv_ctx, cmd);
+        env->ReleaseStringUTFChars(url, sub_url);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvPropertyString(JNIEnv* env, jobject thiz, jstring name, jstring value) {
+    if (mpv_ctx) {
+        const char* prop_name = env->GetStringUTFChars(name, nullptr);
+        const char* prop_value = env->GetStringUTFChars(value, nullptr);
+        mpv_set_property_string(mpv_ctx, prop_name, prop_value);
+        env->ReleaseStringUTFChars(name, prop_name);
+        env->ReleaseStringUTFChars(value, prop_value);
     }
 }
 

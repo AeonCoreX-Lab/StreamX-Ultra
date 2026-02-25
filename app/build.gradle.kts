@@ -206,7 +206,4 @@ dependencies {
     implementation("com.valentinilk.shimmer:compose-shimmer:1.3.0")
     
     implementation("androidx.compose.material:material-icons-extended:1.6.7")
-    
-    // --- NEW: Google ML Kit Translation ---
-    implementation("com.google.mlkit:translate:17.0.3")
 }
