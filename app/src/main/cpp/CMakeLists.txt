@@ -15,10 +15,7 @@ elseif(${ANDROID_ABI} STREQUAL "x86")
     set(RUST_TARGET_ARCH "i686-linux-android")
 endif()
 
-# Rust লাইব্রেরি ইমপোর্ট
-set(RUST_BUILD_DIR "${CMAKE_SOURCE_DIR}/../../../StreamXCore/target")
 set(RUST_LIB_FILE "${RUST_BUILD_DIR}/${RUST_TARGET_ARCH}/release/libstreamx_core.a")
-
 add_library(streamx_core STATIC IMPORTED)
 set_target_properties(streamx_core PROPERTIES IMPORTED_LOCATION "${RUST_LIB_FILE}")
 
