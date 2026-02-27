@@ -41,13 +41,20 @@ add_library(libmpv SHARED IMPORTED)
 set_target_properties(libmpv PROPERTIES IMPORTED_LOCATION 
     ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libmpv.so)
 
-# ২. FFmpeg লাইব্রেরি ইমপোর্ট
+# ২. FFmpeg লাইব্রেরি ইমপোর্ট (Crash-Proof Fix)
 set(FFMPEG_LIBS avcodec avdevice avfilter avformat avutil swresample swscale)
+set(FFMPEG_ALL_LIBS "")
+
 foreach(LIB ${FFMPEG_LIBS})
-    add_library(lib${LIB} SHARED IMPORTED)
-    set_target_properties(lib${LIB} PROPERTIES IMPORTED_LOCATION 
-        ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/lib${LIB}.so)
-    list(APPEND FFMPEG_ALL_LIBS lib${LIB})
+    set(LIB_PATH "${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/lib${LIB}.so")
+    # FIX: চেক করবে ফাইলগুলো ফিজিক্যালি আছে কিনা, না থাকলে Ninja ক্র্যাশ করবে না।
+    if(EXISTS "${LIB_PATH}")
+        add_library(lib${LIB} SHARED IMPORTED)
+        set_target_properties(lib${LIB} PROPERTIES IMPORTED_LOCATION "${LIB_PATH}")
+        list(APPEND FFMPEG_ALL_LIBS lib${LIB})
+    else()
+        message(WARNING "⚠️ Missing FFmpeg Lib: ${LIB_PATH}. Skipping link.")
+    endif()
 endforeach()
 
 # --- অন্যান্য লাইব্রেরি ---
@@ -62,15 +69,14 @@ find_library(vulkan-lib vulkan)
 # --- ✅ Final Linking ---
 target_link_libraries(
         streamx-native
-        PRIVATE
-        -Wl,--whole-archive streamx_core -Wl,--no-whole-archive
-        ${log-lib}
-        ${android-lib}
-        ${vulkan-lib}
+        streamx_core
         libmpv
         ${FFMPEG_ALL_LIBS}
         LibtorrentRasterbar::torrent-rasterbar
         OpenSSL::SSL
         OpenSSL::Crypto
         Boost::system
+        ${log-lib}
+        ${android-lib}
+        ${vulkan-lib}
 )

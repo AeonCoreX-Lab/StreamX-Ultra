@@ -95,15 +95,15 @@ jobs:
             TARGET_DIR="../../app/src/main/jniLibs/$ABI"
             mkdir -p "$TARGET_DIR"
             
-            # ✅ FIX: Smart Find and Copy for libmpv.so
+            # ✅ FIX: Absolute Path Find for libmpv.so
             echo "🔍 Extracting libmpv.so for $ABI..."
-            find ../ -type f -name "libmpv.so" | grep "$arch" | head -n 1 | xargs -I {} cp {} "$TARGET_DIR/"
+            find ${{ github.workspace }} -type f -name "libmpv.so" | grep "$arch" | head -n 1 | xargs -I {} cp {} "$TARGET_DIR/" || true
             
-            # ✅ FIX: Smart Find and Copy for FFmpeg dependencies
+            # ✅ FIX: Absolute Path Find for FFmpeg dependencies
             echo "📦 Extracting FFmpeg dependencies for $ABI..."
-            if [ -d "deps/android-$arch/lib" ]; then
-              find deps/android-$arch/lib -type f -name "*.so" -exec cp {} "$TARGET_DIR/" \;
-            fi
+            find ${{ github.workspace }} -type f -name "*.so" | grep -E "(libavcodec|libavdevice|libavfilter|libavformat|libavutil|libswresample|libswscale)" | grep "$arch" | while read -r libfile; do
+              cp "$libfile" "$TARGET_DIR/" || true
+            done
           done
           
           # ✅ C++ Header files copy
