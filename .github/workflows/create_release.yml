@@ -79,7 +79,6 @@ jobs:
           export PATH=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
           chmod +x *.sh
           
-          # 🚨 FIX: Force Git to use HTTPS instead of GIT protocol
           git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "git://git.ffmpeg.org/ffmpeg.git"
           git config --global url."https://".insteadOf git://
           
@@ -100,23 +99,22 @@ jobs:
             TARGET_DIR="../../app/src/main/jniLibs/$ABI"
             mkdir -p "$TARGET_DIR"
             
-            # ✅ FIX: Absolute Path Find for libmpv.so
             echo "🔍 Extracting libmpv.so for $ABI..."
             find ${{ github.workspace }} -type f -name "libmpv.so" | grep "$arch" | head -n 1 | xargs -I {} cp {} "$TARGET_DIR/" || true
             
-            # ✅ FIX: Absolute Path Find for FFmpeg dependencies
             echo "📦 Extracting FFmpeg dependencies for $ABI..."
             find ${{ github.workspace }} -type f -name "*.so" | grep -E "(libavcodec|libavdevice|libavfilter|libavformat|libavutil|libswresample|libswscale)" | grep "$arch" | while read -r libfile; do
               cp "$libfile" "$TARGET_DIR/" || true
             done
           done
           
-          # ✅ C++ Header files copy
-          echo "📂 Copying header files..."
+          # ✅ C++ Header files copy (Directly from official repo)
+          echo "📂 Downloading header files..."
           mkdir -p ../../app/src/main/cpp/include/mpv
-          if [ -d "../mpv/libmpv" ]; then
-            cp ../mpv/libmpv/*.h ../../app/src/main/cpp/include/mpv/
-          fi
+          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/libmpv/client.h -o ../../app/src/main/cpp/include/mpv/client.h
+          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/libmpv/render.h -o ../../app/src/main/cpp/include/mpv/render.h
+          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/libmpv/render_gl.h -o ../../app/src/main/cpp/include/mpv/render_gl.h
+          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/libmpv/stream_cb.h -o ../../app/src/main/cpp/include/mpv/stream_cb.h
 
 
 

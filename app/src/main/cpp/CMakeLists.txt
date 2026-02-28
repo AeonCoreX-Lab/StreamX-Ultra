@@ -24,11 +24,12 @@ if (DEFINED TMDB_API_KEY)
     add_definitions(-DTMDB_API_KEY="${TMDB_API_KEY}")
 endif()
 
-# --- ✅ FIX: Auto-Download MPV Headers ---
-# যদি GitHub Actions হেডার ফাইল কপি করতে ফেইল করে, CMake নিজে ডাউনলোড করে নিবে (Zero failure)
-set(MPV_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/include/mpv")
+# --- ✅ FIX: Auto-Download MPV Headers (Safety Fallback) ---
+set(MPV_INCLUDE_BASE "${CMAKE_SOURCE_DIR}/include")
+set(MPV_INCLUDE_DIR "${MPV_INCLUDE_BASE}/mpv")
+
 if(NOT EXISTS "${MPV_INCLUDE_DIR}/client.h")
-    message(STATUS "⚠️ mpv headers not found! Downloading them automatically...")
+    message(STATUS "⚠️ mpv headers not found locally! Downloading them automatically...")
     file(MAKE_DIRECTORY "${MPV_INCLUDE_DIR}")
     file(DOWNLOAD "https://raw.githubusercontent.com/mpv-player/mpv/master/libmpv/client.h" "${MPV_INCLUDE_DIR}/client.h")
     file(DOWNLOAD "https://raw.githubusercontent.com/mpv-player/mpv/master/libmpv/render.h" "${MPV_INCLUDE_DIR}/render.h")
@@ -37,7 +38,8 @@ if(NOT EXISTS "${MPV_INCLUDE_DIR}/client.h")
     message(STATUS "✅ mpv headers downloaded successfully.")
 endif()
 
-include_directories(${CMAKE_SOURCE_DIR}/include)
+include_directories(${MPV_INCLUDE_BASE})
+include_directories(${CMAKE_SOURCE_DIR})
 
 add_library(
         streamx-native
@@ -49,18 +51,15 @@ add_library(
 target_include_directories(streamx-native PRIVATE ${CMAKE_SOURCE_DIR})
 
 # --- ✅ MPV & FFmpeg Setup ---
-# ১. libmpv.so ইমপোর্ট
 add_library(libmpv SHARED IMPORTED)
 set_target_properties(libmpv PROPERTIES IMPORTED_LOCATION 
     ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libmpv.so)
 
-# ২. FFmpeg লাইব্রেরি ইমপোর্ট (Crash-Proof Fix)
 set(FFMPEG_LIBS avcodec avdevice avfilter avformat avutil swresample swscale)
 set(FFMPEG_ALL_LIBS "")
 
 foreach(LIB ${FFMPEG_LIBS})
     set(LIB_PATH "${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/lib${LIB}.so")
-    # FIX: চেক করবে ফাইলগুলো ফিজিক্যালি আছে কিনা, না থাকলে Ninja ক্র্যাশ করবে না।
     if(EXISTS "${LIB_PATH}")
         add_library(lib${LIB} SHARED IMPORTED)
         set_target_properties(lib${LIB} PROPERTIES IMPORTED_LOCATION "${LIB_PATH}")
