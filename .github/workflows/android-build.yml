@@ -105,11 +105,13 @@ jobs:
           
           # ✅ C++ Header files copy (Directly from official repo)
           echo "📂 Downloading header files..."
-          mkdir -p ../../app/src/main/cpp/include/mpv
-          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/libmpv/client.h -o ../../app/src/main/cpp/include/mpv/client.h
-          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/libmpv/render.h -o ../../app/src/main/cpp/include/mpv/render.h
-          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/libmpv/render_gl.h -o ../../app/src/main/cpp/include/mpv/render_gl.h
-          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/libmpv/stream_cb.h -o ../../app/src/main/cpp/include/mpv/stream_cb.h
+          # Prothome directory toiri korun
+          mkdir -p ${{ github.workspace }}/app/src/main/cpp/include/mpv
+          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/client.h -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/client.h
+          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render.h -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/render.h
+          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render_gl.h -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/render_gl.h
+          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/stream_cb.h -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/stream_cb.h
+
 
 
 

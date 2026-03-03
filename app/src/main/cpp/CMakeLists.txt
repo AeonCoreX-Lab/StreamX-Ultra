@@ -24,17 +24,17 @@ if (DEFINED TMDB_API_KEY)
     add_definitions(-DTMDB_API_KEY="${TMDB_API_KEY}")
 endif()
 
-# --- ✅ FIX: Auto-Download MPV Headers (Safety Fallback) ---
+# --- ✅ FIX: Auto-Download MPV Headers (Fixed 404) ---
 set(MPV_INCLUDE_BASE "${CMAKE_SOURCE_DIR}/include")
 set(MPV_INCLUDE_DIR "${MPV_INCLUDE_BASE}/mpv")
 
 if(NOT EXISTS "${MPV_INCLUDE_DIR}/client.h")
     message(STATUS "⚠️ mpv headers not found locally! Downloading them automatically...")
     file(MAKE_DIRECTORY "${MPV_INCLUDE_DIR}")
-    file(DOWNLOAD "https://raw.githubusercontent.com/mpv-player/mpv/master/libmpv/client.h" "${MPV_INCLUDE_DIR}/client.h")
-    file(DOWNLOAD "https://raw.githubusercontent.com/mpv-player/mpv/master/libmpv/render.h" "${MPV_INCLUDE_DIR}/render.h")
-    file(DOWNLOAD "https://raw.githubusercontent.com/mpv-player/mpv/master/libmpv/render_gl.h" "${MPV_INCLUDE_DIR}/render_gl.h")
-    file(DOWNLOAD "https://raw.githubusercontent.com/mpv-player/mpv/master/libmpv/stream_cb.h" "${MPV_INCLUDE_DIR}/stream_cb.h")
+    file(DOWNLOAD "https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/client.h" "${MPV_INCLUDE_DIR}/client.h")
+    file(DOWNLOAD "https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/client.h" "${MPV_INCLUDE_DIR}/render.h" "${MPV_INCLUDE_DIR}/render.h")
+    file(DOWNLOAD "https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render_gl.h" "${MPV_INCLUDE_DIR}/render_gl.h")
+    file(DOWNLOAD "https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/stream_cb.h" "${MPV_INCLUDE_DIR}/stream_cb.h")
     message(STATUS "✅ mpv headers downloaded successfully.")
 endif()
 
