@@ -67,8 +67,18 @@ android {
              excludes += "META-INF/INDEX.LIST"
         }
         jniLibs {
-             // Sherpa-ONNX removed, keeping only libc++
-             pickFirsts += setOf("**/libc++_shared.so")
+             // FIX: Prevent Duplicate Native Libraries Error (CMake imported vs jniLibs)
+             pickFirsts += setOf(
+                 "**/libc++_shared.so",
+                 "**/libmpv.so",
+                 "**/libavcodec.so",
+                 "**/libavdevice.so",
+                 "**/libavfilter.so",
+                 "**/libavformat.so",
+                 "**/libavutil.so",
+                 "**/libswresample.so",
+                 "**/libswscale.so"
+             )
         }
     }
 
