@@ -24,7 +24,7 @@ if (DEFINED TMDB_API_KEY)
     add_definitions(-DTMDB_API_KEY="${TMDB_API_KEY}")
 endif()
 
-# --- ✅ FIX: Auto-Download MPV Headers (Fixed 404) ---
+# --- Auto-Download MPV Headers ---
 set(MPV_INCLUDE_BASE "${CMAKE_SOURCE_DIR}/include")
 set(MPV_INCLUDE_DIR "${MPV_INCLUDE_BASE}/mpv")
 
@@ -50,7 +50,7 @@ add_library(
 
 target_include_directories(streamx-native PRIVATE ${CMAKE_SOURCE_DIR})
 
-# --- ✅ MPV & FFmpeg Setup ---
+# --- MPV & FFmpeg Setup ---
 add_library(libmpv SHARED IMPORTED)
 set_target_properties(libmpv PROPERTIES IMPORTED_LOCATION 
     ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libmpv.so)
@@ -78,10 +78,10 @@ find_library(log-lib log)
 find_library(android-lib android)
 find_library(vulkan-lib vulkan)
 
-# --- ✅ Final Linking ---
+# --- ✅ FIX: -Wl,--whole-archive PREVENTS LINKER FROM DELETING RUST JNI FUNCTIONS ---
 target_link_libraries(
         streamx-native
-        streamx_core
+        -Wl,--whole-archive streamx_core -Wl,--no-whole-archive
         libmpv
         ${FFMPEG_ALL_LIBS}
         LibtorrentRasterbar::torrent-rasterbar

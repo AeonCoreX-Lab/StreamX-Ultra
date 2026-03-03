@@ -45,8 +45,15 @@ interface TmdbApi {
 }
 
 object MovieRepository {
-    // --- SECURE KEY FETCH FROM RUST ---
-    private val API_KEY = StreamXCore.getTmdbKey() 
+    // --- ✅ FIX: SECURE KEY FETCH FROM RUST WITH LAZY INIT AND TRY-CATCH ---
+    private val API_KEY: String by lazy {
+        try {
+            StreamXCore.getTmdbKey()
+        } catch (e: Throwable) {
+            Log.e("MovieRepo", "Native key load failed: ${e.message}")
+            "api_key_not_found" // Fallback to avoid crash
+        }
+    }
     
     private const val IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
     private const val BACKDROP_BASE_URL = "https://image.tmdb.org/t/p/original"
@@ -72,7 +79,7 @@ object MovieRepository {
 
     private suspend fun safeApiCall(call: suspend () -> TmdbResponse): List<Movie> = withContext(Dispatchers.IO) {
         if (API_KEY.isEmpty() || API_KEY == "api_key_not_found") {
-            Log.e("MovieRepo", "Invalid API Key")
+            Log.e("MovieRepo", "Invalid API Key or Native Library failed to load")
             return@withContext emptyList()
         }
         try {
