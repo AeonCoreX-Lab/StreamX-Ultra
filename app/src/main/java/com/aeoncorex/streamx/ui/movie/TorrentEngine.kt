@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.flow
 import java.io.File
 
 object TorrentEngine {
-    private const val TAG = "StreamX_JNI"
+    private const val TAG = "StreamX_Native"
 
     // --- NATIVE FUNCTIONS ---
     private external fun initNative()
