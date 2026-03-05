@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -28,6 +29,28 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        init {
+            try {
+                // FFmpeg dependencies load kora hocche
+                System.loadLibrary("avutil")
+                System.loadLibrary("swresample")
+                System.loadLibrary("avcodec")
+                System.loadLibrary("avformat")
+                System.loadLibrary("swscale")
+                System.loadLibrary("avfilter")
+                System.loadLibrary("avdevice")
+                System.loadLibrary("mpv")
+                
+                // Native code (Rust + Torrent) load kora hocche
+                System.loadLibrary("streamx-native")
+                Log.d("StreamX_Native", "All Libraries Loaded Successfully!")
+            } catch (e: Exception) {
+                Log.e("StreamX_Native", "Native Library Load Error: ${e.message}")
+            }
+        }
+    }
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { }
@@ -36,6 +59,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         
+        // Purono torrent cache clear kora
         lifecycleScope.launch(Dispatchers.IO) {
             TorrentEngine.clearCache(applicationContext)
         }
@@ -50,14 +74,9 @@ class MainActivity : ComponentActivity() {
                     return ThemeViewModel(applicationContext) as T
                 }
             })
-            
             val currentTheme by themeViewModel.theme
-            
             StreamXUltraTheme(appTheme = currentTheme) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     AppNavigation(themeViewModel = themeViewModel)
                 }
             }
@@ -65,21 +84,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkPermissions() {
-        val permissions = mutableListOf(Manifest.permission.RECORD_AUDIO) // Added for Subtitles
+        val permissions = mutableListOf(Manifest.permission.RECORD_AUDIO) 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         val notGranted = permissions.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
-        if (notGranted.isNotEmpty()) {
-            permissionLauncher.launch(notGranted.toTypedArray())
-        }
+        if (notGranted.isNotEmpty()) permissionLauncher.launch(notGranted.toTypedArray())
     }
 
     override fun onDestroy() {
         super.onDestroy()
         MusicManager.release()
-        lifecycleScope.launch(Dispatchers.IO) {
-            TorrentEngine.clearCache(applicationContext)
-        }
     }
 }
