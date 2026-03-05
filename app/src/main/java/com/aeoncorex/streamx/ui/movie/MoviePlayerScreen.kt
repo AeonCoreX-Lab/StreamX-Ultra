@@ -53,14 +53,12 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-// --- ✅ FIX: RUST BRIDGE & MPV NATIVE ---
+// --- RUST BRIDGE & MPV NATIVE ---
 object StreamXCore {
     init {
-        // streamx_core .a (static) ফাইল, তাই এটি আলাদাভাবে লোড করা যাবে না। 
-        // এটি streamx-native এর ভেতরেই যুক্ত করা হয়েছে।
+        try { System.loadLibrary("streamx_core") } catch (e: Throwable) { e.printStackTrace() }
         try { System.loadLibrary("streamx-native") } catch (e: Throwable) { e.printStackTrace() }
     }
-    
     external fun getTmdbKey(): String 
     
     // Core Functions
@@ -73,7 +71,7 @@ object StreamXCore {
     external fun getMpvTime(): Double
     external fun getMpvDuration(): Double
     
-    // Generic Bridges
+    // NEW: Generic Bridges
     external fun commandNative(cmd: Array<String>)
     external fun setPropertyStringNative(name: String, value: String)
     

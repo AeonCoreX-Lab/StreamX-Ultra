@@ -45,19 +45,8 @@ interface TmdbApi {
 }
 
 object MovieRepository {
-    private const val TAG = "MovieRepo"
-    
-    // --- ✅ FIX: SECURE KEY FETCH FROM RUST WITH LAZY INIT AND TRY-CATCH ---
-    private val API_KEY: String by lazy {
-        try {
-            val key = StreamXCore.getTmdbKey()
-            Log.d(TAG, "Native API Key fetched successfully. Length: ${key.length}")
-            key
-        } catch (e: Throwable) {
-            Log.e(TAG, "Native key load failed: ${e.message}")
-            "api_key_not_found" // Fallback to avoid crash
-        }
-    }
+    // --- SECURE KEY FETCH FROM RUST ---
+    private val API_KEY = StreamXCore.getTmdbKey() 
     
     private const val IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
     private const val BACKDROP_BASE_URL = "https://image.tmdb.org/t/p/original"
@@ -81,36 +70,27 @@ object MovieRepository {
         )
     }
 
-    private suspend fun safeApiCall(callName: String, call: suspend () -> TmdbResponse): List<Movie> = withContext(Dispatchers.IO) {
+    private suspend fun safeApiCall(call: suspend () -> TmdbResponse): List<Movie> = withContext(Dispatchers.IO) {
         if (API_KEY.isEmpty() || API_KEY == "api_key_not_found") {
-            Log.e(TAG, "[$callName] Invalid API Key or Native Library failed to load")
+            Log.e("MovieRepo", "Invalid API Key")
             return@withContext emptyList()
         }
         try {
-            val response = call()
-            val movies = response.results.filter { it.posterPath != null }.map { mapToMovie(it) }
-            Log.d(TAG, "[$callName] Fetched ${movies.size} movies successfully.")
-            movies
+            call().results.filter { it.posterPath != null }.map { mapToMovie(it) }
         } catch (e: Exception) {
-            Log.e(TAG, "[$callName] API Call Failed: ${e.message}")
             emptyList()
         }
     }
 
-    suspend fun getTrending() = safeApiCall("getTrending") { api.getTrending(API_KEY) }
-    suspend fun getPopularMovies() = safeApiCall("getPopularMovies") { api.getPopularMovies(API_KEY) }
-    suspend fun getTopSeries() = safeApiCall("getTopSeries") { api.getTopRatedSeries(API_KEY) }
-    suspend fun getActionMovies() = safeApiCall("getActionMovies") { api.getActionMovies(API_KEY) }
-    suspend fun getSciFiMovies() = safeApiCall("getSciFiMovies") { api.getSciFiMovies(API_KEY) }
-    suspend fun searchMovies(query: String) = safeApiCall("searchMovies") { api.searchMulti(API_KEY, query) }
+    suspend fun getTrending() = safeApiCall { api.getTrending(API_KEY) }
+    suspend fun getPopularMovies() = safeApiCall { api.getPopularMovies(API_KEY) }
+    suspend fun getTopSeries() = safeApiCall { api.getTopRatedSeries(API_KEY) }
+    suspend fun getActionMovies() = safeApiCall { api.getActionMovies(API_KEY) }
+    suspend fun getSciFiMovies() = safeApiCall { api.getSciFiMovies(API_KEY) }
+    suspend fun searchMovies(query: String) = safeApiCall { api.searchMulti(API_KEY, query) }
 
     suspend fun getFullDetails(movieId: Int, type: MovieType): FullMovieDetails? = withContext(Dispatchers.IO) {
         try {
-            if (API_KEY.isEmpty() || API_KEY == "api_key_not_found") {
-                Log.e(TAG, "[getFullDetails] Invalid API Key")
-                return@withContext null
-            }
-            
             val typeStr = if (type == MovieType.MOVIE) "movie" else "tv"
             val res = api.getDetails(typeStr, movieId, API_KEY)
             
@@ -141,21 +121,16 @@ object MovieRepository {
                 imdbId = res.external_ids?.imdbId 
             )
         } catch (e: Exception) {
-            Log.e(TAG, "[getFullDetails] Detail Error: ${e.localizedMessage}")
+            Log.e("MovieRepo", "Detail Error: ${e.localizedMessage}")
             null
         }
     }
 
     suspend fun getEpisodes(seriesId: Int, seasonNumber: Int): List<EpisodeDto> = withContext(Dispatchers.IO) {
         try {
-            if (API_KEY.isEmpty() || API_KEY == "api_key_not_found") {
-                Log.e(TAG, "[getEpisodes] Invalid API Key")
-                return@withContext emptyList()
-            }
             val res = api.getSeasonDetails(seriesId, seasonNumber, API_KEY)
             res.episodes ?: emptyList()
         } catch (e: Exception) {
-            Log.e(TAG, "[getEpisodes] Error: ${e.localizedMessage}")
             emptyList()
         }
     }
