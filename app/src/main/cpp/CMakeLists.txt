@@ -22,6 +22,7 @@ set_target_properties(streamx_core PROPERTIES IMPORTED_LOCATION "${RUST_LIB_FILE
 # TMDB API Key ডিফাইন
 if (DEFINED TMDB_API_KEY)
     add_definitions(-DTMDB_API_KEY="${TMDB_API_KEY}")
+    message(STATUS "TMDB API Key injected into CMake")
 endif()
 
 # --- Auto-Download MPV Headers ---

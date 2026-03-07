@@ -45,13 +45,12 @@ interface TmdbApi {
 }
 
 object MovieRepository {
-    // --- ✅ FIX: SECURE KEY FETCH FROM RUST WITH LAZY INIT AND TRY-CATCH ---
     private val API_KEY: String by lazy {
         try {
             StreamXCore.getTmdbKey()
         } catch (e: Throwable) {
             Log.e("MovieRepo", "Native key load failed: ${e.message}")
-            "api_key_not_found" // Fallback to avoid crash
+            "api_key_not_found" 
         }
     }
     

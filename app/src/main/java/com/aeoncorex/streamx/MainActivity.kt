@@ -30,9 +30,13 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     companion object {
+        private const val TAG = "StreamX_Native"
         init {
             try {
-                // FFmpeg dependencies load kora hocche
+                // 1. MUST LOAD C++ SHARED FIRST to resolve NDK 27 symbols for libmpv.so
+                System.loadLibrary("c++_shared")
+                
+                // 2. Load FFmpeg Dependencies
                 System.loadLibrary("avutil")
                 System.loadLibrary("swresample")
                 System.loadLibrary("avcodec")
@@ -40,13 +44,16 @@ class MainActivity : ComponentActivity() {
                 System.loadLibrary("swscale")
                 System.loadLibrary("avfilter")
                 System.loadLibrary("avdevice")
+                
+                // 3. Load MPV
                 System.loadLibrary("mpv")
                 
-                // Native code (Rust + Torrent) load kora hocche
+                // 4. Load Main Native Logic (C++ & Rust)
                 System.loadLibrary("streamx-native")
-                Log.d("StreamX_Native", "All Libraries Loaded Successfully!")
-            } catch (e: Exception) {
-                Log.e("StreamX_Native", "Native Library Load Error: ${e.message}")
+                
+                Log.d(TAG, "✅ All Native Libraries Loaded Successfully")
+            } catch (e: Throwable) {
+                Log.e(TAG, "❌ Critical Library Load Error: ${e.message}")
             }
         }
     }
@@ -59,9 +66,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         
-        // Purono torrent cache clear kora
         lifecycleScope.launch(Dispatchers.IO) {
-            TorrentEngine.clearCache(applicationContext)
+            try {
+                TorrentEngine.clearCache(applicationContext)
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Cache clear failed")
+            }
         }
 
         checkPermissions()
