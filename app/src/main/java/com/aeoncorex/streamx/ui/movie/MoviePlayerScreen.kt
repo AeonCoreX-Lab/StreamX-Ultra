@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.os.Bundle
+import android.util.Log
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -53,10 +54,8 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-// --- ✅ FIX: STREAMX CORE NATIVE BRIDGES ---
+// --- STREAMX CORE NATIVE BRIDGES ---
 object StreamXCore {
-    // 🚫 NO System.loadLibrary() HERE! Everything is loaded safely in MainActivity.
-    
     external fun getTmdbKey(): String 
     
     // Core Functions
