@@ -1,6 +1,7 @@
 package com.aeoncorex.streamx.ui.movie
 
 import android.util.Log
+import com.aeoncorex.streamx.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import retrofit2.Retrofit
@@ -47,15 +48,25 @@ interface TmdbApi {
 object MovieRepository {
     private var API_KEY_CACHE: String = ""
 
-    // Retry mechanism added for robust safety
+    // --- FIX: MULTI-LAYER KEY FETCHING ---
+    // Tries Rust JNI first, falls back to BuildConfig injected from GitHub Secrets
     private fun getApiKey(): String {
         if (API_KEY_CACHE.isNotEmpty() && API_KEY_CACHE != "api_key_not_found") return API_KEY_CACHE
+        
         return try {
-            API_KEY_CACHE = StreamXCore.getTmdbKey()
+            val rustKey = StreamXCore.getTmdbKey()
+            if (rustKey == "api_key_not_found" || rustKey.isEmpty()) {
+                Log.w("MovieRepo", "Rust Key missing, falling back to BuildConfig")
+                API_KEY_CACHE = BuildConfig.TMDB_API_KEY
+            } else {
+                Log.d("MovieRepo", "Successfully loaded key from Rust JNI")
+                API_KEY_CACHE = rustKey
+            }
             API_KEY_CACHE
         } catch (e: Throwable) {
-            Log.e("MovieRepo", "Native key load failed: ${e.message}")
-            "api_key_not_found"
+            Log.e("MovieRepo", "Native key load crashed: ${e.message}, falling back to BuildConfig")
+            API_KEY_CACHE = BuildConfig.TMDB_API_KEY
+            API_KEY_CACHE
         }
     }
     
@@ -84,12 +95,13 @@ object MovieRepository {
     private suspend fun safeApiCall(call: suspend (String) -> TmdbResponse): List<Movie> = withContext(Dispatchers.IO) {
         val currentKey = getApiKey()
         if (currentKey.isEmpty() || currentKey == "api_key_not_found") {
-            Log.e("MovieRepo", "Invalid API Key or Native Library failed to load")
+            Log.e("MovieRepo", "Invalid API Key. Both Rust and BuildConfig failed.")
             return@withContext emptyList()
         }
         try {
             call(currentKey).results.filter { it.posterPath != null }.map { mapToMovie(it) }
         } catch (e: Exception) {
+            Log.e("MovieRepo", "API Call Failed: ${e.message}")
             emptyList()
         }
     }
@@ -103,7 +115,7 @@ object MovieRepository {
 
     suspend fun getFullDetails(movieId: Int, type: MovieType): FullMovieDetails? = withContext(Dispatchers.IO) {
         val currentKey = getApiKey()
-        if (currentKey == "api_key_not_found") return@withContext null
+        if (currentKey == "api_key_not_found" || currentKey.isEmpty()) return@withContext null
 
         try {
             val typeStr = if (type == MovieType.MOVIE) "movie" else "tv"
@@ -143,11 +155,12 @@ object MovieRepository {
 
     suspend fun getEpisodes(seriesId: Int, seasonNumber: Int): List<EpisodeDto> = withContext(Dispatchers.IO) {
         val currentKey = getApiKey()
-        if (currentKey == "api_key_not_found") return@withContext emptyList()
+        if (currentKey == "api_key_not_found" || currentKey.isEmpty()) return@withContext emptyList()
         try {
             val res = api.getSeasonDetails(seriesId, seasonNumber, currentKey)
             res.episodes ?: emptyList()
         } catch (e: Exception) {
+            Log.e("MovieRepo", "Episodes Error: ${e.localizedMessage}")
             emptyList()
         }
     }

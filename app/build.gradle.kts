@@ -35,6 +35,7 @@ android {
                 
                 // --- FIX: FETCH GITHUB SECRET AND PASS TO CMAKE/RUST ---
                 val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "api_key_not_found"
+                buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
 
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
