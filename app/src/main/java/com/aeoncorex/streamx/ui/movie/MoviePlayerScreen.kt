@@ -12,6 +12,7 @@ import android.view.SurfaceView
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.annotation.Keep
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -55,22 +56,42 @@ import kotlin.math.max
 import kotlin.math.min
 
 // --- STREAMX CORE NATIVE BRIDGES ---
+@Keep
 object StreamXCore {
-    external fun getTmdbKey(): String 
+    init {
+        try {
+            // Load natively inside the object so it's always ready before any call
+            System.loadLibrary("c++_shared")
+            System.loadLibrary("avutil")
+            System.loadLibrary("swresample")
+            System.loadLibrary("swscale")
+            System.loadLibrary("avcodec")
+            System.loadLibrary("avformat")
+            System.loadLibrary("avfilter")
+            System.loadLibrary("avdevice")
+            System.loadLibrary("mpv")
+            System.loadLibrary("streamx-native")
+            Log.d("StreamX_Native", "✅ Native Libraries Loaded Successfully")
+        } catch (e: Throwable) {
+            Log.e("StreamX_Native", "❌ Critical Library Load Error: ${e.message}")
+        }
+    }
+
+    @JvmStatic external fun getTmdbKey(): String 
     
     // Core Functions
-    external fun initMpvEngine()
-    external fun playMpvVideo(path: String)
-    external fun setMpvSurface(surface: Surface)
-    external fun toggleVulkanFSR(enable: Boolean)
-    external fun seekMpvVideo(seconds: Double)
-    external fun pauseMpvVideo(pause: Boolean)
-    external fun getMpvTime(): Double
-    external fun getMpvDuration(): Double
+    @JvmStatic external fun initMpvEngine()
+    @JvmStatic external fun playMpvVideo(path: String)
+    @JvmStatic external fun setMpvSurface(surface: Surface)
+    @JvmStatic external fun toggleVulkanFSR(enable: Boolean)
+    @JvmStatic external fun seekMpvVideo(seconds: Double)
+    @JvmStatic external fun pauseMpvVideo(pause: Boolean)
+    @JvmStatic external fun getMpvTime(): Double
+    @JvmStatic external fun getMpvDuration(): Double
     
     // Generic Bridges
-    external fun commandNative(cmd: Array<String>)
-    external fun setPropertyStringNative(name: String, value: String)
+    @JvmStatic external fun commandNative(cmd: Array<String>)
+    @JvmStatic external fun setPropertyStringNative(name: String, value: String)
     
     // Helpers
     fun cycleSubtitles() = commandNative(arrayOf("cycle", "sub"))

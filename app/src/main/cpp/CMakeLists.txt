@@ -82,7 +82,8 @@ find_library(vulkan-lib vulkan)
 # --- ✅ FIX: -Wl,--whole-archive PREVENTS LINKER FROM DELETING RUST JNI FUNCTIONS ---
 target_link_libraries(
         streamx-native
-        -Wl,--whole-archive streamx_core -Wl,--no-whole-archive
+        -Wl,--whole-archive 
+        streamx_core -Wl,--no-whole-archive
         libmpv
         ${FFMPEG_ALL_LIBS}
         LibtorrentRasterbar::torrent-rasterbar

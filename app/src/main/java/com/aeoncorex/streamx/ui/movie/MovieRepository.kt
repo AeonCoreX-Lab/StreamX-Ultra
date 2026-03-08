@@ -45,12 +45,17 @@ interface TmdbApi {
 }
 
 object MovieRepository {
-    private val API_KEY: String by lazy {
-        try {
-            StreamXCore.getTmdbKey()
+    private var API_KEY_CACHE: String = ""
+
+    // Retry mechanism added for robust safety
+    private fun getApiKey(): String {
+        if (API_KEY_CACHE.isNotEmpty() && API_KEY_CACHE != "api_key_not_found") return API_KEY_CACHE
+        return try {
+            API_KEY_CACHE = StreamXCore.getTmdbKey()
+            API_KEY_CACHE
         } catch (e: Throwable) {
             Log.e("MovieRepo", "Native key load failed: ${e.message}")
-            "api_key_not_found" 
+            "api_key_not_found"
         }
     }
     
@@ -76,29 +81,33 @@ object MovieRepository {
         )
     }
 
-    private suspend fun safeApiCall(call: suspend () -> TmdbResponse): List<Movie> = withContext(Dispatchers.IO) {
-        if (API_KEY.isEmpty() || API_KEY == "api_key_not_found") {
+    private suspend fun safeApiCall(call: suspend (String) -> TmdbResponse): List<Movie> = withContext(Dispatchers.IO) {
+        val currentKey = getApiKey()
+        if (currentKey.isEmpty() || currentKey == "api_key_not_found") {
             Log.e("MovieRepo", "Invalid API Key or Native Library failed to load")
             return@withContext emptyList()
         }
         try {
-            call().results.filter { it.posterPath != null }.map { mapToMovie(it) }
+            call(currentKey).results.filter { it.posterPath != null }.map { mapToMovie(it) }
         } catch (e: Exception) {
             emptyList()
         }
     }
 
-    suspend fun getTrending() = safeApiCall { api.getTrending(API_KEY) }
-    suspend fun getPopularMovies() = safeApiCall { api.getPopularMovies(API_KEY) }
-    suspend fun getTopSeries() = safeApiCall { api.getTopRatedSeries(API_KEY) }
-    suspend fun getActionMovies() = safeApiCall { api.getActionMovies(API_KEY) }
-    suspend fun getSciFiMovies() = safeApiCall { api.getSciFiMovies(API_KEY) }
-    suspend fun searchMovies(query: String) = safeApiCall { api.searchMulti(API_KEY, query) }
+    suspend fun getTrending() = safeApiCall { api.getTrending(it) }
+    suspend fun getPopularMovies() = safeApiCall { api.getPopularMovies(it) }
+    suspend fun getTopSeries() = safeApiCall { api.getTopRatedSeries(it) }
+    suspend fun getActionMovies() = safeApiCall { api.getActionMovies(it) }
+    suspend fun getSciFiMovies() = safeApiCall { api.getSciFiMovies(it) }
+    suspend fun searchMovies(query: String) = safeApiCall { api.searchMulti(it, query) }
 
     suspend fun getFullDetails(movieId: Int, type: MovieType): FullMovieDetails? = withContext(Dispatchers.IO) {
+        val currentKey = getApiKey()
+        if (currentKey == "api_key_not_found") return@withContext null
+
         try {
             val typeStr = if (type == MovieType.MOVIE) "movie" else "tv"
-            val res = api.getDetails(typeStr, movieId, API_KEY)
+            val res = api.getDetails(typeStr, movieId, currentKey)
             
             val basic = Movie(
                 id = res.id,
@@ -133,8 +142,10 @@ object MovieRepository {
     }
 
     suspend fun getEpisodes(seriesId: Int, seasonNumber: Int): List<EpisodeDto> = withContext(Dispatchers.IO) {
+        val currentKey = getApiKey()
+        if (currentKey == "api_key_not_found") return@withContext emptyList()
         try {
-            val res = api.getSeasonDetails(seriesId, seasonNumber, API_KEY)
+            val res = api.getSeasonDetails(seriesId, seasonNumber, currentKey)
             res.episodes ?: emptyList()
         } catch (e: Exception) {
             emptyList()
