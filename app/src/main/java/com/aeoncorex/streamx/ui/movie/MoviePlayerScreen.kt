@@ -59,21 +59,18 @@ import kotlin.math.min
 @Keep
 object StreamXCore {
     init {
-        try {
-            // Load natively inside the object so it's always ready before any call
-            System.loadLibrary("c++_shared")
-            System.loadLibrary("avutil")
-            System.loadLibrary("swresample")
-            System.loadLibrary("swscale")
-            System.loadLibrary("avcodec")
-            System.loadLibrary("avformat")
-            System.loadLibrary("avfilter")
-            System.loadLibrary("avdevice")
-            System.loadLibrary("mpv")
-            System.loadLibrary("streamx-native")
-            Log.d("StreamX_Native", "✅ Native Libraries Loaded Successfully")
-        } catch (e: Throwable) {
-            Log.e("StreamX_Native", "❌ Critical Library Load Error: ${e.message}")
+        val libraries = listOf(
+            "c++_shared", "avutil", "swresample", "swscale", "avcodec", 
+            "avformat", "avfilter", "avdevice", "mpv", "streamx-native"
+        )
+        
+        for (lib in libraries) {
+            try {
+                System.loadLibrary(lib)
+                Log.d("StreamX_Native", "✅ Loaded: $lib")
+            } catch (e: Throwable) {
+                Log.e("StreamX_Native", "❌ Critical Library Load Error for $lib: ${e.message}")
+            }
         }
     }
 
@@ -141,7 +138,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 
     // --- INIT MPV ---
     LaunchedEffect(Unit) {
-        try { StreamXCore.initMpvEngine() } catch (e: Exception) { Log.e("MPV", "Init Error") }
+        try { StreamXCore.initMpvEngine() } catch (e: Exception) { Log.e("MPV", "Init Error", e) }
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val insetsController = activity?.window?.let { WindowCompat.getInsetsController(it, it.decorView) }

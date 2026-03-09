@@ -18,9 +18,19 @@ extern "C" {
 static TorrentSystem* torrentEngine = nullptr;
 static mpv_handle* mpv_ctx = nullptr;
 
+// --- Missing TMDB Key Bridge ---
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getTmdbKey(JNIEnv* env, jclass clazz) {
+#ifdef TMDB_API_KEY
+    return env->NewStringUTF(TMDB_API_KEY);
+#else
+    return env->NewStringUTF("api_key_not_found");
+#endif
+}
+
 // --- MPV & Vulkan Setup ---
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initMpvEngine(JNIEnv* env, jobject thiz) {
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initMpvEngine(JNIEnv* env, jclass clazz) {
     // FIX: Locale C setup for proper subtitle parsing and timing
     setlocale(LC_NUMERIC, "C");
 
@@ -43,7 +53,7 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initMpvEngine(JNIEnv* env, jobje
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_playMpvVideo(JNIEnv* env, jobject thiz, jstring path) {
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_playMpvVideo(JNIEnv* env, jclass clazz, jstring path) {
     if (!mpv_ctx) return;
     const char* file_path = env->GetStringUTFChars(path, nullptr);
     const char* cmd[] = {"loadfile", file_path, NULL};
@@ -52,7 +62,7 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_playMpvVideo(JNIEnv* env, jobjec
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvSurface(JNIEnv* env, jobject thiz, jobject surface) {
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvSurface(JNIEnv* env, jclass clazz, jobject surface) {
     if (!mpv_ctx) return;
     if (surface != nullptr) {
         ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
@@ -65,7 +75,7 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvSurface(JNIEnv* env, jobje
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_toggleVulkanFSR(JNIEnv* env, jobject thiz, jboolean enable) {
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_toggleVulkanFSR(JNIEnv* env, jclass clazz, jboolean enable) {
     if (!mpv_ctx) return;
     if (enable) {
         mpv_set_option_string(mpv_ctx, "scale", "ewa_lanczossharp");
@@ -77,7 +87,7 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_toggleVulkanFSR(JNIEnv* env, job
 }
 
 extern "C" JNIEXPORT jdouble JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvTime(JNIEnv* env, jobject thiz) {
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvTime(JNIEnv* env, jclass clazz) {
     if (!mpv_ctx) return 0.0;
     double time_pos = 0.0;
     mpv_get_property(mpv_ctx, "time-pos", MPV_FORMAT_DOUBLE, &time_pos);
@@ -85,7 +95,7 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvTime(JNIEnv* env, jobject 
 }
 
 extern "C" JNIEXPORT jdouble JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvDuration(JNIEnv* env, jobject thiz) {
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvDuration(JNIEnv* env, jclass clazz) {
     if (!mpv_ctx) return 0.0;
     double duration = 0.0;
     mpv_get_property(mpv_ctx, "duration", MPV_FORMAT_DOUBLE, &duration);
@@ -93,7 +103,7 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvDuration(JNIEnv* env, jobj
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_seekMpvVideo(JNIEnv* env, jobject thiz, jdouble seconds) {
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_seekMpvVideo(JNIEnv* env, jclass clazz, jdouble seconds) {
     if (!mpv_ctx) return;
     std::string sec_str = std::to_string(seconds);
     const char* cmd[] = {"seek", sec_str.c_str(), "relative", NULL};
@@ -101,7 +111,7 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_seekMpvVideo(JNIEnv* env, jobjec
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pauseMpvVideo(JNIEnv* env, jobject thiz, jboolean pause) {
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pauseMpvVideo(JNIEnv* env, jclass clazz, jboolean pause) {
     if (!mpv_ctx) return;
     int pause_val = pause ? 1 : 0;
     mpv_set_property(mpv_ctx, "pause", MPV_FORMAT_FLAG, &pause_val);
@@ -110,7 +120,7 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pauseMpvVideo(JNIEnv* env, jobje
 // --- NEW GENERIC BRIDGES (from mpv-android) ---
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_commandNative(JNIEnv* env, jobject thiz, jobjectArray jarray) {
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_commandNative(JNIEnv* env, jclass clazz, jobjectArray jarray) {
     if (!mpv_ctx) return;
     int len = env->GetArrayLength(jarray);
     const char *arguments[128] = {0};
@@ -130,7 +140,7 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_commandNative(JNIEnv* env, jobje
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setPropertyStringNative(JNIEnv* env, jobject thiz, jstring name, jstring value) {
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setPropertyStringNative(JNIEnv* env, jclass clazz, jstring name, jstring value) {
     if (mpv_ctx) {
         const char* prop_name = env->GetStringUTFChars(name, nullptr);
         const char* prop_value = env->GetStringUTFChars(value, nullptr);
@@ -142,11 +152,11 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setPropertyStringNative(JNIEnv* 
 
 // --- Torrent Engine Logic ---
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_initNative(JNIEnv* env, jobject) {
+Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_initNative(JNIEnv* env, jobject thiz) {
     if (!torrentEngine) torrentEngine = new TorrentSystem();
 }
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_startNative(JNIEnv* env, jobject, jstring magnet, jstring path) {
+Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_startNative(JNIEnv* env, jobject thiz, jstring magnet, jstring path) {
     if (!torrentEngine) torrentEngine = new TorrentSystem();
     const char* m = env->GetStringUTFChars(magnet, nullptr);
     const char* p = env->GetStringUTFChars(path, nullptr);
@@ -155,11 +165,11 @@ Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_startNative(JNIEnv* env, jobje
     env->ReleaseStringUTFChars(path, p);
 }
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_stopNative(JNIEnv* env, jobject) {
+Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_stopNative(JNIEnv* env, jobject thiz) {
     if (torrentEngine) { torrentEngine->stop(); delete torrentEngine; torrentEngine = nullptr; }
 }
 extern "C" JNIEXPORT jlongArray JNICALL
-Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getStatusNative(JNIEnv* env, jobject) {
+Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getStatusNative(JNIEnv* env, jobject thiz) {
     if (!torrentEngine) return nullptr;
     EngineStatus s = torrentEngine->getStatus();
     jlongArray result = env->NewLongArray(5);
@@ -168,7 +178,7 @@ Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getStatusNative(JNIEnv* env, j
     return result;
 }
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getFilePathNative(JNIEnv* env, jobject) {
+Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getFilePathNative(JNIEnv* env, jobject thiz) {
     if (!torrentEngine) return env->NewStringUTF("");
     return env->NewStringUTF(torrentEngine->getFilePath().c_str());
 }
