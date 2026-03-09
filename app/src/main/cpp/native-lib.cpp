@@ -18,16 +18,6 @@ extern "C" {
 static TorrentSystem* torrentEngine = nullptr;
 static mpv_handle* mpv_ctx = nullptr;
 
-// --- Missing TMDB Key Bridge ---
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getTmdbKey(JNIEnv* env, jclass clazz) {
-#ifdef TMDB_API_KEY
-    return env->NewStringUTF(TMDB_API_KEY);
-#else
-    return env->NewStringUTF("api_key_not_found");
-#endif
-}
-
 // --- MPV & Vulkan Setup ---
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initMpvEngine(JNIEnv* env, jclass clazz) {
