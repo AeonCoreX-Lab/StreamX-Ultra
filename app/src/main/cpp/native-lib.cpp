@@ -2,9 +2,8 @@
 #include <android/log.h>
 #include <android/native_window_jni.h>
 #include <string>
-#include <locale.h>
-#include <mpv/client.h>
 #include "torrent_system.hpp"
+#include "mpv_handler.hpp"
 
 #define TAG "StreamX_Native"
 
@@ -16,102 +15,62 @@ extern "C" {
 }
 
 static TorrentSystem* torrentEngine = nullptr;
-static mpv_handle* mpv_ctx = nullptr;
 
-// --- MPV & Vulkan Setup ---
+// --- MPV JNI BRIDGES (Delegating to mpv_handler.cpp) ---
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initMpvEngine(JNIEnv* env, jclass clazz) {
-    // FIX: Locale C setup for proper subtitle parsing and timing
-    setlocale(LC_NUMERIC, "C");
-
-    if (!mpv_ctx) {
-        mpv_ctx = mpv_create();
-        if (mpv_ctx) {
-            mpv_set_option_string(mpv_ctx, "vo", "gpu");
-            mpv_set_option_string(mpv_ctx, "gpu-api", "vulkan"); // Hardware Vulkan Output
-            mpv_set_option_string(mpv_ctx, "hwdec", "auto");
-            
-            // Subtitle Engine Setup (mpv-android defaults)
-            mpv_set_option_string(mpv_ctx, "sub-auto", "fuzzy"); 
-            mpv_set_option_string(mpv_ctx, "sub-ass-override", "force"); // Better styling
-            mpv_set_option_string(mpv_ctx, "sub-font-size", "45");
-            
-            mpv_initialize(mpv_ctx);
-            __android_log_print(ANDROID_LOG_DEBUG, TAG, "MPV Engine Initialized");
-        }
-    }
+    init_mpv_engine();
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_playMpvVideo(JNIEnv* env, jclass clazz, jstring path) {
-    if (!mpv_ctx) return;
     const char* file_path = env->GetStringUTFChars(path, nullptr);
-    const char* cmd[] = {"loadfile", file_path, NULL};
-    mpv_command(mpv_ctx, cmd);
+    play_mpv_video(file_path);
     env->ReleaseStringUTFChars(path, file_path);
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvSurface(JNIEnv* env, jclass clazz, jobject surface) {
-    if (!mpv_ctx) return;
+    ANativeWindow* window = nullptr;
     if (surface != nullptr) {
-        ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
-        int64_t wid = (int64_t)window;
-        mpv_set_property(mpv_ctx, "wid", MPV_FORMAT_INT64, &wid);
-    } else {
-        int64_t wid = 0;
-        mpv_set_property(mpv_ctx, "wid", MPV_FORMAT_INT64, &wid);
+        window = ANativeWindow_fromSurface(env, surface);
+    }
+    set_mpv_surface(window);
+    
+    // FIX: Memory leak prevention. Always release ANativeWindow ref.
+    if (window != nullptr) {
+        ANativeWindow_release(window); 
     }
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_toggleVulkanFSR(JNIEnv* env, jclass clazz, jboolean enable) {
-    if (!mpv_ctx) return;
-    if (enable) {
-        mpv_set_option_string(mpv_ctx, "scale", "ewa_lanczossharp");
-        mpv_set_option_string(mpv_ctx, "cscale", "ewa_lanczossharp");
-    } else {
-        mpv_set_option_string(mpv_ctx, "scale", "bilinear");
-        mpv_set_option_string(mpv_ctx, "cscale", "bilinear");
-    }
+    toggle_vulkan_fsr(enable);
 }
 
 extern "C" JNIEXPORT jdouble JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvTime(JNIEnv* env, jclass clazz) {
-    if (!mpv_ctx) return 0.0;
-    double time_pos = 0.0;
-    mpv_get_property(mpv_ctx, "time-pos", MPV_FORMAT_DOUBLE, &time_pos);
-    return time_pos;
+    return get_mpv_time();
 }
 
 extern "C" JNIEXPORT jdouble JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvDuration(JNIEnv* env, jclass clazz) {
-    if (!mpv_ctx) return 0.0;
-    double duration = 0.0;
-    mpv_get_property(mpv_ctx, "duration", MPV_FORMAT_DOUBLE, &duration);
-    return duration;
+    return get_mpv_duration();
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_seekMpvVideo(JNIEnv* env, jclass clazz, jdouble seconds) {
-    if (!mpv_ctx) return;
-    std::string sec_str = std::to_string(seconds);
-    const char* cmd[] = {"seek", sec_str.c_str(), "relative", NULL};
-    mpv_command(mpv_ctx, cmd);
+    seek_mpv_video(seconds);
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pauseMpvVideo(JNIEnv* env, jclass clazz, jboolean pause) {
-    if (!mpv_ctx) return;
-    int pause_val = pause ? 1 : 0;
-    mpv_set_property(mpv_ctx, "pause", MPV_FORMAT_FLAG, &pause_val);
+    pause_mpv_video(pause);
 }
-
-// --- NEW GENERIC BRIDGES (from mpv-android) ---
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_commandNative(JNIEnv* env, jclass clazz, jobjectArray jarray) {
-    if (!mpv_ctx) return;
     int len = env->GetArrayLength(jarray);
     const char *arguments[128] = {0};
     
@@ -120,7 +79,7 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_commandNative(JNIEnv* env, jclas
         arguments[i] = env->GetStringUTFChars(str, NULL);
     }
     
-    mpv_command(mpv_ctx, arguments);
+    command_mpv(arguments);
     
     for (int i = 0; i < len && i < 127; ++i) {
         jstring str = (jstring)env->GetObjectArrayElement(jarray, i);
@@ -131,16 +90,14 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_commandNative(JNIEnv* env, jclas
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setPropertyStringNative(JNIEnv* env, jclass clazz, jstring name, jstring value) {
-    if (mpv_ctx) {
-        const char* prop_name = env->GetStringUTFChars(name, nullptr);
-        const char* prop_value = env->GetStringUTFChars(value, nullptr);
-        mpv_set_property_string(mpv_ctx, prop_name, prop_value);
-        env->ReleaseStringUTFChars(name, prop_name);
-        env->ReleaseStringUTFChars(value, prop_value);
-    }
+    const char* prop_name = env->GetStringUTFChars(name, nullptr);
+    const char* prop_value = env->GetStringUTFChars(value, nullptr);
+    set_property_string_mpv(prop_name, prop_value);
+    env->ReleaseStringUTFChars(name, prop_name);
+    env->ReleaseStringUTFChars(value, prop_value);
 }
 
-// --- Torrent Engine Logic ---
+// --- TORRENT ENGINE BRIDGES ---
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_initNative(JNIEnv* env, jobject thiz) {
     if (!torrentEngine) torrentEngine = new TorrentSystem();

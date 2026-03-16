@@ -70,6 +70,8 @@ object StreamXCore {
                 Log.d("StreamX_Native", "✅ Loaded: $lib")
             } catch (e: Throwable) {
                 Log.e("StreamX_Native", "❌ Critical Library Load Error for $lib: ${e.message}")
+                // FIX: Throw error loudly so it doesn't fail silently later with UnsatisfiedLinkError
+                throw RuntimeException("Failed to load native library '$lib'. Reason: ${e.message}")
             }
         }
     }
@@ -79,7 +81,7 @@ object StreamXCore {
     // Core Functions
     @JvmStatic external fun initMpvEngine()
     @JvmStatic external fun playMpvVideo(path: String)
-    @JvmStatic external fun setMpvSurface(surface: Surface)
+    @JvmStatic external fun setMpvSurface(surface: Surface?)
     @JvmStatic external fun toggleVulkanFSR(enable: Boolean)
     @JvmStatic external fun seekMpvVideo(seconds: Double)
     @JvmStatic external fun pauseMpvVideo(pause: Boolean)
@@ -221,7 +223,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             }
                         }
                         override fun surfaceChanged(h: SurfaceHolder, format: Int, w: Int, height: Int) {}
-                        override fun surfaceDestroyed(h: SurfaceHolder) {}
+                        override fun surfaceDestroyed(h: SurfaceHolder) {
+                            try { StreamXCore.setMpvSurface(null) } catch (e: Exception) {}
+                        }
                     })
                     layoutParams = ViewGroup.LayoutParams(-1, -1)
                 }
