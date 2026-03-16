@@ -8,7 +8,7 @@ plugins {
 android {
     namespace = "com.aeoncorex.streamx"
     compileSdk = 35
-    ndkVersion = "27.3.13750724"
+    ndkVersion = "26.3.11579264"
 
     defaultConfig {
         applicationId = "com.aeoncorex.streamx"

@@ -1,6 +1,6 @@
 <div align="center">
 
-  <a href="https://github.com/cybernahid-dev/StreamX-Ultra">
+  <a href="https://github.com/AeonCoreX-Lab/StreamX-Ultra">
     <img src="assets/logo.png" alt="StreamX Ultra Logo" width="180">
   </a>
 
@@ -100,7 +100,7 @@ StreamX Ultra is built using the latest Android development standards.
 | **Language** | ![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white) **Kotlin** |
 | **UI Framework** | ![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-4285F4?style=flat-square&logo=android&logoColor=white) **Jetpack Compose** |
 | **Architecture** | MVVM / Clean Architecture |
-| **Media Engine** | Media3 / ExoPlayer |
+| **Media Engine** | ExoPlayer / libmpv |
 | **Asynchronous** | Coroutines & Flow |
 | **Dependency Injection** | Hilt (Recommended) |
 | **Build System** | Gradle (Kotlin DSL) |
@@ -138,7 +138,7 @@ Prerequisites
  * Android SDK API 34+
 Installation
  * Clone the repository
-   git clone [https://github.com/cybernahid-dev/StreamX-Ultra.git](https://github.com/cybernahid-dev/StreamX-Ultra.git)
+   git clone [https://github.com/AeonCoreX-Lab/StreamX-Ultra.git](https://github.com/AeonCoreX-Lab/StreamX-Ultra.git)
 
  * Open in Android Studio
    * File > Open > Select StreamX-Ultra folder.

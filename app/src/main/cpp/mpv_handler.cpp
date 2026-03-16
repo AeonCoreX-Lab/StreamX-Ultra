@@ -14,7 +14,8 @@ void init_mpv_engine() {
         mpv_ctx = mpv_create();
         if (mpv_ctx) {
             mpv_set_option_string(mpv_ctx, "vo", "gpu");
-            mpv_set_option_string(mpv_ctx, "gpu-api", "vulkan"); // Hardware Vulkan Output
+            // FIX: Changed from vulkan to opengl to prevent black screen & crashes
+            mpv_set_option_string(mpv_ctx, "gpu-api", "opengl"); 
             mpv_set_option_string(mpv_ctx, "hwdec", "auto");
             mpv_set_option_string(mpv_ctx, "sub-auto", "fuzzy"); 
             mpv_set_option_string(mpv_ctx, "sub-ass-override", "force"); 
