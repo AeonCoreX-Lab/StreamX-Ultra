@@ -104,7 +104,7 @@ StreamX Ultra is built using the latest Android development standards.
 | **Asynchronous** | Coroutines & Flow |
 | **Dependency Injection** | Hilt (Recommended) |
 | **Build System** | Gradle (Kotlin DSL) |
-| **Min SDK** | Android 8.0 (API 26) |
+| **Min SDK** | Android 9.0 (API 28) |
 
 ---
 

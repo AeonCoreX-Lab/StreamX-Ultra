@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>StreamX Ultra | Next-Gen Entertainment</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;800&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <style>
+    :root {
+      --primary: #00f2ff;
+      --secondary: #7000ff;
+      --bg: #03030b;
+      --card-bg: rgba(255, 255, 255, 0.03);
+      --glass-border: rgba(255, 255, 255, 0.1);
+      --text-main: #ffffff;
+      --text-dim: rgba(255, 255, 255, 0.7);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      scroll-behavior: smooth;
+    }
+
+    /* Fixed Horizontal Scroll Issue */
+    html, body {
+      background-color: var(--bg);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      color: var(--text-main);
+      overflow-x: hidden;
+      width: 100%;
+      position: relative;
+      line-height: 1.6;
+    }
+
+    /* Animated Background */
+    #bg-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: -1;
+      width: 100%;
+      height: 100%;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Navbar */
+    nav {
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      border-bottom: 1px solid var(--glass-border);
+    }
+
+    .logo {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 1.5rem;
+      font-weight: 900;
+      background: linear-gradient(to right, #fff, var(--primary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: 2px;
+    }
+
+    /* Hero Section */
+    .hero {
+      padding: 100px 0 60px;
+      text-align: center;
+    }
+
+    /* ULTRA CORE Text Styling Fixes */
+    .hero h1 {
+      font-family: 'Orbitron', sans-serif;
+      font-size: clamp(2rem, 6vw, 5rem); /* Dynamically scales down smoothly */
+      font-weight: 900;
+      line-height: 1.1;
+      margin-bottom: 24px;
+      text-transform: uppercase;
+      letter-spacing: -1px;
+      background: linear-gradient(135deg, #fff 30%, var(--primary) 60%, var(--secondary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 10px 30px rgba(0, 242, 255, 0.3));
+      word-wrap: break-word; /* Allows long words to break if needed */
+    }
+
+    .hero p {
+      font-size: clamp(0.9rem, 2vw, 1.25rem);
+      color: var(--text-dim);
+      max-width: 700px;
+      margin: 0 auto 40px;
+    }
+
+    /* Buttons */
+    .btn-group {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 16px 36px;
+      border-radius: 12px;
+      font-weight: 700;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.9rem;
+      letter-spacing: 1px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #000;
+      box-shadow: 0 0 20px rgba(0, 242, 255, 0.4);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 0 35px var(--primary);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      color: #fff;
+      border: 1px solid var(--glass-border);
+      backdrop-filter: blur(10px);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: var(--primary);
+    }
+
+    /* Mockup Slider */
+    .showcase {
+      margin: 80px 0;
+      display: flex;
+      justify-content: center;
+      padding: 0 15px; /* Added padding to prevent touching edges */
+    }
+
+    .phone-mockup {
+      width: 300px;
+      max-width: 100%; /* Ensures it doesn't break small screens */
+      height: 600px;
+      background: #000;
+      border-radius: 40px;
+      border: 8px solid #1a1a1a;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 50px 100px -20px rgba(0,0,0,1), 0 0 20px var(--primary);
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      transition: 0.8s ease-in-out;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 30px;
+      text-align: center;
+    }
+
+    .slide.active { opacity: 1; }
+
+    .slide i {
+      font-size: 4rem;
+      margin-bottom: 20px;
+      color: var(--primary);
+      filter: drop-shadow(0 0 15px var(--primary));
+    }
+
+    /* Features Grid */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      margin-bottom: 100px;
+    }
+
+    .feature-card {
+      background: var(--card-bg);
+      border: 1px solid var(--glass-border);
+      padding: 40px;
+      border-radius: 24px;
+      transition: 0.4s;
+      cursor: default;
+    }
+
+    .feature-card:hover {
+      border-color: var(--primary);
+      background: rgba(0, 242, 255, 0.03);
+      transform: translateY(-10px);
+    }
+
+    .feature-card i {
+      font-size: 2.5rem;
+      margin-bottom: 20px;
+      background: linear-gradient(to bottom, var(--primary), var(--secondary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .feature-card h3 {
+      font-family: 'Orbitron', sans-serif;
+      margin-bottom: 12px;
+    }
+
+    /* Download Section */
+    .download-box {
+      background: linear-gradient(135deg, rgba(112, 0, 255, 0.1), rgba(0, 242, 255, 0.1));
+      padding: 80px 40px;
+      border-radius: 32px;
+      text-align: center;
+      border: 1px solid var(--glass-border);
+      margin-bottom: 80px;
+      overflow: hidden; /* Added to keep contents inside */
+    }
+
+    .version {
+      display: inline-block;
+      padding: 6px 16px;
+      background: rgba(0, 242, 255, 0.1);
+      border: 1px solid var(--primary);
+      color: var(--primary);
+      border-radius: 100px;
+      font-size: 0.8rem;
+      margin-bottom: 20px;
+    }
+
+    footer {
+      padding: 40px 0;
+      border-top: 1px solid var(--glass-border);
+      display: flex;
+      justify-content: space-between;
+      color: var(--text-dim);
+      font-size: 0.9rem;
+    }
+
+    /* Professional Responsive Styling */
+    @media (max-width: 768px) {
+      .hero {
+        padding: 60px 0 40px; /* Reduced padding on top */
+      }
+      
+      .hero h1 { 
+        font-size: 2.2rem; /* Adjusted down specifically for long words */
+      }
+      
+      .download-box h2 {
+        font-size: 1.5rem !important;
+      }
+      
+      footer { 
+        flex-direction: column; 
+        gap: 20px; 
+        text-align: center; 
+        align-items: center; /* Centered nicely */
+      }
+    }
+
+    @media (max-width: 360px) {
+      /* Extra small devices fix */
+      .hero h1 {
+        font-size: 1.8rem;
+      }
+      .btn {
+        padding: 14px 24px; /* Slightly smaller button for smaller phones */
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="bg-canvas"></canvas>
+
+  <nav>
+    <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
+      <div class="logo">STREAMX</div>
+      <a href="#download" class="btn btn-secondary" style="padding: 10px 20px; font-size: 0.7rem;">GET APK</a>
+    </div>
+  </nav>
+
+  <section class="container hero">
+    <h1>ULTRA CORE<br>ENTERTAINMENT</h1>
+    <p>Experience the next evolution of streaming. Quantum-speed protocols meet high-fidelity entertainment. No ads, no limits, just pure content.</p>
+    <div class="btn-group">
+      <a href="#download" class="btn btn-primary"><i class="fas fa-bolt"></i> START NOW</a>
+      <a href="https://github.com/AeonCoreX-Lab/StreamX-Ultra" class="btn btn-secondary"><i class="fab fa-github"></i> REPOSITORY</a>
+    </div>
+  </section>
+
+  <section class="showcase">
+    <div class="phone-mockup">
+      <div class="slide active">
+        <i class="fas fa-rocket"></i>
+        <h3>Quantum Speed</h3>
+        <p style="color: #888; font-size: 0.9rem; margin-top:10px;">Zero buffering on 4K content.</p>
+      </div>
+      <div class="slide">
+        <i class="fas fa-shield-halved"></i>
+        <h3>Ad Shield</h3>
+        <p style="color: #888; font-size: 0.9rem; margin-top:10px;">Clean interface, zero distractions.</p>
+      </div>
+      <div class="slide">
+        <i class="fas fa-tv"></i>
+        <h3>Live Global</h3>
+        <p style="color: #888; font-size: 0.9rem; margin-top:10px;">1000+ Premium channels.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="container features">
+    <div class="feature-card">
+      <i class="fas fa-film"></i>
+      <h3>Movie Engine</h3>
+      <p>Cloud-based streaming with torrent support and multi-source indexing.</p>
+    </div>
+    <div class="feature-card">
+      <i class="fas fa-microchip"></i>
+      <h3>Core Tech</h3>
+      <p>Built on the latest framework for low battery consumption and high FPS.</p>
+    </div>
+    <div class="feature-card">
+      <i class="fas fa-music"></i>
+      <h3>Hi-Fi Audio</h3>
+      <p>Lossless audio streaming for the ultimate audiophile experience.</p>
+    </div>
+  </section>
+
+  <section class="container" id="download">
+    <div class="download-box">
+      <span class="version">LATEST VERSION 1.2.0</span>
+      <h2 style="font-family: 'Orbitron'; margin-bottom: 20px; font-size: 2rem;">Ready to upgrade?</h2>
+      <a href="https://github.com/AeonCoreX-Lab/StreamX-Ultra/releases/latest/download/app-release.apk" class="btn btn-primary" style="margin: 0 auto; display: inline-flex;">
+        <i class="fas fa-download"></i> DOWNLOAD APK
+      </a>
+      <p style="margin-top: 25px; font-size: 0.8rem; color: var(--text-dim);">Supported on Android 8.0 and above</p>
+    </div>
+  </section>
+
+  <footer class="container">
+    <div>© 2026 AeonCoreX-Lab. All rights reserved.</div>
+    <div style="display: flex; gap: 20px;">
+      <a href="#" style="color: inherit; text-decoration: none;">Privacy</a>
+      <a href="#" style="color: inherit; text-decoration: none;">Terms</a>
+      <a href="https://github.com" style="color: inherit;"><i class="fab fa-github"></i></a>
+    </div>
+  </footer>
+
+  <script>
+    // Background Particles
+    const canvas = document.getElementById('bg-canvas');
+    const ctx = canvas.getContext('2d');
+    let points = [];
+
+    function init() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      points = [];
+      for(let i=0; i<50; i++) {
+        points.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          vx: (Math.random() - 0.5) * 0.5,
+          vy: (Math.random() - 0.5) * 0.5
+        });
+      }
+    }
+
+    function animate() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = 'rgba(0, 242, 255, 0.3)';
+      points.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        if(p.x < 0 || p.x > canvas.width) p.vx *= -1;
+        if(p.y < 0 || p.y > canvas.height) p.vy *= -1;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 1.5, 0, Math.PI*2);
+        ctx.fill();
+      });
+      requestAnimationFrame(animate);
+    }
+
+    window.addEventListener('resize', init);
+    init();
+    animate();
+
+    // Auto Slider
+    const slides = document.querySelectorAll('.slide');
+    let currentSlide = 0;
+
+    setInterval(() => {
+      slides[currentSlide].classList.remove('active');
+      currentSlide = (currentSlide + 1) % slides.length;
+      slides[currentSlide].classList.add('active');
+    }, 3000);
+  </script>
+</body>
+</html>
