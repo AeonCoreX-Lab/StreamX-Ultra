@@ -10,7 +10,7 @@
 TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
     lt::settings_pack pack;
     
-    // FIX: Enable Aggressive DHT and Peer Discovery for Instant Metadata
+    // Enable Aggressive DHT and Peer Discovery for Instant Metadata
     pack.set_bool(lt::settings_pack::enable_dht, true);
     pack.set_bool(lt::settings_pack::enable_lsd, true);
     pack.set_bool(lt::settings_pack::enable_upnp, true);
@@ -53,7 +53,7 @@ void TorrentSystem::start(const std::string& magnet, const std::string& saveDir)
     }
 
     p.save_path = saveDir;
-    // FIX: Force Sequential Download right from the start
+    // Force Sequential Download right from the start (Compatible with Libtorrent 2.x)
     p.flags |= lt::torrent_flags::sequential_download;
     
     handle = ses->add_torrent(p);
@@ -87,7 +87,6 @@ void TorrentSystem::updateLoop() {
             
             if (finalFilePath.empty() && s.has_metadata) {
                 handle.resume(); // Enforce active downloading
-                handle.set_sequential_download(true); // Double check sequential
                 
                 auto info = s.torrent_file.lock();
                 if (info && info->num_files() > 0) {
@@ -110,7 +109,7 @@ void TorrentSystem::updateLoop() {
                 }
             }
 
-            // FIX: Play video at 1% instead of 5% for instant playback
+            // Play video at 1% for instant playback
             if (currentStatus.progress >= 1 && !finalFilePath.empty()) {
                 currentStatus.state = 3; 
             } else {
