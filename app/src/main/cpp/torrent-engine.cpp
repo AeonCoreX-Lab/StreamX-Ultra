@@ -2,11 +2,12 @@
 #include <android/log.h>
 #include <libtorrent/settings_pack.hpp>
 #include <libtorrent/torrent_info.hpp>
+#include <libtorrent/add_torrent_params.hpp>
 
 #define TAG "StreamX_Native"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 
-TorrentSystem::TorrentSystem() : isRunning(false) {
+TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
     lt::settings_pack pack;
     pack.set_int(lt::settings_pack::alert_mask, 
         lt::alert::status_notification | 
@@ -22,15 +23,17 @@ TorrentSystem::TorrentSystem() : isRunning(false) {
 
 TorrentSystem::~TorrentSystem() {
     stop();
-    delete ses;
+    if (ses != nullptr) {
+        delete ses;
+        ses = nullptr;
+    }
 }
 
 void TorrentSystem::start(const std::string& magnet, const std::string& saveDir) {
-    if (isRunning) stop(); // আগের সেশন থাকলে বন্ধ হবে
+    if (isRunning) stop();
     
     LOGD("Starting Engine for: %s", magnet.c_str());
 
-    // FIX: State Reset for New Movie
     finalFilePath = ""; 
     memset(&currentStatus, 0, sizeof(EngineStatus));
 
@@ -54,13 +57,13 @@ void TorrentSystem::start(const std::string& magnet, const std::string& saveDir)
 
 void TorrentSystem::updateLoop() {
     while (isRunning) {
-        std::vector<lt::alert*> alerts;
-        ses->pop_alerts(&alerts);
-
-        if (!handle.is_valid()) {
+        if (ses == nullptr || !handle.is_valid()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
             continue;
         }
+
+        std::vector<lt::alert*> alerts;
+        ses->pop_alerts(&alerts);
 
         lt::torrent_status s = handle.status();
 
@@ -77,17 +80,20 @@ void TorrentSystem::updateLoop() {
             
             if (finalFilePath.empty() && s.has_metadata) {
                 auto info = s.torrent_file.lock();
-                if (info) {
-                    lt::file_index_t largestFileIdx;
+                if (info && info->num_files() > 0) {
+                    lt::file_index_t largestFileIdx(0);
                     std::int64_t maxSize = 0;
                     
-                    for (auto i : info->files().file_range()) {
-                        if (info->files().file_size(i) > maxSize) {
-                            maxSize = info->files().file_size(i);
-                            largestFileIdx = i;
+                    // FIX: Safer iterator over files
+                    for (int i = 0; i < info->num_files(); ++i) {
+                        lt::file_index_t idx(i);
+                        if (info->files().file_size(idx) > maxSize) {
+                            maxSize = info->files().file_size(idx);
+                            largestFileIdx = idx;
                         }
                     }
                     
+                    // FIX: Safe path extraction
                     std::string relPath = info->files().file_path(largestFileIdx);
                     finalFilePath = s.save_path + "/" + relPath;
                     
@@ -96,6 +102,7 @@ void TorrentSystem::updateLoop() {
                 }
             }
 
+            // FIX: Wait for 5% buffer before playing
             if (currentStatus.progress >= 5 && !finalFilePath.empty()) {
                 currentStatus.state = 3; 
             } else {
@@ -112,10 +119,12 @@ void TorrentSystem::updateLoop() {
 
 void TorrentSystem::stop() {
     isRunning = false;
-    if (workerThread.joinable()) workerThread.join();
     
-    if (handle.is_valid()) {
-        // FIX: Remove Torrent AND Delete Files to prevent conflict with next movie
+    if (workerThread.joinable()) {
+        workerThread.join();
+    }
+    
+    if (ses != nullptr && handle.is_valid()) {
         ses->remove_torrent(handle, lt::session::delete_files); 
     }
 }

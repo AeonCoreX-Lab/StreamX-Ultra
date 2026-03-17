@@ -224,6 +224,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         }
                         override fun surfaceChanged(h: SurfaceHolder, format: Int, w: Int, height: Int) {}
                         override fun surfaceDestroyed(h: SurfaceHolder) {
+                            // FIX: Prevent MPV from rendering on destroyed surface (causes black screen/crash)
                             try { StreamXCore.setMpvSurface(null) } catch (e: Exception) {}
                         }
                     })

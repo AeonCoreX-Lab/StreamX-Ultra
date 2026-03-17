@@ -16,7 +16,7 @@ extern "C" {
 
 static TorrentSystem* torrentEngine = nullptr;
 
-// --- MPV JNI BRIDGES (Delegating to mpv_handler.cpp) ---
+// --- MPV JNI BRIDGES ---
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initMpvEngine(JNIEnv* env, jclass clazz) {
@@ -38,7 +38,6 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvSurface(JNIEnv* env, jclas
     }
     set_mpv_surface(window);
     
-    // FIX: Memory leak prevention. Always release ANativeWindow ref.
     if (window != nullptr) {
         ANativeWindow_release(window); 
     }
@@ -102,6 +101,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_initNative(JNIEnv* env, jobject thiz) {
     if (!torrentEngine) torrentEngine = new TorrentSystem();
 }
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_startNative(JNIEnv* env, jobject thiz, jstring magnet, jstring path) {
     if (!torrentEngine) torrentEngine = new TorrentSystem();
@@ -111,10 +111,16 @@ Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_startNative(JNIEnv* env, jobje
     env->ReleaseStringUTFChars(magnet, m);
     env->ReleaseStringUTFChars(path, p);
 }
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_stopNative(JNIEnv* env, jobject thiz) {
-    if (torrentEngine) { torrentEngine->stop(); delete torrentEngine; torrentEngine = nullptr; }
+    if (torrentEngine) { 
+        torrentEngine->stop(); 
+        delete torrentEngine; 
+        torrentEngine = nullptr; 
+    }
 }
+
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getStatusNative(JNIEnv* env, jobject thiz) {
     if (!torrentEngine) return nullptr;
@@ -124,6 +130,7 @@ Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getStatusNative(JNIEnv* env, j
     env->SetLongArrayRegion(result, 0, 5, fill);
     return result;
 }
+
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getFilePathNative(JNIEnv* env, jobject thiz) {
     if (!torrentEngine) return env->NewStringUTF("");

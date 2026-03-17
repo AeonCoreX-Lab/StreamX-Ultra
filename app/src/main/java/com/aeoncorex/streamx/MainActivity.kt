@@ -65,7 +65,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkPermissions() {
-        val permissions = mutableListOf(Manifest.permission.RECORD_AUDIO) 
+        val permissions = mutableListOf(
+            Manifest.permission.RECORD_AUDIO,
+            // FIX: Added storage permissions for torrent downloading
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        ) 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
