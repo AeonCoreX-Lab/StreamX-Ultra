@@ -14,14 +14,19 @@ void init_mpv_engine() {
         mpv_ctx = mpv_create();
         if (mpv_ctx) {
             mpv_set_option_string(mpv_ctx, "vo", "gpu");
-            // FIX: Changed from vulkan to opengl to prevent black screen & crashes
             mpv_set_option_string(mpv_ctx, "gpu-api", "opengl"); 
             mpv_set_option_string(mpv_ctx, "hwdec", "auto");
+            
+            // FIX: Enable Aggressive Cache for Torrent Streaming
+            mpv_set_option_string(mpv_ctx, "cache", "yes");
+            mpv_set_option_string(mpv_ctx, "demuxer-max-bytes", "64MiB");
+            mpv_set_option_string(mpv_ctx, "demuxer-readahead-secs", "20");
+
             mpv_set_option_string(mpv_ctx, "sub-auto", "fuzzy"); 
             mpv_set_option_string(mpv_ctx, "sub-ass-override", "force"); 
             mpv_set_option_string(mpv_ctx, "sub-font-size", "45");
             mpv_initialize(mpv_ctx);
-            __android_log_print(ANDROID_LOG_DEBUG, TAG, "MPV Engine Initialized Modularly");
+            __android_log_print(ANDROID_LOG_DEBUG, TAG, "MPV Engine Initialized Modularly with Caching");
         }
     }
 }

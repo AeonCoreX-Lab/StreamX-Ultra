@@ -44,13 +44,17 @@ object TorrentRepository {
         .build()
         .create(YtsApi::class.java)
 
+    // FIX: Ultra-fast metadata fetching trackers added
     private val TRACKERS = listOf(
+        "udp://tracker.opentrackr.org:1337/announce",
         "udp://open.demonii.com:1337/announce",
         "udp://tracker.openbittorrent.com:80",
         "udp://tracker.coppersurfer.tk:6969",
         "udp://glotorrents.pw:6969/announce",
-        "udp://tracker.opentrackr.org:1337/announce",
-        "udp://9.rarbg.to:2710"
+        "udp://9.rarbg.to:2710",
+        "udp://tracker.torrent.eu.org:451/announce",
+        "udp://tracker.internetwarriors.net:1337/announce",
+        "udp://tracker.leechers-paradise.org:6969/announce"
     )
 
     suspend fun getStreamLinks(
@@ -85,7 +89,7 @@ object TorrentRepository {
                 jobs.add(async { fetchYtsWithMirrors(imdbId, title) })
             }
 
-            // 4. BitSearch (Backup for all) - Replaced Consumet
+            // 4. BitSearch (Backup for all)
             jobs.add(async {
                 try {
                     val searchTitle = if(type == MovieType.SERIES) "$title S${String.format("%02d", season)}E${String.format("%02d", episode)}" else title

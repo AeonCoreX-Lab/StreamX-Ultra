@@ -20,12 +20,10 @@ object TorrentEngine {
     // লাইব্রেরি লোড করা
     init {
         try {
-            // FIXME: Ensure this matches the name in CMakeLists.txt -> "streamx-native"
             System.loadLibrary("streamx-native") 
             initNative()
         } catch (e: UnsatisfiedLinkError) {
             Log.e(TAG, "Native Library Load Failed: ${e.message}")
-            // Fallback logic could go here if needed
         } catch (e: Exception) {
             Log.e(TAG, "Engine Init Failed: ${e.message}")
         }
@@ -65,9 +63,9 @@ object TorrentEngine {
 
                 when (state) {
                     0 -> emit(StreamState.Preparing("Idle"))
-                    1 -> emit(StreamState.Preparing("Metadata: S:$seeds"))
+                    1 -> emit(StreamState.Preparing("Metadata: P:$peers S:$seeds"))
                     2, 3 -> {
-                        // 2 = Downloading, 3 = Ready/Playing
+                        // 2 = Downloading, 3 = Ready/Playing (now starts at 1% progress)
                         if (state == 3 && !isPlaying) {
                             val path = getFilePathNative()
                             if (path.isNotEmpty()) {
@@ -81,11 +79,11 @@ object TorrentEngine {
                     4 -> emit(StreamState.Error("Engine Error occurred"))
                 }
             } else {
-                // If native returns null abruptly
                 Log.w(TAG, "Native status unavailable")
             }
             
-            delay(500)
+            // Reduced delay for faster UI syncing
+            delay(250)
         }
     }
 

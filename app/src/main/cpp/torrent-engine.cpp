@@ -9,11 +9,17 @@
 
 TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
     lt::settings_pack pack;
-    pack.set_int(lt::settings_pack::alert_mask, 
-        lt::alert::status_notification | 
-        lt::alert::storage_notification | 
-        lt::alert::error_notification);
     
+    // FIX: Enable Aggressive DHT and Peer Discovery for Instant Metadata
+    pack.set_bool(lt::settings_pack::enable_dht, true);
+    pack.set_bool(lt::settings_pack::enable_lsd, true);
+    pack.set_bool(lt::settings_pack::enable_upnp, true);
+    pack.set_bool(lt::settings_pack::enable_natpmp, true);
+    pack.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:6881");
+    pack.set_bool(lt::settings_pack::prioritize_partial_pieces, true);
+    pack.set_int(lt::settings_pack::metadata_token_limit, 500);
+
+    pack.set_int(lt::settings_pack::alert_mask, lt::alert::all_categories);
     pack.set_int(lt::settings_pack::download_rate_limit, 0); 
     pack.set_int(lt::settings_pack::upload_rate_limit, 0);
     
@@ -47,6 +53,7 @@ void TorrentSystem::start(const std::string& magnet, const std::string& saveDir)
     }
 
     p.save_path = saveDir;
+    // FIX: Force Sequential Download right from the start
     p.flags |= lt::torrent_flags::sequential_download;
     
     handle = ses->add_torrent(p);
@@ -79,12 +86,14 @@ void TorrentSystem::updateLoop() {
         else if (s.state == lt::torrent_status::downloading || s.state == lt::torrent_status::finished) {
             
             if (finalFilePath.empty() && s.has_metadata) {
+                handle.resume(); // Enforce active downloading
+                handle.set_sequential_download(true); // Double check sequential
+                
                 auto info = s.torrent_file.lock();
                 if (info && info->num_files() > 0) {
                     lt::file_index_t largestFileIdx(0);
                     std::int64_t maxSize = 0;
                     
-                    // FIX: Safer iterator over files
                     for (int i = 0; i < info->num_files(); ++i) {
                         lt::file_index_t idx(i);
                         if (info->files().file_size(idx) > maxSize) {
@@ -93,7 +102,6 @@ void TorrentSystem::updateLoop() {
                         }
                     }
                     
-                    // FIX: Safe path extraction
                     std::string relPath = info->files().file_path(largestFileIdx);
                     finalFilePath = s.save_path + "/" + relPath;
                     
@@ -102,8 +110,8 @@ void TorrentSystem::updateLoop() {
                 }
             }
 
-            // FIX: Wait for 5% buffer before playing
-            if (currentStatus.progress >= 5 && !finalFilePath.empty()) {
+            // FIX: Play video at 1% instead of 5% for instant playback
+            if (currentStatus.progress >= 1 && !finalFilePath.empty()) {
                 currentStatus.state = 3; 
             } else {
                 currentStatus.state = 2; 
@@ -113,7 +121,8 @@ void TorrentSystem::updateLoop() {
             currentStatus.state = 0;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        // Reduced sleep for faster UI updates
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 }
 
