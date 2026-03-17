@@ -4,6 +4,10 @@ project("streamx-native")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# FIX: Hardcore fix for aligned_alloc error in Boost/NDK 29
+add_definitions(-DBOOST_ASIO_DISABLE_STD_ALIGNED_ALLOC)
+add_definitions(-DBOOST_ASIO_HAS_STD_ALIGNED_ALLOC=0)
+
 if(${ANDROID_ABI} STREQUAL "arm64-v8a")
     set(RUST_TARGET_ARCH "aarch64-linux-android")
 elseif(${ANDROID_ABI} STREQUAL "armeabi-v7a")

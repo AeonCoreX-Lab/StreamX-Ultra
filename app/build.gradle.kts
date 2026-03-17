@@ -25,7 +25,14 @@ android {
 
         externalNativeBuild {
             cmake {
-                cppFlags("-std=c++17", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0")
+                // FIX: Added explicit flags to bypass NDK 29 aligned_alloc issue
+                cppFlags(
+                    "-std=c++17", 
+                    "-U_FORTIFY_SOURCE", 
+                    "-D_FORTIFY_SOURCE=0",
+                    "-DBOOST_ASIO_DISABLE_STD_ALIGNED_ALLOC",
+                    "-DBOOST_ASIO_HAS_STD_ALIGNED_ALLOC=0"
+                )
 
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
                 val envNdk = System.getenv("ANDROID_NDK_HOME")
@@ -43,7 +50,7 @@ android {
                     "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ndkPath/build/cmake/android.toolchain.cmake",
                     "-DVCPKG_TARGET_TRIPLET=arm64-android",
                     "-DANDROID_ABI=arm64-v8a",
-                    "-DANDROID_PLATFORM=android-26",
+                    "-DANDROID_PLATFORM=android-28",
                     "-D_FORTIFY_SOURCE=0",
                     "-DRUST_BUILD_DIR=$rustBuildDir",
                     "-DTMDB_API_KEY=$tmdbApiKey" // <--- PASSING SECRET TO CMAKE
