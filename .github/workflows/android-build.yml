@@ -37,6 +37,14 @@ jobs:
           rustup target add x86_64-linux-android
           rustup target add i686-linux-android
           cargo install cargo-ndk
+          
+      - name: Install latest Meson & Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip python3-setuptools
+          python3 -m pip install --upgrade pip
+          pip3 install meson ninja
+
 
       # Cache for C++ builds
       - name: Restore vcpkg artifacts
