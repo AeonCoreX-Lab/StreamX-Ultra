@@ -4,6 +4,7 @@
 #include <libtorrent/torrent_info.hpp>
 #include <libtorrent/add_torrent_params.hpp>
 #include <libtorrent/magnet_uri.hpp> // Required for proper magnet parsing
+#include <utility> // Required for std::make_pair
 
 #define TAG "StreamX_Native"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -30,14 +31,23 @@ TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
     // Increased active downloads for faster peer connecting
     pack.set_int(lt::settings_pack::active_downloads, 10);
     
+    // Also setting bootstrap nodes directly in settings pack for better compatibility
+    pack.set_str(lt::settings_pack::dht_bootstrap_nodes, 
+        "router.bittorrent.com:6881,"
+        "router.utorrent.com:6881,"
+        "dht.transmissionbt.com:6881,"
+        "dht.libtorrent.org:25401,"
+        "dht.aelitis.com:6881"
+    );
+    
     ses = new lt::session(pack);
 
-    // FIX: Essential DHT bootstrap routers. Without this, magnet metadata will hang!
-    ses->add_dht_router({"router.bittorrent.com", 6881});
-    ses->add_dht_router({"router.utorrent.com", 6881});
-    ses->add_dht_router({"dht.transmissionbt.com", 6881});
-    ses->add_dht_router({"dht.libtorrent.org", 25401});
-    ses->add_dht_router({"dht.aelitis.com", 6881});
+    // FIX: Replaced add_dht_router with add_dht_node per Libtorrent 2.x API changes
+    ses->add_dht_node(std::make_pair("router.bittorrent.com", 6881));
+    ses->add_dht_node(std::make_pair("router.utorrent.com", 6881));
+    ses->add_dht_node(std::make_pair("dht.transmissionbt.com", 6881));
+    ses->add_dht_node(std::make_pair("dht.libtorrent.org", 25401));
+    ses->add_dht_node(std::make_pair("dht.aelitis.com", 6881));
 }
 
 TorrentSystem::~TorrentSystem() {
