@@ -158,36 +158,54 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     }
 
     // --- Torrent / Playback Handling ---
-    LaunchedEffect(decodedUrl) {
-        if (decodedUrl.startsWith("magnet:?")) {
-            withContext(Dispatchers.IO) { TorrentEngine.clearCache(context) }
-            TorrentEngine.start(context, decodedUrl).collect { state ->
-                when (state) {
-                    is StreamState.Preparing -> statusMsg = state.message
-                    is StreamState.Buffering -> {
-                        isBuffering = true
-                        statusMsg = "Buffering ${state.progress}%"
-                        downloadSpeed = "${state.speed / 1024} KB/s"
-                        seeds = state.seeds
+    // Inside MoviePlayerScreen, replace the LaunchedEffect for decodedUrl:
+
+LaunchedEffect(decodedUrl) {
+    if (decodedUrl.startsWith("magnet:?")) {
+        withContext(Dispatchers.IO) { TorrentEngine.clearCache(context) }
+        var metadataTimeout = 0
+        TorrentEngine.start(context, decodedUrl).collect { state ->
+            when (state) {
+                is StreamState.Preparing -> {
+                    statusMsg = state.message
+                    metadataTimeout++
+                    if (metadataTimeout > 120) { // ~30 seconds (120 * 250ms)
+                        statusMsg = "Metadata timeout – poor connectivity"
+                        // Optionally emit an error or retry
                     }
-                    is StreamState.Ready -> {
-                        if (videoPath != state.filePath) {
-                            videoPath = state.filePath
-                            try { StreamXCore.playMpvVideo(state.filePath) } catch (e: Exception) { }
+                }
+                is StreamState.Buffering -> {
+                    isBuffering = true
+                    statusMsg = "Buffering ${state.progress}%"
+                    downloadSpeed = "${state.speed / 1024} KB/s"
+                    seeds = state.seeds
+                    metadataTimeout = 0 // reset timeout once we start buffering
+                }
+                is StreamState.Ready -> {
+                    if (videoPath != state.filePath) {
+                        videoPath = state.filePath
+                        try { StreamXCore.playMpvVideo(state.filePath) } catch (e: Exception) {
+                            statusMsg = "Playback failed: ${e.message}"
                         }
-                        statusMsg = ""
-                        isBuffering = false
                     }
-                    is StreamState.Error -> statusMsg = "Error: ${state.message}"
+                    statusMsg = ""
+                    isBuffering = false
+                }
+                is StreamState.Error -> {
+                    statusMsg = "Error: ${state.message}"
+                    isBuffering = false
                 }
             }
-        } else {
-            videoPath = decodedUrl
-            try { StreamXCore.playMpvVideo(decodedUrl) } catch (e: Exception) { }
-            statusMsg = ""
-            isBuffering = false
         }
+    } else {
+        videoPath = decodedUrl
+        try { StreamXCore.playMpvVideo(decodedUrl) } catch (e: Exception) {
+            statusMsg = "Playback failed: ${e.message}"
+        }
+        statusMsg = ""
+        isBuffering = false
     }
+}
 
     // --- Time Sync Loop for MPV ---
     LaunchedEffect(isPlaying) {

@@ -3,8 +3,8 @@
 #include <libtorrent/settings_pack.hpp>
 #include <libtorrent/torrent_info.hpp>
 #include <libtorrent/add_torrent_params.hpp>
-#include <libtorrent/magnet_uri.hpp> // Required for proper magnet parsing
-#include <utility> // Required for std::make_pair
+#include <libtorrent/magnet_uri.hpp>
+#include <utility>
 
 #define TAG "StreamX_Native"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -12,42 +12,44 @@
 TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
     lt::settings_pack pack;
     
-    // Enable Aggressive DHT and Peer Discovery for Instant Metadata
+    // Enable all discovery methods
     pack.set_bool(lt::settings_pack::enable_dht, true);
     pack.set_bool(lt::settings_pack::enable_lsd, true);
     pack.set_bool(lt::settings_pack::enable_upnp, true);
     pack.set_bool(lt::settings_pack::enable_natpmp, true);
     
-    // FIX: Use dynamic ports to prevent binding issues on Android
+    // Use dynamic ports (0 = any available)
     pack.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:0,[::]:0");
     
+    // Streaming optimizations
     pack.set_bool(lt::settings_pack::prioritize_partial_pieces, true);
     pack.set_int(lt::settings_pack::metadata_token_limit, 500);
-
     pack.set_int(lt::settings_pack::alert_mask, lt::alert::all_categories);
-    pack.set_int(lt::settings_pack::download_rate_limit, 0); 
+    pack.set_int(lt::settings_pack::download_rate_limit, 0);
     pack.set_int(lt::settings_pack::upload_rate_limit, 0);
-    
-    // Increased active downloads for faster peer connecting
     pack.set_int(lt::settings_pack::active_downloads, 10);
     
-    // Also setting bootstrap nodes directly in settings pack for better compatibility
-    pack.set_str(lt::settings_pack::dht_bootstrap_nodes, 
+    // FIX: Enhanced DHT bootstrap nodes
+    pack.set_str(lt::settings_pack::dht_bootstrap_nodes,
         "router.bittorrent.com:6881,"
         "router.utorrent.com:6881,"
         "dht.transmissionbt.com:6881,"
         "dht.libtorrent.org:25401,"
-        "dht.aelitis.com:6881"
-    );
+        "dht.aelitis.com:6881,"
+        "dht.metautr.ent:6881,"
+        "dht.ikig.ail:6881");
     
+    // FIX: Pre‑seed with additional DHT nodes
     ses = new lt::session(pack);
-
-    // FIX: Replaced add_dht_router with add_dht_node per Libtorrent 2.x API changes
     ses->add_dht_node(std::make_pair("router.bittorrent.com", 6881));
     ses->add_dht_node(std::make_pair("router.utorrent.com", 6881));
     ses->add_dht_node(std::make_pair("dht.transmissionbt.com", 6881));
     ses->add_dht_node(std::make_pair("dht.libtorrent.org", 25401));
     ses->add_dht_node(std::make_pair("dht.aelitis.com", 6881));
+    ses->add_dht_node(std::make_pair("dht.metautr.ent", 6881));
+    ses->add_dht_node(std::make_pair("dht.ikig.ail", 6881));
+    
+    LOGD("TorrentSystem constructed with enhanced DHT");
 }
 
 TorrentSystem::~TorrentSystem() {
@@ -59,31 +61,36 @@ TorrentSystem::~TorrentSystem() {
 }
 
 void TorrentSystem::start(const std::string& magnet, const std::string& saveDir) {
-    stop(); 
+    stop(); // Ensure any previous session is cleaned up
 
     isRunning = true;
     finalFilePath = "";
-
     currentStatus = {0, 0, 0, 0, 0, ""};
     
     lt::error_code ec;
-    
-    // FIX: Parse magnet URI properly using libtorrent 2.x standards
     lt::add_torrent_params p = lt::parse_magnet_uri(magnet, ec);
     if (ec) {
         LOGD("Parse Magnet Error: %s", ec.message().c_str());
-        currentStatus.state = 4; // Error State
+        currentStatus.state = 4; // Error
         return;
     }
     
     p.save_path = saveDir;
-    handle = ses->add_torrent(p, ec);
     
+    // FIX: Explicitly request to start the torrent (not paused)
+    p.flags &= ~lt::torrent_flags::paused;
+    p.flags &= ~lt::torrent_flags::auto_managed; // We'll manage manually for streaming
+    
+    handle = ses->add_torrent(p, ec);
     if (ec) {
         LOGD("Add Torrent Error: %s", ec.message().c_str());
-        currentStatus.state = 4; // Error State
+        currentStatus.state = 4;
         return;
     }
+    
+    // FIX: Resume the torrent to force immediate start
+    handle.resume();
+    LOGD("Torrent added and resumed. Save path: %s", saveDir.c_str());
 
     workerThread = std::thread(&TorrentSystem::updateLoop, this);
 }
@@ -104,47 +111,53 @@ void TorrentSystem::updateLoop() {
         currentStatus.seeds = s.num_seeds;
         currentStatus.peers = s.num_peers;
 
-        // FIX: Ensure accurate checking of metadata presence
+        // Metadata not yet available
         if (!s.has_metadata) {
             currentStatus.state = 1; // Fetching Metadata
-        } 
-        else if (s.state == lt::torrent_status::downloading || s.state == lt::torrent_status::finished || s.state == lt::torrent_status::seeding) {
+            LOGD("State: Fetching metadata, peers: %d", s.num_peers);
+        }
+        else if (s.state == lt::torrent_status::downloading || 
+                 s.state == lt::torrent_status::finished || 
+                 s.state == lt::torrent_status::seeding) {
             
+            // Set file path and priorities once when metadata first becomes available
             if (finalFilePath.empty()) {
                 std::shared_ptr<const lt::torrent_info> info = handle.torrent_file();
                 if (info && info->is_valid()) {
                     int largestFileIdx = 0;
                     int64_t maxSize = 0;
-                    
                     for (int idx = 0; idx < info->num_files(); ++idx) {
-                        if (info->files().file_size(lt::file_index_t(idx)) > maxSize) {
-                            maxSize = info->files().file_size(lt::file_index_t(idx));
+                        lt::file_index_t fi(idx);
+                        if (info->files().file_size(fi) > maxSize) {
+                            maxSize = info->files().file_size(fi);
                             largestFileIdx = idx;
                         }
                     }
                     
                     std::string relPath = info->files().file_path(lt::file_index_t(largestFileIdx));
                     finalFilePath = s.save_path + "/" + relPath;
-                    
                     strncpy(currentStatus.videoPath, finalFilePath.c_str(), 511);
                     
-                    // High priority for the video file
+                    // Prioritize the video file and enable sequential download
                     handle.file_priority(lt::file_index_t(largestFileIdx), lt::default_priority);
-                    
-                    // Essential for instant streaming playback
                     handle.set_flags(lt::torrent_flags::sequential_download);
+                    
+                    LOGD("Metadata ready. Video path: %s", finalFilePath.c_str());
                 }
             }
 
-            // Play video at 1% for instant playback
+            // Transition to Ready (playable) once at least 1% is downloaded
             if (currentStatus.progress >= 1 && !finalFilePath.empty()) {
                 currentStatus.state = 3; // Ready/Playing
+                LOGD("State: Ready (progress %d%%)", currentStatus.progress);
             } else {
                 currentStatus.state = 2; // Downloading/Buffering
+                LOGD("State: Downloading (progress %d%%)", currentStatus.progress);
             }
         } 
         else {
             currentStatus.state = 0; // Idle
+            LOGD("State: Idle");
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
@@ -159,7 +172,8 @@ void TorrentSystem::stop() {
     }
     
     if (ses != nullptr && handle.is_valid()) {
-        ses->remove_torrent(handle, lt::session::delete_files); 
+        ses->remove_torrent(handle, lt::session::delete_files);
+        LOGD("Torrent stopped and files removed");
     }
 }
 

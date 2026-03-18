@@ -54,7 +54,14 @@ object TorrentRepository {
         "udp://9.rarbg.to:2710",
         "udp://tracker.torrent.eu.org:451/announce",
         "udp://tracker.internetwarriors.net:1337/announce",
-        "udp://tracker.leechers-paradise.org:6969/announce"
+        "udp://tracker.leechers-paradise.org:6969/announce",
+        "udp://tracker.cyberia.is:6969/announce",
+        "udp://exodus.desync.com:6969/announce",
+        "udp://ipv4.tracker.harry.lu:80/announce",
+        "udp://tracker.moeking.me:6969/announce",
+        "udp://tracker.skynetcloud.tk:6969/announce",
+        "udp://tracker.pirateparty.gr:6969/announce",
+        "udp://tracker.zerobytes.xyz:1337/announce"
     )
 
     suspend fun getStreamLinks(
