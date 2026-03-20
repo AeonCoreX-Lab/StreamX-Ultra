@@ -44,7 +44,7 @@ object TorrentRepository {
         .build()
         .create(YtsApi::class.java)
 
-    // FIX: Ultra-fast metadata fetching trackers added
+    // FIX: Expanded tracker list with most reliable UDP trackers
     private val TRACKERS = listOf(
         "udp://tracker.opentrackr.org:1337/announce",
         "udp://open.demonii.com:1337/announce",
@@ -110,9 +110,20 @@ object TorrentRepository {
             jobs.awaitAll().forEach { allLinks.addAll(it) }
         }
 
+        // FIX: ALWAYS append our trackers – duplicates are harmless
         return@withContext allLinks
             .distinctBy { it.magnet }
+            .map { link ->
+                link.copy(magnet = appendTrackersToMagnet(link.magnet))
+            }
             .sortedByDescending { it.seeds }
+    }
+
+    // FIX: Always append trackers, even if the magnet already has some
+    private fun appendTrackersToMagnet(magnet: String): String {
+        if (!magnet.startsWith("magnet:?")) return magnet
+        val trackerParams = TRACKERS.joinToString("") { "&tr=${URLEncoder.encode(it, "UTF-8")}" }
+        return magnet + trackerParams
     }
 
     private suspend fun fetchYtsWithMirrors(imdbId: String?, title: String): List<StreamLink> {

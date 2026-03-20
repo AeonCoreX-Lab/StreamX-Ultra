@@ -29,7 +29,7 @@ TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
     pack.set_int(lt::settings_pack::upload_rate_limit, 0);
     pack.set_int(lt::settings_pack::active_downloads, 10);
     
-    // FIX: Enhanced DHT bootstrap nodes
+    // FIX: Enhanced DHT bootstrap nodes (more than before)
     pack.set_str(lt::settings_pack::dht_bootstrap_nodes,
         "router.bittorrent.com:6881,"
         "router.utorrent.com:6881,"
@@ -37,10 +37,13 @@ TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
         "dht.libtorrent.org:25401,"
         "dht.aelitis.com:6881,"
         "dht.metautr.ent:6881,"
-        "dht.ikig.ail:6881");
+        "dht.ikig.ail:6881,"
+        "dht.lei.net:6881,"
+        "dht.free.isp:6881");
     
-    // FIX: Pre‑seed with additional DHT nodes
     ses = new lt::session(pack);
+    
+    // Pre‑seed with additional DHT nodes
     ses->add_dht_node(std::make_pair("router.bittorrent.com", 6881));
     ses->add_dht_node(std::make_pair("router.utorrent.com", 6881));
     ses->add_dht_node(std::make_pair("dht.transmissionbt.com", 6881));
@@ -48,6 +51,8 @@ TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
     ses->add_dht_node(std::make_pair("dht.aelitis.com", 6881));
     ses->add_dht_node(std::make_pair("dht.metautr.ent", 6881));
     ses->add_dht_node(std::make_pair("dht.ikig.ail", 6881));
+    ses->add_dht_node(std::make_pair("dht.lei.net", 6881));
+    ses->add_dht_node(std::make_pair("dht.free.isp", 6881));
     
     LOGD("TorrentSystem constructed with enhanced DHT");
 }
@@ -77,9 +82,33 @@ void TorrentSystem::start(const std::string& magnet, const std::string& saveDir)
     
     p.save_path = saveDir;
     
-    // FIX: Explicitly request to start the torrent (not paused)
-    p.flags &= ~lt::torrent_flags::paused;
-    p.flags &= ~lt::torrent_flags::auto_managed; // We'll manage manually for streaming
+    // FIX: Force start and sequential download from the beginning
+    p.flags &= ~lt::torrent_flags::paused;          // Not paused
+    p.flags &= ~lt::torrent_flags::auto_managed;    // Manual management for streaming
+    p.flags |= lt::torrent_flags::sequential_download; // Enable sequential download immediately
+    
+    // FIX: Also add our trackers directly (hardcoded as backup)
+    std::vector<std::string> extra_trackers = {
+        "udp://tracker.opentrackr.org:1337/announce",
+        "udp://open.demonii.com:1337/announce",
+        "udp://tracker.openbittorrent.com:80",
+        "udp://tracker.coppersurfer.tk:6969",
+        "udp://glotorrents.pw:6969/announce",
+        "udp://9.rarbg.to:2710",
+        "udp://tracker.torrent.eu.org:451/announce",
+        "udp://tracker.internetwarriors.net:1337/announce",
+        "udp://tracker.leechers-paradise.org:6969/announce",
+        "udp://tracker.cyberia.is:6969/announce",
+        "udp://exodus.desync.com:6969/announce",
+        "udp://ipv4.tracker.harry.lu:80/announce",
+        "udp://tracker.moeking.me:6969/announce",
+        "udp://tracker.skynetcloud.tk:6969/announce",
+        "udp://tracker.pirateparty.gr:6969/announce",
+        "udp://tracker.zerobytes.xyz:1337/announce"
+    };
+    for (const auto& tr : extra_trackers) {
+        p.trackers.push_back(tr);
+    }
     
     handle = ses->add_torrent(p, ec);
     if (ec) {
@@ -88,8 +117,9 @@ void TorrentSystem::start(const std::string& magnet, const std::string& saveDir)
         return;
     }
     
-    // FIX: Resume the torrent to force immediate start
+    // FIX: Resume the torrent and force reannounce to find peers faster
     handle.resume();
+    handle.force_reannounce();
     LOGD("Torrent added and resumed. Save path: %s", saveDir.c_str());
 
     workerThread = std::thread(&TorrentSystem::updateLoop, this);
@@ -138,11 +168,13 @@ void TorrentSystem::updateLoop() {
                     finalFilePath = s.save_path + "/" + relPath;
                     strncpy(currentStatus.videoPath, finalFilePath.c_str(), 511);
                     
-                    // Prioritize the video file and enable sequential download
+                    // Prioritize the video file
                     handle.file_priority(lt::file_index_t(largestFileIdx), lt::default_priority);
-                    handle.set_flags(lt::torrent_flags::sequential_download);
                     
                     LOGD("Metadata ready. Video path: %s", finalFilePath.c_str());
+                    
+                    // Force another reannounce now that we have metadata
+                    handle.force_reannounce();
                 }
             }
 
