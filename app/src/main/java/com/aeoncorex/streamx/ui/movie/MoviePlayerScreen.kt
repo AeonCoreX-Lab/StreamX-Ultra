@@ -161,49 +161,72 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     // Inside MoviePlayerScreen, replace the LaunchedEffect for decodedUrl:
 
 LaunchedEffect(decodedUrl) {
-    if (decodedUrl.startsWith("magnet:?")) {
-        withContext(Dispatchers.IO) { TorrentEngine.clearCache(context) }
-        var metadataTimeout = 0
-        TorrentEngine.start(context, decodedUrl).collect { state ->
-            when (state) {
-                is StreamState.Preparing -> {
-                    statusMsg = state.message
-                    metadataTimeout++
-                    if (metadataTimeout > 120) { // ~30 seconds (120 * 250ms)
-                        statusMsg = "Metadata timeout – poor connectivity"
-                        // Optionally emit an error or retry
-                    }
-                }
-                is StreamState.Buffering -> {
-                    isBuffering = true
-                    statusMsg = "Buffering ${state.progress}%"
-                    downloadSpeed = "${state.speed / 1024} KB/s"
-                    seeds = state.seeds
-                    metadataTimeout = 0 // reset timeout once we start buffering
-                }
-                is StreamState.Ready -> {
-                    if (videoPath != state.filePath) {
-                        videoPath = state.filePath
-                        try { StreamXCore.playMpvVideo(state.filePath) } catch (e: Exception) {
-                            statusMsg = "Playback failed: ${e.message}"
+    var retryCount = 0
+    val maxRetries = 3
+    val baseDelay = 2000L // 2 seconds between retries
+
+    while (retryCount < maxRetries) {
+        if (decodedUrl.startsWith("magnet:?")) {
+            withContext(Dispatchers.IO) { TorrentEngine.clearCache(context) }
+            var metadataTimeout = 0
+            var completed = false
+            TorrentEngine.start(context, decodedUrl).collect { state ->
+                when (state) {
+                    is StreamState.Preparing -> {
+                        statusMsg = state.message
+                        metadataTimeout++
+                        if (metadataTimeout > 120) { // ~30 seconds
+                            if (retryCount < maxRetries - 1) {
+                                statusMsg = "Metadata timeout – retrying (${retryCount+1}/$maxRetries)"
+                            } else {
+                                statusMsg = "Metadata timeout – last retry"
+                            }
+                            // Force stop engine to retry
+                            TorrentEngine.stop()
+                            completed = true
                         }
                     }
-                    statusMsg = ""
-                    isBuffering = false
-                }
-                is StreamState.Error -> {
-                    statusMsg = "Error: ${state.message}"
-                    isBuffering = false
+                    is StreamState.Buffering -> {
+                        isBuffering = true
+                        statusMsg = "Buffering ${state.progress}%"
+                        downloadSpeed = "${state.speed / 1024} KB/s"
+                        seeds = state.seeds
+                        metadataTimeout = 0
+                    }
+                    is StreamState.Ready -> {
+                        if (videoPath != state.filePath) {
+                            videoPath = state.filePath
+                            try { StreamXCore.playMpvVideo(state.filePath) } catch (e: Exception) {
+                                statusMsg = "Playback failed: ${e.message}"
+                            }
+                        }
+                        statusMsg = ""
+                        isBuffering = false
+                        completed = true
+                    }
+                    is StreamState.Error -> {
+                        statusMsg = "Error: ${state.message}"
+                        isBuffering = false
+                        completed = true
+                    }
                 }
             }
+            if (completed) break
+            retryCount++
+            delay(baseDelay)
+        } else {
+            // Direct URL playback
+            videoPath = decodedUrl
+            try { StreamXCore.playMpvVideo(decodedUrl) } catch (e: Exception) {
+                statusMsg = "Playback failed: ${e.message}"
+            }
+            statusMsg = ""
+            isBuffering = false
+            break
         }
-    } else {
-        videoPath = decodedUrl
-        try { StreamXCore.playMpvVideo(decodedUrl) } catch (e: Exception) {
-            statusMsg = "Playback failed: ${e.message}"
-        }
-        statusMsg = ""
-        isBuffering = false
+    }
+    if (retryCount == maxRetries) {
+        statusMsg = "Failed after $maxRetries retries. Check connection."
     }
 }
 

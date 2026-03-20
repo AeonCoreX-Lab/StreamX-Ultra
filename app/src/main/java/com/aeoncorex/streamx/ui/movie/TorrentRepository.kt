@@ -44,7 +44,7 @@ object TorrentRepository {
         .build()
         .create(YtsApi::class.java)
 
-    // FIX: Expanded tracker list with most reliable UDP trackers
+    // FIX: Combined UDP + HTTP trackers (more reliable)
     private val TRACKERS = listOf(
         "udp://tracker.opentrackr.org:1337/announce",
         "udp://open.demonii.com:1337/announce",
@@ -61,7 +61,11 @@ object TorrentRepository {
         "udp://tracker.moeking.me:6969/announce",
         "udp://tracker.skynetcloud.tk:6969/announce",
         "udp://tracker.pirateparty.gr:6969/announce",
-        "udp://tracker.zerobytes.xyz:1337/announce"
+        "udp://tracker.zerobytes.xyz:1337/announce",
+        "http://tracker.bt4g.com:2095/announce",
+        "http://tracker.files.fm:6969/announce",
+        "http://tracker.gbitt.info:80/announce",
+        "http://tracker.ipv6tracker.org:80/announce"
     )
 
     suspend fun getStreamLinks(

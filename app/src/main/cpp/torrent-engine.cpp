@@ -5,6 +5,7 @@
 #include <libtorrent/add_torrent_params.hpp>
 #include <libtorrent/magnet_uri.hpp>
 #include <utility>
+#include <thread>
 
 #define TAG "StreamX_Native"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -28,6 +29,7 @@ TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
     pack.set_int(lt::settings_pack::download_rate_limit, 0);
     pack.set_int(lt::settings_pack::upload_rate_limit, 0);
     pack.set_int(lt::settings_pack::active_downloads, 10);
+    pack.set_int(lt::settings_pack::dht_max_peers, 1000); // Allow more DHT peers
     
     // FIX: Enhanced DHT bootstrap nodes (more than before)
     pack.set_str(lt::settings_pack::dht_bootstrap_nodes,
@@ -39,7 +41,9 @@ TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
         "dht.metautr.ent:6881,"
         "dht.ikig.ail:6881,"
         "dht.lei.net:6881,"
-        "dht.free.isp:6881");
+        "dht.free.isp:6881,"
+        "dht.aelitis.com:6881,"
+        "dht.bt.bt:6881");
     
     ses = new lt::session(pack);
     
@@ -53,6 +57,7 @@ TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
     ses->add_dht_node(std::make_pair("dht.ikig.ail", 6881));
     ses->add_dht_node(std::make_pair("dht.lei.net", 6881));
     ses->add_dht_node(std::make_pair("dht.free.isp", 6881));
+    ses->add_dht_node(std::make_pair("dht.bt.bt", 6881));
     
     LOGD("TorrentSystem constructed with enhanced DHT");
 }
@@ -87,7 +92,7 @@ void TorrentSystem::start(const std::string& magnet, const std::string& saveDir)
     p.flags &= ~lt::torrent_flags::auto_managed;    // Manual management for streaming
     p.flags |= lt::torrent_flags::sequential_download; // Enable sequential download immediately
     
-    // FIX: Also add our trackers directly (hardcoded as backup)
+    // FIX: Hardcoded trackers (UDP + HTTP) – duplicates are harmless
     std::vector<std::string> extra_trackers = {
         "udp://tracker.opentrackr.org:1337/announce",
         "udp://open.demonii.com:1337/announce",
@@ -104,7 +109,11 @@ void TorrentSystem::start(const std::string& magnet, const std::string& saveDir)
         "udp://tracker.moeking.me:6969/announce",
         "udp://tracker.skynetcloud.tk:6969/announce",
         "udp://tracker.pirateparty.gr:6969/announce",
-        "udp://tracker.zerobytes.xyz:1337/announce"
+        "udp://tracker.zerobytes.xyz:1337/announce",
+        "http://tracker.bt4g.com:2095/announce",
+        "http://tracker.files.fm:6969/announce",
+        "http://tracker.gbitt.info:80/announce",
+        "http://tracker.ipv6tracker.org:80/announce"
     };
     for (const auto& tr : extra_trackers) {
         p.trackers.push_back(tr);
@@ -117,9 +126,10 @@ void TorrentSystem::start(const std::string& magnet, const std::string& saveDir)
         return;
     }
     
-    // FIX: Resume the torrent and force reannounce to find peers faster
+    // FIX: Resume the torrent and force announces to find peers faster
     handle.resume();
-    handle.force_reannounce();
+    handle.force_reannounce();      // Announce to trackers
+    handle.force_dht_announce();    // Announce to DHT
     LOGD("Torrent added and resumed. Save path: %s", saveDir.c_str());
 
     workerThread = std::thread(&TorrentSystem::updateLoop, this);
@@ -145,6 +155,14 @@ void TorrentSystem::updateLoop() {
         if (!s.has_metadata) {
             currentStatus.state = 1; // Fetching Metadata
             LOGD("State: Fetching metadata, peers: %d", s.num_peers);
+            
+            // Periodically reannounce to keep trying
+            static int counter = 0;
+            if (++counter % 10 == 0) { // every ~2.5 seconds
+                handle.force_reannounce();
+                handle.force_dht_announce();
+                LOGD("Forced reannounce (metadata still missing)");
+            }
         }
         else if (s.state == lt::torrent_status::downloading || 
                  s.state == lt::torrent_status::finished || 
@@ -175,6 +193,7 @@ void TorrentSystem::updateLoop() {
                     
                     // Force another reannounce now that we have metadata
                     handle.force_reannounce();
+                    handle.force_dht_announce();
                 }
             }
 
