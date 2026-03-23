@@ -19,7 +19,7 @@ TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
     pack.set_bool(lt::settings_pack::enable_upnp, true);
     pack.set_bool(lt::settings_pack::enable_natpmp, true);
     
-    // Use dynamic ports (0 = any available)
+    // Use dynamic ports
     pack.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:0,[::]:0");
     
     // Streaming optimizations
@@ -29,9 +29,11 @@ TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
     pack.set_int(lt::settings_pack::download_rate_limit, 0);
     pack.set_int(lt::settings_pack::upload_rate_limit, 0);
     pack.set_int(lt::settings_pack::active_downloads, 10);
-    pack.set_int(lt::settings_pack::dht_max_peers, 1000); // Allow more DHT peers
+    pack.set_int(lt::settings_pack::dht_max_peers, 2000); // More DHT peers
+    pack.set_int(lt::settings_pack::dht_announce_interval, 60); // Announce every minute
+    pack.set_int(lt::settings_pack::dht_bootstrap_nodes, 20); // Keep many bootstrap nodes
     
-    // FIX: Enhanced DHT bootstrap nodes (more than before)
+    // Enhanced DHT bootstrap nodes (more reliable)
     pack.set_str(lt::settings_pack::dht_bootstrap_nodes,
         "router.bittorrent.com:6881,"
         "router.utorrent.com:6881,"
@@ -42,12 +44,13 @@ TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
         "dht.ikig.ail:6881,"
         "dht.lei.net:6881,"
         "dht.free.isp:6881,"
-        "dht.aelitis.com:6881,"
-        "dht.bt.bt:6881");
+        "dht.bt.bt:6881,"
+        "dht.dnsbl.manitu.net:6881,"
+        "dht.moeking.me:6881");
     
     ses = new lt::session(pack);
     
-    // Pre‑seed with additional DHT nodes
+    // Add DHT nodes manually
     ses->add_dht_node(std::make_pair("router.bittorrent.com", 6881));
     ses->add_dht_node(std::make_pair("router.utorrent.com", 6881));
     ses->add_dht_node(std::make_pair("dht.transmissionbt.com", 6881));
@@ -59,7 +62,7 @@ TorrentSystem::TorrentSystem() : isRunning(false), ses(nullptr) {
     ses->add_dht_node(std::make_pair("dht.free.isp", 6881));
     ses->add_dht_node(std::make_pair("dht.bt.bt", 6881));
     
-    LOGD("TorrentSystem constructed with enhanced DHT");
+    LOGD("TorrentSystem constructed with aggressive DHT settings");
 }
 
 TorrentSystem::~TorrentSystem() {
@@ -71,7 +74,7 @@ TorrentSystem::~TorrentSystem() {
 }
 
 void TorrentSystem::start(const std::string& magnet, const std::string& saveDir) {
-    stop(); // Ensure any previous session is cleaned up
+    stop();
 
     isRunning = true;
     finalFilePath = "";
@@ -81,19 +84,25 @@ void TorrentSystem::start(const std::string& magnet, const std::string& saveDir)
     lt::add_torrent_params p = lt::parse_magnet_uri(magnet, ec);
     if (ec) {
         LOGD("Parse Magnet Error: %s", ec.message().c_str());
-        currentStatus.state = 4; // Error
+        currentStatus.state = 4;
         return;
     }
     
     p.save_path = saveDir;
+    p.flags &= ~lt::torrent_flags::paused;
+    p.flags &= ~lt::torrent_flags::auto_managed;
+    p.flags |= lt::torrent_flags::sequential_download;
     
-    // FIX: Force start and sequential download from the beginning
-    p.flags &= ~lt::torrent_flags::paused;          // Not paused
-    p.flags &= ~lt::torrent_flags::auto_managed;    // Manual management for streaming
-    p.flags |= lt::torrent_flags::sequential_download; // Enable sequential download immediately
-    
-    // FIX: Hardcoded trackers (UDP + HTTP) – duplicates are harmless
+    // Hardcoded trackers (HTTP first, then UDP)
     std::vector<std::string> extra_trackers = {
+        "http://tracker.bt4g.com:2095/announce",
+        "http://tracker.files.fm:6969/announce",
+        "http://tracker.gbitt.info:80/announce",
+        "http://tracker.ipv6tracker.org:80/announce",
+        "http://tracker.nyaa.uk:6969/announce",
+        "http://tracker.zerobytes.xyz:1337/announce",
+        "https://tracker.bt4g.com:443/announce",
+        "https://tracker.nanoha.org:443/announce",
         "udp://tracker.opentrackr.org:1337/announce",
         "udp://open.demonii.com:1337/announce",
         "udp://tracker.openbittorrent.com:80",
@@ -109,11 +118,7 @@ void TorrentSystem::start(const std::string& magnet, const std::string& saveDir)
         "udp://tracker.moeking.me:6969/announce",
         "udp://tracker.skynetcloud.tk:6969/announce",
         "udp://tracker.pirateparty.gr:6969/announce",
-        "udp://tracker.zerobytes.xyz:1337/announce",
-        "http://tracker.bt4g.com:2095/announce",
-        "http://tracker.files.fm:6969/announce",
-        "http://tracker.gbitt.info:80/announce",
-        "http://tracker.ipv6tracker.org:80/announce"
+        "udp://tracker.zerobytes.xyz:1337/announce"
     };
     for (const auto& tr : extra_trackers) {
         p.trackers.push_back(tr);
@@ -126,11 +131,10 @@ void TorrentSystem::start(const std::string& magnet, const std::string& saveDir)
         return;
     }
     
-    // FIX: Resume the torrent and force announces to find peers faster
     handle.resume();
-    handle.force_reannounce();      // Announce to trackers
-    handle.force_dht_announce();    // Announce to DHT
-    LOGD("Torrent added and resumed. Save path: %s", saveDir.c_str());
+    handle.force_reannounce();
+    handle.force_dht_announce();
+    LOGD("Torrent added with %zu trackers", p.trackers.size());
 
     workerThread = std::thread(&TorrentSystem::updateLoop, this);
 }
@@ -151,24 +155,22 @@ void TorrentSystem::updateLoop() {
         currentStatus.seeds = s.num_seeds;
         currentStatus.peers = s.num_peers;
 
-        // Metadata not yet available
         if (!s.has_metadata) {
-            currentStatus.state = 1; // Fetching Metadata
+            currentStatus.state = 1;
             LOGD("State: Fetching metadata, peers: %d", s.num_peers);
             
-            // Periodically reannounce to keep trying
+            // Force announces every 0.5 seconds until we get metadata
             static int counter = 0;
-            if (++counter % 10 == 0) { // every ~2.5 seconds
+            if (counter++ % 2 == 0) { // every ~0.5 seconds (since loop sleeps 250ms)
                 handle.force_reannounce();
                 handle.force_dht_announce();
-                LOGD("Forced reannounce (metadata still missing)");
+                LOGD("Force reannounce (metadata missing, peers=%d)", s.num_peers);
             }
         }
         else if (s.state == lt::torrent_status::downloading || 
                  s.state == lt::torrent_status::finished || 
                  s.state == lt::torrent_status::seeding) {
             
-            // Set file path and priorities once when metadata first becomes available
             if (finalFilePath.empty()) {
                 std::shared_ptr<const lt::torrent_info> info = handle.torrent_file();
                 if (info && info->is_valid()) {
@@ -186,28 +188,24 @@ void TorrentSystem::updateLoop() {
                     finalFilePath = s.save_path + "/" + relPath;
                     strncpy(currentStatus.videoPath, finalFilePath.c_str(), 511);
                     
-                    // Prioritize the video file
                     handle.file_priority(lt::file_index_t(largestFileIdx), lt::default_priority);
                     
                     LOGD("Metadata ready. Video path: %s", finalFilePath.c_str());
-                    
-                    // Force another reannounce now that we have metadata
                     handle.force_reannounce();
                     handle.force_dht_announce();
                 }
             }
 
-            // Transition to Ready (playable) once at least 1% is downloaded
             if (currentStatus.progress >= 1 && !finalFilePath.empty()) {
-                currentStatus.state = 3; // Ready/Playing
+                currentStatus.state = 3;
                 LOGD("State: Ready (progress %d%%)", currentStatus.progress);
             } else {
-                currentStatus.state = 2; // Downloading/Buffering
+                currentStatus.state = 2;
                 LOGD("State: Downloading (progress %d%%)", currentStatus.progress);
             }
         } 
         else {
-            currentStatus.state = 0; // Idle
+            currentStatus.state = 0;
             LOGD("State: Idle");
         }
 

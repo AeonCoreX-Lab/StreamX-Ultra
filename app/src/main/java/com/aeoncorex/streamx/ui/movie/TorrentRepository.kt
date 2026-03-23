@@ -44,8 +44,18 @@ object TorrentRepository {
         .build()
         .create(YtsApi::class.java)
 
-    // FIX: Combined UDP + HTTP trackers (more reliable)
+    // FIX: Prioritize HTTP/HTTPS trackers (more reliable on many networks)
     private val TRACKERS = listOf(
+        // HTTP trackers
+        "http://tracker.bt4g.com:2095/announce",
+        "http://tracker.files.fm:6969/announce",
+        "http://tracker.gbitt.info:80/announce",
+        "http://tracker.ipv6tracker.org:80/announce",
+        "http://tracker.nyaa.uk:6969/announce",
+        "http://tracker.zerobytes.xyz:1337/announce",
+        "https://tracker.bt4g.com:443/announce",
+        "https://tracker.nanoha.org:443/announce",
+        // UDP trackers (backup)
         "udp://tracker.opentrackr.org:1337/announce",
         "udp://open.demonii.com:1337/announce",
         "udp://tracker.openbittorrent.com:80",
@@ -61,11 +71,7 @@ object TorrentRepository {
         "udp://tracker.moeking.me:6969/announce",
         "udp://tracker.skynetcloud.tk:6969/announce",
         "udp://tracker.pirateparty.gr:6969/announce",
-        "udp://tracker.zerobytes.xyz:1337/announce",
-        "http://tracker.bt4g.com:2095/announce",
-        "http://tracker.files.fm:6969/announce",
-        "http://tracker.gbitt.info:80/announce",
-        "http://tracker.ipv6tracker.org:80/announce"
+        "udp://tracker.zerobytes.xyz:1337/announce"
     )
 
     suspend fun getStreamLinks(
@@ -81,26 +87,18 @@ object TorrentRepository {
         coroutineScope {
             val jobs = mutableListOf<Deferred<List<StreamLink>>>()
 
-            // 1. Anime (NYAA)
             if (isAnime) {
-                jobs.add(async {
-                    try { TorrentProviders.fetchAnime(title, episode) } catch (e: Exception) { emptyList() }
-                })
+                jobs.add(async { try { TorrentProviders.fetchAnime(title, episode) } catch (e: Exception) { emptyList() } })
             }
 
-            // 2. Series (EZTV)
             if (type == MovieType.SERIES && imdbId != null) {
-                jobs.add(async {
-                    try { TorrentProviders.fetchSeries(imdbId, season, episode) } catch (e: Exception) { emptyList() }
-                })
+                jobs.add(async { try { TorrentProviders.fetchSeries(imdbId, season, episode) } catch (e: Exception) { emptyList() } })
             }
 
-            // 3. Movies (YTS Mirrors)
             if (type == MovieType.MOVIE) {
                 jobs.add(async { fetchYtsWithMirrors(imdbId, title) })
             }
 
-            // 4. BitSearch (Backup for all)
             jobs.add(async {
                 try {
                     val searchTitle = if(type == MovieType.SERIES) "$title S${String.format("%02d", season)}E${String.format("%02d", episode)}" else title
@@ -114,7 +112,6 @@ object TorrentRepository {
             jobs.awaitAll().forEach { allLinks.addAll(it) }
         }
 
-        // FIX: ALWAYS append our trackers – duplicates are harmless
         return@withContext allLinks
             .distinctBy { it.magnet }
             .map { link ->
@@ -123,7 +120,6 @@ object TorrentRepository {
             .sortedByDescending { it.seeds }
     }
 
-    // FIX: Always append trackers, even if the magnet already has some
     private fun appendTrackersToMagnet(magnet: String): String {
         if (!magnet.startsWith("magnet:?")) return magnet
         val trackerParams = TRACKERS.joinToString("") { "&tr=${URLEncoder.encode(it, "UTF-8")}" }

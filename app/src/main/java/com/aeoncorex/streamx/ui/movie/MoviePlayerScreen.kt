@@ -158,12 +158,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     }
 
     // --- Torrent / Playback Handling ---
-    // Inside MoviePlayerScreen, replace the LaunchedEffect for decodedUrl:
-
-LaunchedEffect(decodedUrl) {
+    LaunchedEffect(decodedUrl) {
     var retryCount = 0
     val maxRetries = 3
-    val baseDelay = 2000L // 2 seconds between retries
+    val baseDelay = 2000L
 
     while (retryCount < maxRetries) {
         if (decodedUrl.startsWith("magnet:?")) {
@@ -175,13 +173,12 @@ LaunchedEffect(decodedUrl) {
                     is StreamState.Preparing -> {
                         statusMsg = state.message
                         metadataTimeout++
-                        if (metadataTimeout > 120) { // ~30 seconds
+                        if (metadataTimeout > 180) { // 45 seconds (180 * 250ms)
                             if (retryCount < maxRetries - 1) {
                                 statusMsg = "Metadata timeout – retrying (${retryCount+1}/$maxRetries)"
                             } else {
                                 statusMsg = "Metadata timeout – last retry"
                             }
-                            // Force stop engine to retry
                             TorrentEngine.stop()
                             completed = true
                         }
@@ -215,7 +212,6 @@ LaunchedEffect(decodedUrl) {
             retryCount++
             delay(baseDelay)
         } else {
-            // Direct URL playback
             videoPath = decodedUrl
             try { StreamXCore.playMpvVideo(decodedUrl) } catch (e: Exception) {
                 statusMsg = "Playback failed: ${e.message}"
