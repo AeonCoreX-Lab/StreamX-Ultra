@@ -51,10 +51,14 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvSurface(JNIEnv* env, jclas
     ANativeWindow* window = nullptr;
     if (surface != nullptr) {
         window = ANativeWindow_fromSurface(env, surface);
-        // ✅ DO NOT call ANativeWindow_release(window) here.
-        //    set_mpv_surface() takes ownership of this reference.
     }
     set_mpv_surface(window);
+}
+
+// ── NEW: must be called from surfaceChanged (official mpv-android pattern) ──
+extern "C" JNIEXPORT void JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvSurfaceSize(JNIEnv*, jclass, jint width, jint height) {
+    set_mpv_surface_size(width, height);
 }
 
 extern "C" JNIEXPORT void JNICALL

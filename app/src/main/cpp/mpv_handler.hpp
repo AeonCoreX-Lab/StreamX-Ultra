@@ -6,6 +6,7 @@
 void init_mpv_engine();
 void play_mpv_video(const char* path);
 void set_mpv_surface(ANativeWindow* window);
+void set_mpv_surface_size(int width, int height); // ← NEW: call from surfaceChanged
 void toggle_vulkan_fsr(bool enable);
 double get_mpv_time();
 double get_mpv_duration();

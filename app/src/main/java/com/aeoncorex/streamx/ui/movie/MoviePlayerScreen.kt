@@ -87,6 +87,7 @@ object StreamXCore {
     @JvmStatic external fun pauseMpvVideo(pause: Boolean)
     @JvmStatic external fun getMpvTime(): Double
     @JvmStatic external fun getMpvDuration(): Double
+    @JvmStatic external fun setMpvSurfaceSize(width: Int, height: Int) 
     
     // Generic Bridges
     @JvmStatic external fun commandNative(cmd: Array<String>)
@@ -253,18 +254,26 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         AndroidView(
             factory = { ctx ->
                 SurfaceView(ctx).apply {
-                    holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) {
-                            if(holder.surface.isValid) {
-                                try { StreamXCore.setMpvSurface(holder.surface) } catch (e: Exception) { }
-                            }
-                        }
-                        override fun surfaceChanged(h: SurfaceHolder, format: Int, w: Int, height: Int) {}
-                        override fun surfaceDestroyed(h: SurfaceHolder) {
-                            // FIX: Prevent MPV from rendering on destroyed surface (causes black screen/crash)
-                            try { StreamXCore.setMpvSurface(null) } catch (e: Exception) {}
-                        }
-                    })
+                                    holder.addCallback(object : SurfaceHolder.Callback {
+                    override fun surfaceCreated(h: SurfaceHolder) {
+                        try { StreamXCore.setMpvSurface(h.surface) } catch (e: Exception) {}
+                    }
+
+                    override fun surfaceChanged(h: SurfaceHolder, format: Int, w: Int, height: Int) {
+                        // FIX: Window resize ba orientation change hole MPV size update kora
+                        try { 
+                            StreamXCore.setMpvSurfaceSize(w, height) 
+                        } catch (e: Exception) {}
+                    }
+
+                    override fun surfaceDestroyed(h: SurfaceHolder) {
+                        // FIX: Prevent MPV from rendering on destroyed surface
+                        try { 
+                            StreamXCore.setMpvSurface(null) 
+                        } catch (e: Exception) {}
+                    }
+                })
+
                     layoutParams = ViewGroup.LayoutParams(-1, -1)
                 }
             },

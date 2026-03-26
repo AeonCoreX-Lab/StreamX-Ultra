@@ -23,6 +23,13 @@ sealed class StreamState {
 object TorrentEngine {
     private const val TAG = "StreamX_Native"
 
+    // ── FIX: volatile flag so the flow loop sees stop() immediately ──
+    // When stop() is called from INSIDE collect{} (e.g. metadata timeout),
+    // the coroutine context is still active so isActive stays true.
+    // Without this flag the flow loops forever on null statuses and
+    // collect{} never returns → retry loop is unreachable.
+    @Volatile private var engineStopped = false
+
     // --- NATIVE FUNCTIONS ---
     private external fun initNative()
     private external fun startNative(magnet: String, savePath: String)
@@ -32,10 +39,6 @@ object TorrentEngine {
 
     init {
         try {
-            // NOTE: streamx-native is also loaded by StreamXCore with its full dependency
-            // chain (avutil, swresample, …, mpv). TorrentEngine.init runs lazily when
-            // the object is first touched — by that time StreamXCore.init will already
-            // have run and all shared libraries will be in memory.
             System.loadLibrary("streamx-native")
             initNative()
         } catch (e: UnsatisfiedLinkError) {
@@ -65,10 +68,13 @@ object TorrentEngine {
         Log.d(TAG, "Starting Native Engine for: $magnetLink")
 
         try {
+            engineStopped = false
             startNative(magnetLink, downloadDir.absolutePath)
             emit(StreamState.Preparing("Initializing Core Engine…"))
 
-            while (currentCoroutineContext().isActive) {
+            // ── FIX: also check engineStopped so stop() from inside
+            // collect{} (e.g. metadata timeout) terminates the flow.
+            while (currentCoroutineContext().isActive && !engineStopped) {
                 val status = getStatusNative()
 
                 if (status != null && status.size >= 5) {
@@ -120,6 +126,9 @@ object TorrentEngine {
 
     fun stop() {
         Log.d(TAG, "Stopping Native Engine")
+        // ── FIX: set flag BEFORE stopNative() so the flow loop exits
+        // on next iteration even while collect{} is still suspended
+        engineStopped = true
         try { stopNative() } catch (e: Exception) { Log.e(TAG, "Error stopping engine: ${e.message}") }
     }
 

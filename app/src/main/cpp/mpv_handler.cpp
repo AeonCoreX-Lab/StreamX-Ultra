@@ -37,11 +37,18 @@ void init_mpv_engine() {
         return;
     }
 
-    // Video output — use gpu-next (the renderer used by mpv-android 2026-03-22;
-    // the older "gpu" VO is being phased out upstream).
-    mpv_set_option_string(mpv_ctx, "vo",      "gpu-next");
-    mpv_set_option_string(mpv_ctx, "gpu-api", "opengl");
-    mpv_set_option_string(mpv_ctx, "hwdec",   "mediacodec-copy");
+    // ── Video / Audio output (official mpv-android pattern) ──────
+    // gpu-next is the current VO used by mpv-android 2026-03-22.
+    // opengl-es MUST be "yes" on Android — without this MPV tries
+    // desktop OpenGL which is unavailable → black screen.
+    // ao must list audiotrack first; opensles as fallback.
+    mpv_set_option_string(mpv_ctx, "vo",          "gpu-next");
+    mpv_set_option_string(mpv_ctx, "gpu-api",     "opengl");
+    mpv_set_option_string(mpv_ctx, "opengl-es",   "yes");           // ← CRITICAL for Android
+    mpv_set_option_string(mpv_ctx, "hwdec",       "mediacodec-copy");
+    mpv_set_option_string(mpv_ctx, "hwdec-codecs","h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1");
+    mpv_set_option_string(mpv_ctx, "ao",          "audiotrack,opensles"); // ← CRITICAL for Android audio
+    mpv_set_option_string(mpv_ctx, "force-window","yes");           // render even if window isn't ready yet
 
     // ── Streaming / torrent cache ──────────────────────────────
     // Allow MPV to start playing as soon as it has the first few
@@ -143,6 +150,15 @@ double get_mpv_duration() {
     double d = 0.0;
     mpv_get_property(mpv_ctx, "duration", MPV_FORMAT_DOUBLE, &d);
     return d;
+}
+
+void set_mpv_surface_size(int width, int height) {
+    if (!mpv_ctx) return;
+    // Official mpv-android sets "android-surface-size" in surfaceChanged
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%dx%d", width, height);
+    mpv_set_property_string(mpv_ctx, "android-surface-size", buf);
+    LOGD("Surface size: %s", buf);
 }
 
 void seek_mpv_video(double seconds) {
