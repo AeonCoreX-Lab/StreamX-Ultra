@@ -2,6 +2,7 @@
 #include <android/log.h>
 #include <android/native_window_jni.h>
 #include <string>
+#include <stdlib.h>
 #include "torrent_system.hpp"
 #include "mpv_handler.hpp"
 
@@ -33,18 +34,12 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_playMpvVideo(JNIEnv* env, jclass
     env->ReleaseStringUTFChars(path, fp);
 }
 
-// ─────────────────────────────────────────────────────────────
-//  CRITICAL: DO NOT call ANativeWindow_release() after this.
-//  Ownership is transferred to set_mpv_surface() / mpv_handler.cpp
-//  which stores it in s_current_window and releases it on next call.
-// ─────────────────────────────────────────────────────────────
+// CRITICAL: ownership transferred to set_mpv_surface() — do NOT release here
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvSurface(JNIEnv* env, jclass, jobject surface) {
-    ANativeWindow* window = nullptr;
-    if (surface != nullptr)
-        window = ANativeWindow_fromSurface(env, surface);
-    set_mpv_surface(window);
-    // ← NO ANativeWindow_release(window) here — ownership transferred
+    ANativeWindow* w = nullptr;
+    if (surface != nullptr) w = ANativeWindow_fromSurface(env, surface);
+    set_mpv_surface(w);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -104,6 +99,39 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setPropertyStringNative(
     env->ReleaseStringUTFChars(value, v);
 }
 
+// ── New: property getters ─────────────────────────────────────
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getPropertyStringNative(JNIEnv* env, jclass, jstring name) {
+    const char* n  = env->GetStringUTFChars(name, nullptr);
+    char*       val = get_property_string_mpv(n);
+    env->ReleaseStringUTFChars(name, n);
+    if (!val) return env->NewStringUTF("");
+    jstring result = env->NewStringUTF(val);
+    // free() the string returned by mpv_get_property_string
+    // (mpv uses its own allocator which is compatible with free())
+    mpv_free(val);
+    return result;
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getPropertyIntNative(JNIEnv* env, jclass, jstring name) {
+    const char* n = env->GetStringUTFChars(name, nullptr);
+    int64_t val   = get_property_int_mpv(n);
+    env->ReleaseStringUTFChars(name, n);
+    return (jlong)val;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvCachePercent(JNIEnv*, jclass) {
+    return (jint)get_cache_percent_mpv();
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_isMpvPausedForCache(JNIEnv*, jclass) {
+    return (jboolean)(is_paused_for_cache_mpv() != 0);
+}
+
 // ════════════════════════════════════════════════════════════
 //  TORRENT ENGINE JNI BRIDGES
 // ════════════════════════════════════════════════════════════
@@ -125,11 +153,7 @@ Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_startNative(JNIEnv* env, jobje
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_stopNative(JNIEnv*, jobject) {
-    if (torrentEngine) {
-        torrentEngine->stop();
-        delete torrentEngine;
-        torrentEngine = nullptr;
-    }
+    if (torrentEngine) { torrentEngine->stop(); delete torrentEngine; torrentEngine = nullptr; }
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL
