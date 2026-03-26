@@ -197,7 +197,11 @@ fun AuthScreen(navController: NavController) {
                 Spacer(Modifier.height(28.dp))
 
                 // ── Form crossfade ────────────────────────────
-                Crossfade(authState, tween(400), label = "form") { state ->
+                Crossfade(
+                    targetState = authState, 
+                    animationSpec = tween(400), 
+                    label = "form"
+                ) { state ->
                     when (state) {
                         AuthScreenState.LOGIN -> LoginContent(
                             onSwitchToSignUp = { authState = AuthScreenState.SIGN_UP },
