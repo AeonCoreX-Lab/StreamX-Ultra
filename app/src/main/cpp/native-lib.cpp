@@ -9,16 +9,17 @@
 
 extern "C" {
     __attribute__((weak))
-    ssize_t __sendto_chk(int fd, const void* buf, size_t len, size_t buflen, int flags, const struct sockaddr* addr, socklen_t addr_len) {
+    ssize_t __sendto_chk(int fd, const void* buf, size_t len, size_t buflen,
+                         int flags, const struct sockaddr* addr, socklen_t addr_len) {
         return sendto(fd, buf, len, flags, addr, addr_len);
     }
 }
 
 static TorrentSystem* torrentEngine = nullptr;
 
-// ════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
 //  MPV JNI BRIDGES
-// ════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initMpvEngine(JNIEnv*, jclass) {
@@ -32,33 +33,23 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_playMpvVideo(JNIEnv* env, jclass
     env->ReleaseStringUTFChars(path, fp);
 }
 
-// ─────────────────────────────────────────────────────────────────
-//  setMpvSurface — CRITICAL FIX
-//
-//  OLD CODE (broken):
-//      ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
-//      set_mpv_surface(window);
-//      ANativeWindow_release(window);   ← released while MPV still held the pointer!
-//
-//  FIX: ownership of the ANativeWindow reference is TRANSFERRED to
-//  set_mpv_surface() / mpv_handler.cpp (stored in s_current_window).
-//  We must NOT call ANativeWindow_release() here.  The handler
-//  releases the old window when a new surface is set, or when null
-//  is passed on surfaceDestroyed.
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  CRITICAL: DO NOT call ANativeWindow_release() after this.
+//  Ownership is transferred to set_mpv_surface() / mpv_handler.cpp
+//  which stores it in s_current_window and releases it on next call.
+// ─────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvSurface(JNIEnv* env, jclass, jobject surface) {
     ANativeWindow* window = nullptr;
-    if (surface != nullptr) {
+    if (surface != nullptr)
         window = ANativeWindow_fromSurface(env, surface);
-    }
     set_mpv_surface(window);
+    // ← NO ANativeWindow_release(window) here — ownership transferred
 }
 
-// ── NEW: must be called from surfaceChanged (official mpv-android pattern) ──
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvSurfaceSize(JNIEnv*, jclass, jint width, jint height) {
-    set_mpv_surface_size(width, height);
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvSurfaceSize(JNIEnv*, jclass, jint w, jint h) {
+    set_mpv_surface_size(w, h);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -77,8 +68,8 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvDuration(JNIEnv*, jclass) 
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_seekMpvVideo(JNIEnv*, jclass, jdouble seconds) {
-    seek_mpv_video(seconds);
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_seekMpvVideo(JNIEnv*, jclass, jdouble sec) {
+    seek_mpv_video(sec);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -87,26 +78,25 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pauseMpvVideo(JNIEnv*, jclass, j
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_commandNative(JNIEnv* env, jclass, jobjectArray jarray) {
-    int len = env->GetArrayLength(jarray);
-    const char* arguments[128] = {nullptr};
-
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_commandNative(JNIEnv* env, jclass, jobjectArray arr) {
+    int len = env->GetArrayLength(arr);
+    const char* args[128] = {nullptr};
     for (int i = 0; i < len && i < 127; ++i) {
-        auto str = (jstring)env->GetObjectArrayElement(jarray, i);
-        arguments[i] = env->GetStringUTFChars(str, nullptr);
-        env->DeleteLocalRef(str);
+        auto s = (jstring)env->GetObjectArrayElement(arr, i);
+        args[i] = env->GetStringUTFChars(s, nullptr);
+        env->DeleteLocalRef(s);
     }
-    command_mpv(arguments);
-
+    command_mpv(args);
     for (int i = 0; i < len && i < 127; ++i) {
-        auto str = (jstring)env->GetObjectArrayElement(jarray, i);
-        env->ReleaseStringUTFChars(str, arguments[i]);
-        env->DeleteLocalRef(str);
+        auto s = (jstring)env->GetObjectArrayElement(arr, i);
+        env->ReleaseStringUTFChars(s, args[i]);
+        env->DeleteLocalRef(s);
     }
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setPropertyStringNative(JNIEnv* env, jclass, jstring name, jstring value) {
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setPropertyStringNative(
+        JNIEnv* env, jclass, jstring name, jstring value) {
     const char* n = env->GetStringUTFChars(name,  nullptr);
     const char* v = env->GetStringUTFChars(value, nullptr);
     set_property_string_mpv(n, v);
@@ -114,9 +104,9 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setPropertyStringNative(JNIEnv* 
     env->ReleaseStringUTFChars(value, v);
 }
 
-// ════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
 //  TORRENT ENGINE JNI BRIDGES
-// ════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_initNative(JNIEnv*, jobject) {
@@ -146,10 +136,10 @@ extern "C" JNIEXPORT jlongArray JNICALL
 Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getStatusNative(JNIEnv* env, jobject) {
     if (!torrentEngine) return nullptr;
     EngineStatus s = torrentEngine->getStatus();
-    jlongArray result = env->NewLongArray(5);
-    jlong fill[5] = { (jlong)s.progress, (jlong)s.speed, (jlong)s.seeds, (jlong)s.peers, (jlong)s.state };
-    env->SetLongArrayRegion(result, 0, 5, fill);
-    return result;
+    jlongArray r = env->NewLongArray(5);
+    jlong fill[5] = {(jlong)s.progress, (jlong)s.speed, (jlong)s.seeds, (jlong)s.peers, (jlong)s.state};
+    env->SetLongArrayRegion(r, 0, 5, fill);
+    return r;
 }
 
 extern "C" JNIEXPORT jstring JNICALL

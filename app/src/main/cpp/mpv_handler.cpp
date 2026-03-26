@@ -4,64 +4,47 @@
 #include <android/native_window.h>
 #include <locale.h>
 #include <string>
+#include <inttypes.h>
 
 #define TAG "StreamX_MPV"
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG,  TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR,  TAG, __VA_ARGS__)
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-static mpv_handle*   mpv_ctx         = nullptr;
-
-// ─────────────────────────────────────────────────────────────
-//  BUG THAT WAS HERE (native-lib.cpp called ANativeWindow_release
-//  immediately after passing the window to set_mpv_surface).
-//
-//  ANativeWindow_fromSurface() returns a window with refcount = 1.
-//  MPV stores the raw pointer internally but does NOT call
-//  ANativeWindow_acquire().  If we release right away, the refcount
-//  drops to 0, the window is freed, and MPV later writes to freed
-//  memory → black screen / crash.
-//
-//  FIX: keep one reference alive in s_current_window until the
-//  surface changes or the engine shuts down.
-// ─────────────────────────────────────────────────────────────
+static mpv_handle*    mpv_ctx         = nullptr;
 static ANativeWindow* s_current_window = nullptr;
 
 // ─────────────────────────────────────────────────────────────
 void init_mpv_engine() {
     setlocale(LC_NUMERIC, "C");
-    if (mpv_ctx) return;   // already initialised
+    if (mpv_ctx) return;
 
     mpv_ctx = mpv_create();
-    if (!mpv_ctx) {
-        LOGE("mpv_create() failed");
-        return;
-    }
+    if (!mpv_ctx) { LOGE("mpv_create() failed"); return; }
 
-    // ── Video / Audio output (official mpv-android pattern) ──────
-    // gpu-next is the current VO used by mpv-android 2026-03-22.
-    // opengl-es MUST be "yes" on Android — without this MPV tries
-    // desktop OpenGL which is unavailable → black screen.
-    // ao must list audiotrack first; opensles as fallback.
+    // ── Video output ──────────────────────────────────────────
+    // gpu-next = current VO for mpv-android 2026-03-22
+    // opengl-es yes = REQUIRED on Android (no desktop GL)
+    // hwdec mediacodec-copy = hardware decode + software surface copy
     mpv_set_option_string(mpv_ctx, "vo",          "gpu-next");
     mpv_set_option_string(mpv_ctx, "gpu-api",     "opengl");
-    mpv_set_option_string(mpv_ctx, "opengl-es",   "yes");           // ← CRITICAL for Android
+    mpv_set_option_string(mpv_ctx, "opengl-es",   "yes");
     mpv_set_option_string(mpv_ctx, "hwdec",       "mediacodec-copy");
     mpv_set_option_string(mpv_ctx, "hwdec-codecs","h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1");
-    mpv_set_option_string(mpv_ctx, "ao",          "audiotrack,opensles"); // ← CRITICAL for Android audio
-    mpv_set_option_string(mpv_ctx, "force-window","yes");           // render even if window isn't ready yet
 
-    // ── Streaming / torrent cache ──────────────────────────────
-    // Allow MPV to start playing as soon as it has the first few
-    // seconds in its demuxer buffer (do not wait for a large chunk).
+    // ── Audio output ─────────────────────────────────────────
+    // audiotrack = modern Android audio API, opensles = fallback
+    mpv_set_option_string(mpv_ctx, "ao", "audiotrack,opensles");
+
+    // ── Torrent streaming cache ───────────────────────────────
+    // cache-pause-wait=5: resume after 5 s of buffered data
+    // demuxer-max-bytes=128MiB: keep up to 128 MB ahead in demuxer
     mpv_set_option_string(mpv_ctx, "cache",                  "yes");
     mpv_set_option_string(mpv_ctx, "cache-pause",            "yes");
     mpv_set_option_string(mpv_ctx, "cache-pause-initial",    "yes");
-    mpv_set_option_string(mpv_ctx, "cache-pause-wait",       "3");    // resume after 3 s of cached data
+    mpv_set_option_string(mpv_ctx, "cache-pause-wait",       "5");
     mpv_set_option_string(mpv_ctx, "demuxer-max-bytes",      "128MiB");
-    mpv_set_option_string(mpv_ctx, "demuxer-readahead-secs", "30");
+    mpv_set_option_string(mpv_ctx, "demuxer-readahead-secs", "60");
     mpv_set_option_string(mpv_ctx, "demuxer-max-back-bytes", "64MiB");
-
-    // Network / file reading options — helps with partially-downloaded files
     mpv_set_option_string(mpv_ctx, "stream-buffer-size",     "4MiB");
 
     // ── Subtitles ─────────────────────────────────────────────
@@ -69,8 +52,11 @@ void init_mpv_engine() {
     mpv_set_option_string(mpv_ctx, "sub-ass-override", "force");
     mpv_set_option_string(mpv_ctx, "sub-font-size",    "45");
 
-    // ── Playback behaviour ────────────────────────────────────
+    // ── Playback ─────────────────────────────────────────────
+    // keep-open=yes: don't quit when playback ends
+    // idle=yes:      accept loadfile commands even when idle
     mpv_set_option_string(mpv_ctx, "keep-open", "yes");
+    mpv_set_option_string(mpv_ctx, "idle",      "yes");
 
     if (mpv_initialize(mpv_ctx) < 0) {
         LOGE("mpv_initialize() failed");
@@ -78,64 +64,52 @@ void init_mpv_engine() {
         mpv_ctx = nullptr;
         return;
     }
-
-    LOGD("MPV Engine initialised (gpu-next / opengl / mediacodec-copy)");
+    LOGD("MPV initialised (gpu-next/opengl-es/mediacodec-copy/audiotrack)");
 }
 
 // ─────────────────────────────────────────────────────────────
 void play_mpv_video(const char* path) {
-    if (!mpv_ctx) {
-        LOGE("play_mpv_video called but mpv_ctx is null");
-        return;
-    }
-    LOGD("Loading: %s", path);
+    if (!mpv_ctx) { LOGE("play_mpv_video: mpv_ctx null"); return; }
+    LOGD("loadfile: %s", path);
     const char* cmd[] = {"loadfile", path, nullptr};
-    mpv_command(mpv_ctx, cmd);
+    int r = mpv_command(mpv_ctx, cmd);
+    if (r < 0) LOGE("loadfile failed: %s", mpv_error_string(r));
 }
 
 // ─────────────────────────────────────────────────────────────
-//  set_mpv_surface — safe ANativeWindow lifecycle management.
-//
-//  Caller (native-lib.cpp JNI bridge) must NOT call
-//  ANativeWindow_release() after calling this function.
-//  Ownership is transferred here; we release the previous window
-//  and store the new one.
+//  set_mpv_surface — ANativeWindow ownership is transferred here.
+//  Caller must NOT call ANativeWindow_release() after this call.
 // ─────────────────────────────────────────────────────────────
 void set_mpv_surface(ANativeWindow* new_window) {
-    // ── Auto-init if MPV was not ready when surfaceCreated fired ──
-    // (race condition: surfaceCreated can fire before LaunchedEffect
-    //  calls initMpvEngine() on the Kotlin side)
-    if (!mpv_ctx) {
-        LOGD("set_mpv_surface: mpv_ctx null — auto-initialising");
-        init_mpv_engine();
-        if (!mpv_ctx) return;
-    }
+    if (!mpv_ctx) { init_mpv_engine(); if (!mpv_ctx) return; }
 
-    // ── Release previous window ────────────────────────────────
-    if (s_current_window != nullptr) {
+    // Release previous window reference
+    if (s_current_window) {
         ANativeWindow_release(s_current_window);
         s_current_window = nullptr;
     }
+    s_current_window = new_window;   // take ownership (do NOT release)
 
-    // ── Store new window (we own the reference; do NOT release) ─
-    s_current_window = new_window;
+    int64_t wid = (int64_t)new_window;
+    int r = mpv_set_property(mpv_ctx, "wid", MPV_FORMAT_INT64, &wid);
+    if (r < 0) LOGE("set wid failed: %s", mpv_error_string(r));
+    else LOGD("wid set: %" PRId64, wid);
+}
 
-    int64_t wid = (int64_t)(new_window);   // null → 0 detaches surface
-    mpv_set_property(mpv_ctx, "wid", MPV_FORMAT_INT64, &wid);
-
-    LOGD("set_mpv_surface: wid=%" PRId64, wid);
+// ─────────────────────────────────────────────────────────────
+void set_mpv_surface_size(int width, int height) {
+    if (!mpv_ctx) return;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%dx%d", width, height);
+    mpv_set_property_string(mpv_ctx, "android-surface-size", buf);
+    LOGD("android-surface-size: %s", buf);
 }
 
 // ─────────────────────────────────────────────────────────────
 void toggle_vulkan_fsr(bool enable) {
     if (!mpv_ctx) return;
-    if (enable) {
-        mpv_set_option_string(mpv_ctx, "scale",  "ewa_lanczossharp");
-        mpv_set_option_string(mpv_ctx, "cscale", "ewa_lanczossharp");
-    } else {
-        mpv_set_option_string(mpv_ctx, "scale",  "bilinear");
-        mpv_set_option_string(mpv_ctx, "cscale", "bilinear");
-    }
+    mpv_set_option_string(mpv_ctx, "scale",  enable ? "ewa_lanczossharp" : "bilinear");
+    mpv_set_option_string(mpv_ctx, "cscale", enable ? "ewa_lanczossharp" : "bilinear");
 }
 
 double get_mpv_time() {
@@ -150,15 +124,6 @@ double get_mpv_duration() {
     double d = 0.0;
     mpv_get_property(mpv_ctx, "duration", MPV_FORMAT_DOUBLE, &d);
     return d;
-}
-
-void set_mpv_surface_size(int width, int height) {
-    if (!mpv_ctx) return;
-    // Official mpv-android sets "android-surface-size" in surfaceChanged
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%dx%d", width, height);
-    mpv_set_property_string(mpv_ctx, "android-surface-size", buf);
-    LOGD("Surface size: %s", buf);
 }
 
 void seek_mpv_video(double seconds) {
