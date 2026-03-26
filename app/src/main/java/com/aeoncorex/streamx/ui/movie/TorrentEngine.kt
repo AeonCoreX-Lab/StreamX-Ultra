@@ -9,6 +9,17 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 import java.io.File
 
+// ============================================================
+//  StreamState — must be defined here so both TorrentEngine
+//  and MoviePlayerScreen can see it.
+// ============================================================
+sealed class StreamState {
+    data class Preparing(val message: String) : StreamState()
+    data class Buffering(val progress: Int, val speed: Long, val seeds: Int, val peers: Int) : StreamState()
+    data class Ready(val filePath: String) : StreamState()
+    data class Error(val message: String) : StreamState()
+}
+
 object TorrentEngine {
     private const val TAG = "StreamX_Native"
 
@@ -16,12 +27,16 @@ object TorrentEngine {
     private external fun initNative()
     private external fun startNative(magnet: String, savePath: String)
     private external fun stopNative()
-    private external fun getStatusNative(): LongArray? 
+    private external fun getStatusNative(): LongArray?
     private external fun getFilePathNative(): String
 
     init {
         try {
-            System.loadLibrary("streamx-native") 
+            // NOTE: streamx-native is also loaded by StreamXCore with its full dependency
+            // chain (avutil, swresample, …, mpv). TorrentEngine.init runs lazily when
+            // the object is first touched — by that time StreamXCore.init will already
+            // have run and all shared libraries will be in memory.
+            System.loadLibrary("streamx-native")
             initNative()
         } catch (e: UnsatisfiedLinkError) {
             Log.e(TAG, "Native Library Load Failed: ${e.message}")
@@ -30,88 +45,90 @@ object TorrentEngine {
         }
     }
 
-    // --- MAIN LOGIC ---
+    // ----------------------------------------------------------------
+    //  start() — returns a cold Flow that:
+    //    • emits Preparing / Buffering while waiting
+    //    • emits Ready(path) ONCE and then TERMINATES  ← KEY FIX
+    //    • emits Error and then TERMINATES             ← KEY FIX
+    //
+    //  BUG THAT WAS HERE:
+    //    The old code ran `while(currentCoroutineContext().isActive)` forever.
+    //    After emitting Ready it set isPlaying=true and kept looping silently.
+    //    `collect {}` in MoviePlayerScreen therefore NEVER returned, so
+    //    `if (completed) break` was unreachable → UI stuck at metadata forever.
+    // ----------------------------------------------------------------
     fun start(context: Context, magnetLink: String): Flow<StreamState> = flow {
         val rootDir = context.externalCacheDir ?: context.cacheDir
         val downloadDir = File(rootDir, "StreamX_Video")
         if (!downloadDir.exists()) downloadDir.mkdirs()
 
         Log.d(TAG, "Starting Native Engine for: $magnetLink")
-        
+
         try {
             startNative(magnetLink, downloadDir.absolutePath)
-            emit(StreamState.Preparing("Initializing Core Engine..."))
+            emit(StreamState.Preparing("Initializing Core Engine…"))
 
-            var isPlaying = false
-            
-            // FIX: currentCoroutineContext().isActive must be used inside a flow builder
             while (currentCoroutineContext().isActive) {
                 val status = getStatusNative()
+
                 if (status != null && status.size >= 5) {
                     val progress = status[0].toInt()
-                    val speedKB = status[1] / 1024
-                    val seeds = status[2].toInt()
-                    val peers = status[3].toInt()
-                    val state = status[4].toInt()
+                    val speedKB  = status[1] / 1024          // bytes → KB/s
+                    val seeds    = status[2].toInt()
+                    val peers    = status[3].toInt()
+                    val state    = status[4].toInt()
 
-                    Log.d(TAG, "Native Status -> State: $state, Progress: $progress%, Speed: $speedKB KB/s, Seeds: $seeds, Peers: $peers")
+                    Log.d(TAG, "State=$state  Progress=$progress%  Speed=$speedKB KB/s  Seeds=$seeds  Peers=$peers")
 
                     when (state) {
-                        0 -> {
-                            if (!isPlaying) emit(StreamState.Preparing("Connecting to DHT..."))
-                        }
-                        1 -> {
-                            if (!isPlaying) emit(StreamState.Preparing("Fetching Metadata... ($peers peers)"))
-                        }
-                        2 -> {
-                            // FIX: Only emit buffering if playback hasn't started yet
-                            if (!isPlaying) {
-                                emit(StreamState.Buffering(progress, speedKB, seeds, peers))
-                            }
-                        }
+                        0 -> emit(StreamState.Preparing("Connecting to DHT network…"))
+
+                        1 -> emit(StreamState.Preparing("Fetching Torrent Metadata… ($peers peers)"))
+
+                        2 -> emit(StreamState.Buffering(progress, speedKB, seeds, peers))
+
                         3 -> {
-                            // Ready/Playing (crossed 1%)
-                            if (!isPlaying) {
-                                val path = getFilePathNative()
-                                if (path.isNotEmpty()) {
-                                    emit(StreamState.Ready(path))
-                                    isPlaying = true // Prevent reverting to Buffering UI
-                                }
+                            // ✅ FIX: `return@flow` terminates the flow so collect{} returns.
+                            val path = getFilePathNative()
+                            if (path.isNotEmpty()) {
+                                emit(StreamState.Ready(path))
+                                return@flow   // ← FLOW ENDS HERE — collect{} will now return
                             }
+                            // path not ready yet — stay in state 2 briefly
+                            emit(StreamState.Buffering(progress, speedKB, seeds, peers))
                         }
-                        4 -> emit(StreamState.Error("Engine Error occurred"))
+
+                        4 -> {
+                            // ✅ FIX: also terminate on error so collect{} returns
+                            emit(StreamState.Error("Native engine reported an error"))
+                            return@flow
+                        }
                     }
                 } else {
-                    Log.w(TAG, "Native status unavailable")
+                    // Native engine not yet ready — keep waiting
+                    Log.v(TAG, "getStatusNative() returned null, waiting…")
                 }
-                
-                // Reduced delay for faster UI syncing
+
                 delay(250)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Engine Flow Error: ${e.message}")
-            emit(StreamState.Error("Stream Failed: ${e.message}"))
+            emit(StreamState.Error("Stream failed: ${e.message}"))
         }
+        // flow{} block ends here → collect{} returns automatically
     }
 
     fun stop() {
         Log.d(TAG, "Stopping Native Engine")
-        try {
-            stopNative()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping engine: ${e.message}")
-        }
+        try { stopNative() } catch (e: Exception) { Log.e(TAG, "Error stopping engine: ${e.message}") }
     }
 
     fun clearCache(context: Context) {
         try {
             val rootDir = context.externalCacheDir ?: context.cacheDir
-            val downloadDir = File(rootDir, "StreamX_Video")
-            if (downloadDir.exists()) {
-                downloadDir.deleteRecursively()
-            }
+            File(rootDir, "StreamX_Video").also { if (it.exists()) it.deleteRecursively() }
         } catch (e: Exception) {
-            Log.e(TAG, "Cache clear failed")
+            Log.e(TAG, "Cache clear failed: ${e.message}")
         }
     }
 }
