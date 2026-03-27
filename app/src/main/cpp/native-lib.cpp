@@ -2,7 +2,6 @@
 #include <android/log.h>
 #include <android/native_window_jni.h>
 #include <string>
-#include <stdlib.h>
 #include "torrent_system.hpp"
 #include "mpv_handler.hpp"
 
@@ -34,7 +33,7 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_playMpvVideo(JNIEnv* env, jclass
     env->ReleaseStringUTFChars(path, fp);
 }
 
-// CRITICAL: ownership transferred to set_mpv_surface() — do NOT release here
+// CRITICAL: ANativeWindow ownership transferred to set_mpv_surface() — do NOT release here
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvSurface(JNIEnv* env, jclass, jobject surface) {
     ANativeWindow* w = nullptr;
@@ -99,21 +98,26 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setPropertyStringNative(
     env->ReleaseStringUTFChars(value, v);
 }
 
-// ── New: property getters ─────────────────────────────────────
-
+// ─────────────────────────────────────────────────────────────
+//  getPropertyStringNative — SAFE version
+//
+//  CRASH WAS HERE:
+//    Old code returned raw char* from mpv_get_property_string and called
+//    free() on it in this file.  MPV uses its own allocator (mpv_free),
+//    NOT libc free().  Calling free() on an mpv-allocated pointer →
+//    Scudo "corrupted chunk header / double free" → crash.
+//
+//  FIX: get_property_string_mpv_safe() copies to std::string and calls
+//  mpv_free internally.  This function only sees std::string — no raw
+//  MPV pointer, no manual free needed.
+// ─────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getPropertyStringNative(JNIEnv* env, jclass, jstring name) {
-    const char* n  = env->GetStringUTFChars(name, nullptr);
-    char*       val = get_property_string_mpv(n);
+    const char* n = env->GetStringUTFChars(name, nullptr);
+    std::string val = get_property_string_mpv_safe(n);  // safe: no raw pointer returned
     env->ReleaseStringUTFChars(name, n);
-    if (!val) return env->NewStringUTF("");
-    jstring result = env->NewStringUTF(val);
-    // FIX: use free() instead of mpv_free().
-    // mpv_get_property_string uses the system allocator on Android/Linux,
-    // so free() is correct here. mpv_free is an internal mpv symbol that
-    // must NOT be called from outside the mpv_handler layer.
-    free(val);
-    return result;
+    return env->NewStringUTF(val.c_str());
+    // ← NO free() needed. std::string destructs automatically. ✓
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -132,6 +136,21 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvCachePercent(JNIEnv*, jcla
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_isMpvPausedForCache(JNIEnv*, jclass) {
     return (jboolean)(is_paused_for_cache_mpv() != 0);
+}
+
+// ─────────────────────────────────────────────────────────────
+//  getTrackListNative — single-call track list (no JNI loop)
+//
+//  Returns pipe-separated track data: "id|title|selected;id|title|..."
+//  All MPV property reads happen inside one C++ function under one
+//  mutex lock. Kotlin parses the string — no loop JNI calls, no crash.
+// ─────────────────────────────────────────────────────────────
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getTrackListNative(JNIEnv* env, jclass, jstring type) {
+    const char* t = env->GetStringUTFChars(type, nullptr);
+    std::string result = get_track_list_mpv(t);
+    env->ReleaseStringUTFChars(type, t);
+    return env->NewStringUTF(result.c_str());
 }
 
 // ════════════════════════════════════════════════════════════
