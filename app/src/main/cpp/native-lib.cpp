@@ -108,9 +108,11 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getPropertyStringNative(JNIEnv* 
     env->ReleaseStringUTFChars(name, n);
     if (!val) return env->NewStringUTF("");
     jstring result = env->NewStringUTF(val);
-    // free() the string returned by mpv_get_property_string
-    // (mpv uses its own allocator which is compatible with free())
-    mpv_free(val);
+    // FIX: use free() instead of mpv_free().
+    // mpv_get_property_string uses the system allocator on Android/Linux,
+    // so free() is correct here. mpv_free is an internal mpv symbol that
+    // must NOT be called from outside the mpv_handler layer.
+    free(val);
     return result;
 }
 
