@@ -55,7 +55,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-// ─────────────────────────────────────────────────────────────
 @Keep
 object StreamXCore {
     init {
@@ -75,7 +74,6 @@ object StreamXCore {
     }
 
     @JvmStatic external fun getTmdbKey(): String
-
     @JvmStatic external fun initMpvEngine()
     @JvmStatic external fun playMpvVideo(path: String)
     @JvmStatic external fun setMpvSurface(surface: Surface?)
@@ -85,29 +83,21 @@ object StreamXCore {
     @JvmStatic external fun pauseMpvVideo(pause: Boolean)
     @JvmStatic external fun getMpvTime(): Double
     @JvmStatic external fun getMpvDuration(): Double
-
     @JvmStatic external fun commandNative(cmd: Array<String>)
     @JvmStatic external fun setPropertyStringNative(name: String, value: String)
     @JvmStatic external fun getPropertyStringNative(name: String): String
     @JvmStatic external fun getPropertyIntNative(name: String): Long
-
-    // Cache state
     @JvmStatic external fun getMpvCachePercent(): Int
     @JvmStatic external fun isMpvPausedForCache(): Boolean
-
-    // ── Single-call track list (replaces loop-based getTrackList) ──
-    // Returns "id|title|selected;id|title|selected;..." or ""
     @JvmStatic external fun getTrackListNative(type: String): String
 
-    // ── Helpers ───────────────────────────────────────────────
     fun cycleSubtitles()                 = commandNative(arrayOf("cycle", "sub"))
     fun cycleAudio()                     = commandNative(arrayOf("cycle", "audio"))
     fun addExternalSubtitle(url: String) = commandNative(arrayOf("sub-add", url, "select"))
     fun setSubTrack(id: Int)             = setPropertyStringNative("sid", if (id < 0) "no" else id.toString())
     fun setAudioTrack(id: Int)           = setPropertyStringNative("aid", id.toString())
-    fun setVideoFilter(vf: String)       = setPropertyStringNative("vf",  vf)
+    fun setVideoFilter(vf: String)       = setPropertyStringNative("vf", vf)
 
-    /** Parse the pipe-delimited track list string returned by getTrackListNative(). */
     fun getTrackList(type: String): List<MpvTrack> {
         val raw = try { getTrackListNative(type) } catch (e: Exception) { return emptyList() }
         if (raw.isBlank()) return emptyList()
@@ -125,19 +115,18 @@ object StreamXCore {
 
 data class MpvTrack(val id: Int, val title: String, val selected: Boolean)
 
-// ── GPU Quality presets ───────────────────────────────────────
 data class QualityPreset(
     val label: String, val subtitle: String,
     val vf: String, val scale: String, val cscale: String, val deband: Boolean
 )
 
 val GPU_QUALITY_PRESETS = listOf(
-    QualityPreset("Auto",       "Balanced (Recommended)", "",           "bilinear",         "bilinear",         false),
-    QualityPreset("Cinematic",  "Best quality, High GPU", "",           "ewa_lanczossharp", "ewa_lanczossharp", true),
-    QualityPreset("High",       "Sharp, Medium GPU",      "",           "spline36",         "spline36",         false),
-    QualityPreset("Medium",     "Smooth, Low GPU",        "",           "bilinear",         "bilinear",         false),
-    QualityPreset("720p Scale", "Force 720p render",      "scale=1280:720", "bilinear",     "bilinear",         false),
-    QualityPreset("480p Scale", "Force 480p, Save battery","scale=854:480", "bilinear",     "bilinear",         false),
+    QualityPreset("Auto",       "Balanced (Recommended)", "",            "bilinear",         "bilinear",         false),
+    QualityPreset("Cinematic",  "Best quality, High GPU", "",            "ewa_lanczossharp", "ewa_lanczossharp", true),
+    QualityPreset("High",       "Sharp, Medium GPU",      "",            "spline36",         "spline36",         false),
+    QualityPreset("Medium",     "Smooth, Low GPU",        "",            "bilinear",         "bilinear",         false),
+    QualityPreset("720p Scale", "Force 720p render",      "scale=1280:720","bilinear",       "bilinear",         false),
+    QualityPreset("480p Scale", "Force 480p, Save battery","scale=854:480","bilinear",       "bilinear",         false),
 )
 
 fun applyQualityPreset(preset: QualityPreset) {
@@ -149,7 +138,6 @@ fun applyQualityPreset(preset: QualityPreset) {
     } catch (e: Exception) { Log.e("MPV", "applyQuality: ${e.message}") }
 }
 
-// ─────────────────────────────────────────────────────────────
 @Composable
 fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     val context  = LocalContext.current
@@ -159,7 +147,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     }
     val scope = rememberCoroutineScope()
 
-    // Extract movie title from magnet dn= for subtitle search
     val movieTitle = remember {
         if (decodedUrl.startsWith("magnet:?")) {
             try {
@@ -169,13 +156,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         } else ""
     }
 
-    // ── Core state ────────────────────────────────────────────
     var videoPath       by remember { mutableStateOf<String?>(null) }
     var isPlaying       by remember { mutableStateOf(true) }
     var currentTime     by remember { mutableDoubleStateOf(0.0) }
     var totalDuration   by remember { mutableDoubleStateOf(0.0) }
-
-    // ── Buffering ─────────────────────────────────────────────
     var isPreBuffering  by remember { mutableStateOf(true) }
     var isMidBuffering  by remember { mutableStateOf(false) }
     var cachePercent    by remember { mutableIntStateOf(100) }
@@ -183,27 +167,17 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var downloadSpeed   by remember { mutableStateOf("0 KB/s") }
     var seeds           by remember { mutableIntStateOf(0) }
     var torrentProgress by remember { mutableIntStateOf(0) }
-
-    // ── Surface ───────────────────────────────────────────────
     var isSurfaceReady  by remember { mutableStateOf(false) }
-    // Keep a holder ref so we can re-attach surface after loadfile
-    var surfaceHolder   by remember { mutableStateOf<SurfaceHolder?>(null) }
     var surfaceW        by remember { mutableIntStateOf(0) }
     var surfaceH        by remember { mutableIntStateOf(0) }
-
-    // ── Controls ─────────────────────────────────────────────
     var isControlsVisible by remember { mutableStateOf(true) }
     var isLocked          by remember { mutableStateOf(false) }
     var showSettingsMenu  by remember { mutableStateOf(false) }
     var activeSettingPage by remember { mutableStateOf("Main") }
     var selectedQuality   by remember { mutableStateOf(GPU_QUALITY_PRESETS[0]) }
-
-    // ── Subtitle ──────────────────────────────────────────────
     var subTracks       by remember { mutableStateOf<List<MpvTrack>>(emptyList()) }
     var isSearchingSub  by remember { mutableStateOf(false) }
     var subSearchMsg    by remember { mutableStateOf("") }
-
-    // ── Gesture ───────────────────────────────────────────────
     var volumeLevel     by remember { mutableFloatStateOf(0.5f) }
     var brightnessLevel by remember { mutableFloatStateOf(0.5f) }
     var gestureIcon     by remember { mutableStateOf<ImageVector?>(null) }
@@ -258,22 +232,16 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         is StreamState.Buffering -> {
                             isPreBuffering  = true
                             torrentProgress = state.progress
-                            // BUG FIX: removed "target 5%" text and "%/5%" display
                             statusMsg       = "Buffering ${state.progress}%"
                             downloadSpeed   = "${state.speed} KB/s"
                             seeds           = state.seeds
                             metadataTimeout = 0
                         }
                         is StreamState.Ready -> {
-                            videoPath      = state.filePath
-                            isPreBuffering = false
-                            statusMsg      = ""
-                            completed      = true
+                            videoPath = state.filePath; isPreBuffering = false; statusMsg = ""; completed = true
                         }
                         is StreamState.Error -> {
-                            statusMsg      = "Error: ${state.message}"
-                            isPreBuffering = false
-                            completed      = true
+                            statusMsg = "Error: ${state.message}"; isPreBuffering = false; completed = true
                         }
                     }
                 }
@@ -281,14 +249,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 retryCount++
                 delay(2000)
             } else {
-                videoPath      = decodedUrl
-                isPreBuffering = false
-                statusMsg      = ""
-                break
+                videoPath = decodedUrl; isPreBuffering = false; statusMsg = ""; break
             }
         }
-        if (retryCount == maxRetries)
-            statusMsg = "Failed after $maxRetries retries. Check connection."
+        if (retryCount == maxRetries) statusMsg = "Failed after $maxRetries retries."
     }
 
     // ── Start playback when BOTH path AND surface are ready ───
@@ -301,37 +265,56 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             Log.e("MPV", "playMpvVideo failed: ${e.message}"); return@LaunchedEffect
         }
 
-        // ── Surface re-attach after loadfile ─────────────────────────
+        // ─────────────────────────────────────────────────────────────
+        //  BLACK SCREEN ROOT CAUSE (DEFINITIVE):
         //
-        //  BLACK SCREEN ROOT CAUSE:
-        //   After loadfile, MPV internally tears down and re-creates its
-        //   VO (Video Output).  During this reset, android-surface-size
-        //   is cleared and the VO waits for a new size notification before
-        //   rendering any frame.  If we never re-send the size, the VO
-        //   stays in limbo: demuxer runs, audio plays, timer advances,
-        //   but the screen stays black indefinitely.
+        //  The previous code called setMpvSurface() again after a 300ms
+        //  delay "as a belt-and-suspenders fix". This was the actual cause
+        //  of the black screen, not a fix for it.
         //
-        //   The C++ event thread in mpv_handler.cpp handles this via
-        //   MPV_EVENT_VIDEO_RECONFIG.  But we also do it here from Kotlin
-        //   as a belt-and-suspenders fix: wait 300ms for MPV to finish its
-        //   internal VO setup, then re-send the surface + size.
-        delay(300)
-        val holder = surfaceHolder
-        if (holder != null && holder.surface.isValid) {
-            try { StreamXCore.setMpvSurface(holder.surface) } catch (e: Exception) { }
-        }
+        //  Here is why:
+        //
+        //  1. loadfile → MPV's VO initialises with the wid already set
+        //     → VIDEO_RECONFIG fires (video parameters now known)
+        //
+        //  2. C++ event thread (now REMOVED) caught VIDEO_RECONFIG and
+        //     called mpv_set_property("wid", ...) again.
+        //     OR Kotlin called setMpvSurface() again after delay(300).
+        //
+        //  3. Re-setting wid causes MPV to TEAR DOWN and RE-CREATE the
+        //     entire VO (Video Output) → another VIDEO_RECONFIG fires.
+        //
+        //  4. Back to step 2 — INFINITE LOOP.
+        //     The VO is constantly being destroyed and rebuilt.
+        //     No frame is EVER rendered → permanent black screen.
+        //     Audio is unaffected (separate decoder thread).
+        //
+        //  FIX:
+        //  • Remove the C++ event thread entirely (done in mpv_handler.cpp)
+        //  • Do NOT call setMpvSurface() after loadfile
+        //  • Set wid ONCE (in surfaceCreated) — MPV keeps it stable
+        //  • After loadfile, only re-send android-surface-size (SAFE — does
+        //    not tear down the VO, just updates the render dimensions)
+        // ─────────────────────────────────────────────────────────────
+
+        // Wait for MPV's VO to finish its initial VIDEO_RECONFIG
+        delay(500)
+
+        // Re-send ONLY the surface dimensions — this is safe and does NOT
+        // trigger another VO teardown/recreate cycle.
         if (surfaceW > 0 && surfaceH > 0) {
             try { StreamXCore.setMpvSurfaceSize(surfaceW, surfaceH) } catch (e: Exception) { }
         }
 
-        // Duration confirmation loop
+        // Poll for duration confirmation
         repeat(20) {
             delay(1000)
             val dur = try { StreamXCore.getMpvDuration() } catch (e: Exception) { 0.0 }
-            if (dur > 0) { Log.d("MPV", "Duration: $dur s"); return@LaunchedEffect }
+            if (dur > 0) { Log.d("MPV", "Duration confirmed: $dur s"); return@LaunchedEffect }
         }
-        // Still 0 after 20s → reload
-        Log.w("MPV", "Duration 0 after 20s → reloading")
+
+        // Still 0 after 20 s → reload (last resort, not a loop)
+        Log.w("MPV", "Duration 0 after 20s — final reload attempt")
         try { StreamXCore.playMpvVideo(path) } catch (e: Exception) { }
     }
 
@@ -361,9 +344,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 
     // ── Auto-hide controls ────────────────────────────────────
     LaunchedEffect(isControlsVisible, showSettingsMenu) {
-        if (isControlsVisible && !showSettingsMenu) {
-            delay(4000); isControlsVisible = false
-        }
+        if (isControlsVisible && !showSettingsMenu) { delay(4000); isControlsVisible = false }
     }
 
     // ─────────────────────────────────────────────────────────
@@ -375,19 +356,18 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 SurfaceView(ctx).apply {
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(h: SurfaceHolder) {
-                            surfaceHolder = h
+                            // Set wid ONCE here. Do NOT call this again after loadfile —
+                            // calling setMpvSurface again causes an infinite VIDEO_RECONFIG loop.
                             try { StreamXCore.setMpvSurface(h.surface) } catch (e: Exception) { }
                             isSurfaceReady = true
-                            Log.d("MPV", "surfaceCreated")
+                            Log.d("MPV", "surfaceCreated → wid set once")
                         }
                         override fun surfaceChanged(h: SurfaceHolder, fmt: Int, w: Int, height: Int) {
-                            surfaceHolder = h
                             surfaceW = w; surfaceH = height
                             try { StreamXCore.setMpvSurfaceSize(w, height) } catch (e: Exception) { }
                         }
                         override fun surfaceDestroyed(h: SurfaceHolder) {
                             isSurfaceReady = false
-                            surfaceHolder  = null
                             try { StreamXCore.setMpvSurface(null) } catch (e: Exception) { }
                         }
                     })
@@ -400,7 +380,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         var lastUpdateTime  by remember { mutableLongStateOf(0L) }
         var dragAccumulator by remember { mutableFloatStateOf(0f) }
 
-        // Gesture layer
         Box(Modifier.fillMaxSize()
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -411,8 +390,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                     onDoubleTap = { offset ->
                         if (isLocked || showSettingsMenu) return@detectTapGestures
                         val fwd = offset.x > size.width / 2
-                        val delta = if (fwd) 10.0 else -10.0
-                        val target = (currentTime + delta).coerceIn(0.0, totalDuration)
+                        val target = (currentTime + if (fwd) 10.0 else -10.0).coerceIn(0.0, totalDuration)
                         try { StreamXCore.seekMpvVideo(target - currentTime) } catch (e: Exception) { }
                         if (fwd) { forwardAnimAlpha = 1f; scope.launch { delay(500); forwardAnimAlpha = 0f } }
                         else     { rewindAnimAlpha  = 1f; scope.launch { delay(500); rewindAnimAlpha  = 0f } }
@@ -465,7 +443,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         if (rewindAnimAlpha > 0)  { Box(Modifier.align(Alignment.CenterStart).padding(50.dp).alpha(rewindAnimAlpha).background(Color.Black.copy(0.5f), CircleShape).padding(16.dp)) { Icon(Icons.Rounded.FastRewind,  null, tint = Color.White, modifier = Modifier.size(40.dp)) } }
         if (forwardAnimAlpha > 0) { Box(Modifier.align(Alignment.CenterEnd).padding(50.dp).alpha(forwardAnimAlpha).background(Color.Black.copy(0.5f), CircleShape).padding(16.dp)) { Icon(Icons.Rounded.FastForward, null, tint = Color.White, modifier = Modifier.size(40.dp)) } }
 
-        // ── Pre-buffer overlay ────────────────────────────────
+        // Pre-buffer overlay
         if (isPreBuffering && videoPath == null) {
             Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
@@ -477,11 +455,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         LinearProgressIndicator(
                             progress = { torrentProgress / 100f },
                             modifier = Modifier.fillMaxWidth(0.7f).height(4.dp),
-                            color = Color.Cyan,
-                            trackColor = Color.White.copy(0.2f)
+                            color = Color.Cyan, trackColor = Color.White.copy(0.2f)
                         )
                         Spacer(Modifier.height(8.dp))
-                        // BUG FIX: removed "target 5%" and "%/5%" labels
                         Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                             Text("▼ $downloadSpeed", color = Color.Green, fontSize = 13.sp)
                             Text("S: $seeds", color = Color.LightGray, fontSize = 13.sp)
@@ -494,7 +470,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
 
-        // ── Mid-play buffering overlay ────────────────────────
+        // Mid-play buffering overlay
         if (isMidBuffering && videoPath != null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Box(Modifier.background(Color.Black.copy(0.75f), RoundedCornerShape(16.dp)).padding(horizontal = 32.dp, vertical = 20.dp)) {
@@ -508,7 +484,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             }
         }
 
-        // ── Player controls ───────────────────────────────────
+        // Player controls
         if (!isPreBuffering || videoPath != null) {
             AnimatedVisibility(visible = isControlsVisible && !showSettingsMenu, enter = fadeIn(), exit = fadeOut()) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(0.4f))) {
@@ -561,8 +537,8 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             Slider(
                                 value = currentTime.toFloat(),
                                 onValueChange = { v ->
-                                    val clamped = v.coerceIn(0f, totalDuration.toFloat())
-                                    try { StreamXCore.seekMpvVideo(clamped.toDouble() - currentTime) } catch (e: Exception) { }
+                                    val c = v.coerceIn(0f, totalDuration.toFloat())
+                                    try { StreamXCore.seekMpvVideo(c.toDouble() - currentTime) } catch (e: Exception) { }
                                 },
                                 valueRange = 0f..max(1f, totalDuration.toFloat()),
                                 colors = SliderDefaults.colors(thumbColor = Color.Cyan, activeTrackColor = Color.Cyan)
@@ -572,7 +548,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 }
             }
 
-            // ── Settings panel ────────────────────────────────
+            // Settings panel
             AnimatedVisibility(
                 visible = showSettingsMenu,
                 enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
@@ -590,37 +566,19 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             }
                             Text(
                                 when (activeSettingPage) {
-                                    "Quality"   -> "Video Quality"
-                                    "Subtitles" -> "Subtitles"
-                                    "Audio"     -> "Audio Tracks"
-                                    else        -> "Settings"
+                                    "Quality" -> "Video Quality"; "Subtitles" -> "Subtitles"
+                                    "Audio"   -> "Audio Tracks";  else        -> "Settings"
                                 },
                                 color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold
                             )
                         }
 
-                        // Main settings
                         if (activeSettingPage == "Main") {
-                            SettingsItem(Icons.Rounded.HighQuality,  "Video Quality", selectedQuality.label)    { activeSettingPage = "Quality" }
-                            SettingsItem(Icons.Rounded.Subtitles,    "Subtitles",     "Tracks & Download")      {
-                                subTracks = StreamXCore.getTrackList("sub")
-                                activeSettingPage = "Subtitles"
-                            }
-                            // ── CRASH FIX ──────────────────────────────────────────────────
-                            // Audio track click used to call getTrackList() which called
-                            // getPropertyStringNative() in a loop from the UI click handler.
-                            // Concurrent MPV calls from the time-sync coroutine caused a
-                            // data race → Scudo "corrupted chunk header" crash.
-                            //
-                            // FIX: getTrackList() now calls getTrackListNative() — a single
-                            // JNI call that does ALL MPV property reads under ONE C++ mutex.
-                            // No loop, no race, no crash.
-                            SettingsItem(Icons.Rounded.LibraryMusic, "Audio Track",   "Internal tracks")        {
-                                activeSettingPage = "Audio"
-                            }
+                            SettingsItem(Icons.Rounded.HighQuality,  "Video Quality", selectedQuality.label) { activeSettingPage = "Quality" }
+                            SettingsItem(Icons.Rounded.Subtitles,    "Subtitles",     "Tracks & Download")   { subTracks = StreamXCore.getTrackList("sub"); activeSettingPage = "Subtitles" }
+                            SettingsItem(Icons.Rounded.LibraryMusic, "Audio Track",   "Internal tracks")      { activeSettingPage = "Audio" }
                         }
 
-                        // Quality page
                         else if (activeSettingPage == "Quality") {
                             Text("GPU Render Quality", color = Color.Gray, fontSize = 11.sp, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 8.dp))
                             LazyColumn {
@@ -634,7 +592,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column(Modifier.weight(1f)) {
-                                            Text(preset.label,    color = if (sel) Color.Cyan else Color.White,   fontSize = 15.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
+                                            Text(preset.label,    color = if (sel) Color.Cyan else Color.White, fontSize = 15.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
                                             Text(preset.subtitle, color = Color.Gray, fontSize = 11.sp)
                                         }
                                         if (sel) Icon(Icons.Rounded.Check, null, tint = Color.Cyan, modifier = Modifier.size(20.dp))
@@ -643,14 +601,12 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             }
                         }
 
-                        // Subtitles page
                         else if (activeSettingPage == "Subtitles") {
                             Button(
                                 onClick = {
                                     if (!isSearchingSub) {
                                         isSearchingSub = true; subSearchMsg = "Searching…"
-                                        val title = movieTitle.ifBlank { "Movie" }
-                                        fetchSubtitle(title, context) { msg ->
+                                        fetchSubtitle(movieTitle.ifBlank { "Movie" }, context) { msg ->
                                             isSearchingSub = false; subSearchMsg = msg
                                             subTracks = StreamXCore.getTrackList("sub")
                                         }
@@ -670,7 +626,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 }
                             }
                             if (subSearchMsg.isNotEmpty()) Text(subSearchMsg, color = Color.Cyan, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
-
                             Spacer(Modifier.height(14.dp))
                             HorizontalDivider(color = Color.White.copy(0.1f))
                             Spacer(Modifier.height(10.dp))
@@ -684,20 +639,14 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             }
                         }
 
-                        // Audio tracks page
                         else if (activeSettingPage == "Audio") {
-                            // Load track list here — single safe call under C++ mutex
-                            val audioTracks = remember(activeSettingPage) {
-                                StreamXCore.getTrackList("audio")
-                            }
+                            val audioTracks = remember(activeSettingPage) { StreamXCore.getTrackList("audio") }
                             Text("AUDIO TRACKS", color = Color.Gray, fontSize = 10.sp, letterSpacing = 1.sp)
                             Spacer(Modifier.height(8.dp))
                             if (audioTracks.isEmpty()) {
                                 Text("No audio tracks found", color = Color.Gray, fontSize = 12.sp)
                             } else {
-                                audioTracks.forEach { t ->
-                                    SubTrackRow(t.title, t.selected) { StreamXCore.setAudioTrack(t.id); showSettingsMenu = false }
-                                }
+                                audioTracks.forEach { t -> SubTrackRow(t.title, t.selected) { StreamXCore.setAudioTrack(t.id); showSettingsMenu = false } }
                             }
                         }
                     }
@@ -707,7 +656,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────
 @Composable
 fun SettingsItem(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -723,29 +671,22 @@ fun SettingsItem(icon: ImageVector, title: String, subtitle: String, onClick: ()
 
 @Composable
 private fun SubTrackRow(label: String, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp, horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            if (selected) Icons.Rounded.RadioButtonChecked else Icons.Rounded.RadioButtonUnchecked,
-            null, tint = if (selected) Color.Cyan else Color.Gray, modifier = Modifier.size(18.dp)
-        )
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (selected) Icons.Rounded.RadioButtonChecked else Icons.Rounded.RadioButtonUnchecked,
+            null, tint = if (selected) Color.Cyan else Color.Gray, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(12.dp))
         Text(label, color = if (selected) Color.Cyan else Color.White, fontSize = 14.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
     }
 }
 
-// ─────────────────────────────────────────────────────────────
 private fun fetchSubtitle(title: String, context: Context, onComplete: (String) -> Unit) {
     CoroutineScope(Dispatchers.IO).launch {
         try {
             val encoded = title.trim().replace(" ", "%20")
-            val urlStr  = "https://rest.opensubtitles.org/search/query-$encoded/sublanguageid-eng"
-            val conn    = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+            val conn = (URL("https://rest.opensubtitles.org/search/query-$encoded/sublanguageid-eng").openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                setRequestProperty("User-Agent",   "TemporaryUserAgent")
+                setRequestProperty("User-Agent", "TemporaryUserAgent")
                 setRequestProperty("X-User-Agent", "TemporaryUserAgent")
                 connectTimeout = 10_000; readTimeout = 10_000
             }
@@ -754,13 +695,9 @@ private fun fetchSubtitle(title: String, context: Context, onComplete: (String) 
                 var bestUrl = ""; var bestCount = -1
                 for (i in 0 until arr.length()) {
                     val obj = arr.getJSONObject(i)
-                    val lang = obj.optString("SubLanguageID", "")
-                    val fmt  = obj.optString("SubFormat", "")
-                    val dl   = obj.optInt("SubDownloadsCnt", 0)
-                    val url  = obj.optString("SubDownloadLink", "")
-                    if (lang == "eng" && fmt.equals("srt", ignoreCase = true) && dl > bestCount && url.isNotEmpty()) {
-                        bestCount = dl; bestUrl = url
-                    }
+                    val lang = obj.optString("SubLanguageID", ""); val fmt = obj.optString("SubFormat", "")
+                    val dl = obj.optInt("SubDownloadsCnt", 0);     val url = obj.optString("SubDownloadLink", "")
+                    if (lang == "eng" && fmt.equals("srt", ignoreCase = true) && dl > bestCount && url.isNotEmpty()) { bestCount = dl; bestUrl = url }
                 }
                 if (bestUrl.isEmpty() && arr.length() > 0) bestUrl = arr.getJSONObject(0).optString("SubDownloadLink", "")
                 withContext(Dispatchers.Main) {
@@ -768,9 +705,7 @@ private fun fetchSubtitle(title: String, context: Context, onComplete: (String) 
                     else onComplete("No subtitle found for \"$title\"")
                 }
             } else withContext(Dispatchers.Main) { onComplete("Server error: ${conn.responseCode}") }
-        } catch (e: Exception) {
-            withContext(Dispatchers.Main) { onComplete("Error: ${e.message?.take(50)}") }
-        }
+        } catch (e: Exception) { withContext(Dispatchers.Main) { onComplete("Error: ${e.message?.take(50)}") } }
     }
 }
 
