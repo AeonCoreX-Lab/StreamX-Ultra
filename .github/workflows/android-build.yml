@@ -29,7 +29,6 @@ jobs:
       - name: Set NDK Env
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
 
-      # --- FIX: INSTALL RUST & CARGO-NDK ---
       - name: Install Rust and Cargo-NDK
         run: |
           rustup target add aarch64-linux-android
@@ -44,7 +43,6 @@ jobs:
           sudo apt-get install -y python3-pip python3-setuptools
           python3 -m pip install --upgrade pip
           pip3 install meson ninja
-
 
       # Cache for C++ builds
       - name: Restore vcpkg artifacts
@@ -81,48 +79,75 @@ jobs:
           export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/29.0.14206865
           export PATH=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
           chmod +x *.sh
-          
+
           git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "git://git.ffmpeg.org/ffmpeg.git"
           git config --global url."https://".insteadOf git://
-          
+
           echo "📥 Downloading sources..."
           ./download.sh
-          
+
           for arch in arm64 armv7l x86 x86_64; do
             echo "----------------------------------------"
             echo "🚀 Building mpv for: $arch"
             echo "----------------------------------------"
-            
+
             ./buildall.sh --arch $arch
-            
+
             if [ "$arch" = "arm64" ]; then ABI="arm64-v8a";
             elif [ "$arch" = "armv7l" ]; then ABI="armeabi-v7a";
             else ABI="$arch"; fi
-            
+
             TARGET_DIR="../../app/src/main/jniLibs/$ABI"
             mkdir -p "$TARGET_DIR"
-            
+
             echo "🔍 Extracting libmpv.so for $ABI..."
             find ${{ github.workspace }} -type f -name "libmpv.so" | grep "$arch" | head -n 1 | xargs -I {} cp {} "$TARGET_DIR/" || true
-            
-            echo "📦 Extracting FFmpeg dependencies for $ABI..."
+
+            echo "📦 Extracting FFmpeg .so files for $ABI..."
             find ${{ github.workspace }} -type f -name "*.so" | grep -E "(libavcodec|libavdevice|libavfilter|libavformat|libavutil|libswresample|libswscale)" | grep "$arch" | while read -r libfile; do
               cp "$libfile" "$TARGET_DIR/" || true
             done
           done
-          
-          # ✅ C++ Header files copy (Directly from official repo)
-          echo "📂 Downloading header files..."
-          # Prothome directory toiri korun
+
+          # ── MPV C++ header files (official repo) ──────────────────────
+          echo "📂 Downloading mpv header files..."
           mkdir -p ${{ github.workspace }}/app/src/main/cpp/include/mpv
-          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/client.h -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/client.h
-          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render.h -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/render.h
+          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/client.h    -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/client.h
+          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render.h    -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/render.h
           curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render_gl.h -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/render_gl.h
           curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/stream_cb.h -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/stream_cb.h
 
+          # ── FFmpeg C++ header files ────────────────────────────────────
+          # FIX: mpv_handler.cpp uses <libavcodec/jni.h> which lives inside
+          # FFmpeg's include tree.  The mpv-android buildscripts install
+          # headers to  buildscripts/prefix/<arch>/include/.  We copy them
+          # once (arm64 prefix has identical public headers for all arches).
+          echo "📂 Copying FFmpeg header files..."
+          FFMPEG_INCLUDE_BASE=$(find ${{ github.workspace }}/mpv-android/buildscripts/prefix \
+            -maxdepth 2 -type d -name "include" | head -n 1)
 
+          if [ -z "$FFMPEG_INCLUDE_BASE" ]; then
+            echo "⚠️  Normal path not found — trying recursive search..."
+            FFMPEG_INCLUDE_BASE=$(find ${{ github.workspace }}/mpv-android \
+              -path "*/include/libavcodec" -type d | head -n 1 | sed 's|/libavcodec||')
+          fi
 
+          if [ -n "$FFMPEG_INCLUDE_BASE" ]; then
+            echo "✅ FFmpeg include base: $FFMPEG_INCLUDE_BASE"
+            for lib in libavcodec libavdevice libavfilter libavformat libavutil libswresample libswscale; do
+              if [ -d "$FFMPEG_INCLUDE_BASE/$lib" ]; then
+                cp -r "$FFMPEG_INCLUDE_BASE/$lib" ${{ github.workspace }}/app/src/main/cpp/include/
+                echo "  ✅ Copied $lib"
+              fi
+            done
+          else
+            echo "❌ ERROR: FFmpeg headers not found. Cannot compile mpv_handler.cpp."
+            exit 1
+          fi
 
+          echo ""
+          echo "📋 include/ directory:"
+          ls -la ${{ github.workspace }}/app/src/main/cpp/include/
 
       - name: Create google-services.json
         env:

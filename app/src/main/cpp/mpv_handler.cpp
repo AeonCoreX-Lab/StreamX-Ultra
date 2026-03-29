@@ -7,6 +7,11 @@
 #include <sstream>
 #include <inttypes.h>
 
+// FIX: libavcodec/jni.h is part of FFmpeg and is needed so we can call
+// av_jni_set_java_vm() and av_jni_set_android_app_ctx().
+// These headers are now copied from the mpv-android build output into
+// app/src/main/cpp/include/ by the GitHub Actions workflow, so the
+// include path is always available at compile time.
 extern "C" {
     #include <libavcodec/jni.h>
 }
