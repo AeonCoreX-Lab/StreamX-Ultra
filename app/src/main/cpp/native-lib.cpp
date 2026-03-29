@@ -1,11 +1,11 @@
 #include <jni.h>
 #include <android/log.h>
-#include <android/native_window_jni.h>
 #include <string>
 #include "torrent_system.hpp"
 #include "mpv_handler.hpp"
 
 #define TAG "StreamX_Native"
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 extern "C" {
     __attribute__((weak))
@@ -17,13 +17,18 @@ extern "C" {
 
 static TorrentSystem* torrentEngine = nullptr;
 
+// ── Surface GlobalRef management ─────────────────────────────
+// The GlobalRef keeps the Java Surface object alive so MPV can
+// use it as a wid.  We own it until the next setMpvSurface call.
+static jobject g_surface_ref = nullptr;
+
 // ════════════════════════════════════════════════════════════
 //  MPV JNI BRIDGES
 // ════════════════════════════════════════════════════════════
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initMpvEngine(JNIEnv*, jclass) {
-    init_mpv_engine();
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_initMpvEngine(JNIEnv* env, jclass, jobject appctx) {
+    init_mpv_engine(env, appctx);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -33,12 +38,33 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_playMpvVideo(JNIEnv* env, jclass
     env->ReleaseStringUTFChars(path, fp);
 }
 
-// CRITICAL: ANativeWindow ownership transferred to set_mpv_surface() — do NOT release here
+// ─────────────────────────────────────────────────────────────
+//  setMpvSurface — THE CORRECT IMPLEMENTATION
+//
+//  From mpv-android/render.cpp:
+//      surface = env->NewGlobalRef(surface_);       // make GlobalRef
+//      int64_t wid = reinterpret_cast<intptr_t>(surface); // cast to int64
+//      mpv_set_option(g_mpv, "wid", MPV_FORMAT_INT64, &wid);
+//
+//  We must NOT use ANativeWindow_fromSurface here.
+//  MPV extracts the ANativeWindow itself using av_jni_set_java_vm.
+// ─────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setMpvSurface(JNIEnv* env, jclass, jobject surface) {
-    ANativeWindow* w = nullptr;
-    if (surface != nullptr) w = ANativeWindow_fromSurface(env, surface);
-    set_mpv_surface(w);
+    // Delete previous GlobalRef
+    if (g_surface_ref) {
+        env->DeleteGlobalRef(g_surface_ref);
+        g_surface_ref = nullptr;
+    }
+
+    if (surface != nullptr) {
+        g_surface_ref = env->NewGlobalRef(surface);
+        int64_t wid = reinterpret_cast<intptr_t>(g_surface_ref);
+        set_mpv_wid(wid);
+    } else {
+        // surface destroyed — detach VO
+        set_mpv_wid(0);
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -52,24 +78,16 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_toggleVulkanFSR(JNIEnv*, jclass,
 }
 
 extern "C" JNIEXPORT jdouble JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvTime(JNIEnv*, jclass) {
-    return get_mpv_time();
-}
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvTime(JNIEnv*, jclass) { return get_mpv_time(); }
 
 extern "C" JNIEXPORT jdouble JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvDuration(JNIEnv*, jclass) {
-    return get_mpv_duration();
-}
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvDuration(JNIEnv*, jclass) { return get_mpv_duration(); }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_seekMpvVideo(JNIEnv*, jclass, jdouble sec) {
-    seek_mpv_video(sec);
-}
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_seekMpvVideo(JNIEnv*, jclass, jdouble sec) { seek_mpv_video(sec); }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pauseMpvVideo(JNIEnv*, jclass, jboolean pause) {
-    pause_mpv_video(pause);
-}
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_pauseMpvVideo(JNIEnv*, jclass, jboolean pause) { pause_mpv_video(pause); }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_commandNative(JNIEnv* env, jclass, jobjectArray arr) {
@@ -89,8 +107,7 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_commandNative(JNIEnv* env, jclas
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setPropertyStringNative(
-        JNIEnv* env, jclass, jstring name, jstring value) {
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setPropertyStringNative(JNIEnv* env, jclass, jstring name, jstring value) {
     const char* n = env->GetStringUTFChars(name,  nullptr);
     const char* v = env->GetStringUTFChars(value, nullptr);
     set_property_string_mpv(n, v);
@@ -98,53 +115,28 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setPropertyStringNative(
     env->ReleaseStringUTFChars(value, v);
 }
 
-// ─────────────────────────────────────────────────────────────
-//  getPropertyStringNative — SAFE version
-//
-//  CRASH WAS HERE:
-//    Old code returned raw char* from mpv_get_property_string and called
-//    free() on it in this file.  MPV uses its own allocator (mpv_free),
-//    NOT libc free().  Calling free() on an mpv-allocated pointer →
-//    Scudo "corrupted chunk header / double free" → crash.
-//
-//  FIX: get_property_string_mpv_safe() copies to std::string and calls
-//  mpv_free internally.  This function only sees std::string — no raw
-//  MPV pointer, no manual free needed.
-// ─────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getPropertyStringNative(JNIEnv* env, jclass, jstring name) {
     const char* n = env->GetStringUTFChars(name, nullptr);
-    std::string val = get_property_string_mpv_safe(n);  // safe: no raw pointer returned
+    std::string val = get_property_string_mpv_safe(n);
     env->ReleaseStringUTFChars(name, n);
     return env->NewStringUTF(val.c_str());
-    // ← NO free() needed. std::string destructs automatically. ✓
 }
 
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getPropertyIntNative(JNIEnv* env, jclass, jstring name) {
     const char* n = env->GetStringUTFChars(name, nullptr);
-    int64_t val   = get_property_int_mpv(n);
+    int64_t val = get_property_int_mpv(n);
     env->ReleaseStringUTFChars(name, n);
     return (jlong)val;
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvCachePercent(JNIEnv*, jclass) {
-    return (jint)get_cache_percent_mpv();
-}
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvCachePercent(JNIEnv*, jclass) { return (jint)get_cache_percent_mpv(); }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_aeoncorex_streamx_ui_movie_StreamXCore_isMpvPausedForCache(JNIEnv*, jclass) {
-    return (jboolean)(is_paused_for_cache_mpv() != 0);
-}
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_isMpvPausedForCache(JNIEnv*, jclass) { return (jboolean)(is_paused_for_cache_mpv() != 0); }
 
-// ─────────────────────────────────────────────────────────────
-//  getTrackListNative — single-call track list (no JNI loop)
-//
-//  Returns pipe-separated track data: "id|title|selected;id|title|..."
-//  All MPV property reads happen inside one C++ function under one
-//  mutex lock. Kotlin parses the string — no loop JNI calls, no crash.
-// ─────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getTrackListNative(JNIEnv* env, jclass, jstring type) {
     const char* t = env->GetStringUTFChars(type, nullptr);

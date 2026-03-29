@@ -1,14 +1,14 @@
 #ifndef MPV_HANDLER_HPP
 #define MPV_HANDLER_HPP
 
-#include <android/native_window_jni.h>
+#include <jni.h>
 #include <stdint.h>
 #include <string>
 
-void        init_mpv_engine();
+void        init_mpv_engine(JNIEnv* env, jobject appctx);
+void        set_mpv_wid(int64_t wid);         // wid = (int64_t)GlobalRef(Java Surface)
+void        set_mpv_surface_size(int w, int h);
 void        play_mpv_video(const char* path);
-void        set_mpv_surface(ANativeWindow* window);   // set ONCE on surfaceCreated
-void        set_mpv_surface_size(int width, int height); // safe to call anytime
 void        toggle_vulkan_fsr(bool enable);
 double      get_mpv_time();
 double      get_mpv_duration();

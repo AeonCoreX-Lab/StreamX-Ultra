@@ -1,78 +1,74 @@
 #include "mpv_handler.hpp"
 #include <mpv/client.h>
 #include <android/log.h>
-#include <android/native_window.h>
 #include <locale.h>
 #include <string>
 #include <mutex>
 #include <sstream>
 #include <inttypes.h>
 
+extern "C" {
+    #include <libavcodec/jni.h>
+}
+
 #define TAG "StreamX_MPV"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-// ─────────────────────────────────────────────────────────────
-//  Module state
-// ─────────────────────────────────────────────────────────────
-static mpv_handle*    mpv_ctx          = nullptr;
-static ANativeWindow* s_current_window = nullptr;
-static int            s_surface_w      = 0;
-static int            s_surface_h      = 0;
-static std::mutex     mpv_mutex;
+static mpv_handle* mpv_ctx     = nullptr;
+static int         s_surface_w = 0;
+static int         s_surface_h = 0;
+static std::mutex  mpv_mutex;
 
-// ─────────────────────────────────────────────────────────────
-//  WHY THE EVENT THREAD WAS REMOVED:
+// ═══════════════════════════════════════════════════════════════
+//  ROOT CAUSE OF ALL BLACK SCREEN ISSUES — CONFIRMED FROM SOURCE
 //
-//  The previous version had an event_loop thread that listened for
-//  MPV_EVENT_VIDEO_RECONFIG and responded by calling:
-//      mpv_set_property(mpv_ctx, "wid", ...)
+//  From mpv-android/render.cpp (official repo):
 //
-//  THIS CAUSED AN INFINITE LOOP:
+//      surface = env->NewGlobalRef(surface_);          // Java Surface → GlobalRef
+//      int64_t wid = reinterpret_cast<intptr_t>(surface); // GlobalRef cast to int64
+//      mpv_set_option(g_mpv, "wid", MPV_FORMAT_INT64, &wid);
 //
-//  1. loadfile → MPV creates VO → VIDEO_RECONFIG fires
-//  2. event_loop catches VIDEO_RECONFIG → re-sets wid
-//  3. Re-setting wid → MPV recreates VO → VIDEO_RECONFIG fires again
-//  4. event_loop catches VIDEO_RECONFIG → re-sets wid
-//  5. ... infinite loop ...
+//  wid must be a Java Surface jobject (as a GlobalRef) cast to int64_t.
+//  MPV's Android GPU VO uses av_jni_set_java_vm() to get the JVM,
+//  then internally calls ANativeWindow_fromSurface(env, jobject).
 //
-//  During this loop the VO was constantly being torn down and rebuilt,
-//  so NO frame was EVER rendered → perpetual black screen.
-//  Audio continued because it has its own independent decoder thread.
+//  ALL our previous code was passing ANativeWindow* as wid.
+//  MPV treated that as a jobject, called JNI methods on a C pointer
+//  → garbage → no video output → permanent black screen.
+//  Audio was unaffected because it uses a completely separate path.
 //
-//  FIX: Remove the event thread entirely.
-//  Set wid ONCE when the surface is created (before loadfile).
-//  After loadfile, only re-send android-surface-size (safe — does NOT
-//  trigger a full VO teardown/recreate cycle).
-//  The Kotlin side handles the one-time surface setup correctly.
-// ─────────────────────────────────────────────────────────────
+//  FIX:
+//  1. av_jni_set_java_vm() during init (mpv-android/main.cpp pattern)
+//  2. wid = (int64_t)env->NewGlobalRef(javaSurface)
+//  3. No ANativeWindow_fromSurface anywhere in our code
+// ═══════════════════════════════════════════════════════════════
 
-void init_mpv_engine() {
+void init_mpv_engine(JNIEnv* env, jobject appctx) {
     std::lock_guard<std::mutex> lk(mpv_mutex);
     setlocale(LC_NUMERIC, "C");
     if (mpv_ctx) return;
 
+    // ── Give MPV's FFmpeg layer the JavaVM ────────────────────
+    // Required so MPV can call ANativeWindow_fromSurface internally.
+    JavaVM* vm = nullptr;
+    if (env->GetJavaVM(&vm) == 0 && vm) {
+        av_jni_set_java_vm(vm, nullptr);
+        if (appctx) {
+            jobject global_appctx = env->NewGlobalRef(appctx);
+            if (global_appctx) av_jni_set_android_app_ctx(global_appctx, nullptr);
+        }
+    }
+
     mpv_ctx = mpv_create();
     if (!mpv_ctx) { LOGE("mpv_create() failed"); return; }
 
-    // ── Video output ──────────────────────────────────────────
-    // vo=gpu: the older but Android-proven VO that works reliably
-    // with wid=ANativeWindow*.  vo=gpu-next (libplacebo) had
-    // different VIDEO_RECONFIG behaviour that triggered the loop.
     mpv_set_option_string(mpv_ctx, "vo",        "gpu");
     mpv_set_option_string(mpv_ctx, "gpu-api",   "opengl");
     mpv_set_option_string(mpv_ctx, "opengl-es", "yes");
-
-    // hwdec=no: pure FFmpeg software decode.
-    // On Redmi/MIUI, mediacodec-copy returns silent black frames
-    // when the bitstream has any gap (sparse torrent file regions).
-    // Software decode always produces visible frames.
     mpv_set_option_string(mpv_ctx, "hwdec",     "no");
+    mpv_set_option_string(mpv_ctx, "ao",        "audiotrack,opensles");
 
-    // ── Audio ─────────────────────────────────────────────────
-    mpv_set_option_string(mpv_ctx, "ao", "audiotrack,opensles");
-
-    // ── Streaming / torrent cache ─────────────────────────────
     mpv_set_option_string(mpv_ctx, "cache",                  "yes");
     mpv_set_option_string(mpv_ctx, "cache-pause",            "yes");
     mpv_set_option_string(mpv_ctx, "cache-pause-initial",    "no");
@@ -82,71 +78,33 @@ void init_mpv_engine() {
     mpv_set_option_string(mpv_ctx, "demuxer-max-back-bytes", "256MiB");
     mpv_set_option_string(mpv_ctx, "stream-buffer-size",     "8MiB");
 
-    // ── Subtitles ─────────────────────────────────────────────
     mpv_set_option_string(mpv_ctx, "sub-auto",         "fuzzy");
     mpv_set_option_string(mpv_ctx, "sub-ass-override", "force");
     mpv_set_option_string(mpv_ctx, "sub-font-size",    "45");
 
-    // ── Playback ──────────────────────────────────────────────
     mpv_set_option_string(mpv_ctx, "keep-open",      "yes");
     mpv_set_option_string(mpv_ctx, "idle",           "yes");
     mpv_set_option_string(mpv_ctx, "force-seekable", "yes");
 
     if (mpv_initialize(mpv_ctx) < 0) {
         LOGE("mpv_initialize() failed");
-        mpv_destroy(mpv_ctx);
-        mpv_ctx = nullptr;
-        return;
+        mpv_destroy(mpv_ctx); mpv_ctx = nullptr; return;
     }
-
-    // No event thread — see comment at top of file.
-    LOGD("MPV initialised (vo=gpu / opengl-es / software-decode)");
+    LOGD("MPV initialised — vo=gpu/opengl-es/hwdec=no, JavaVM registered");
 }
 
-// ─────────────────────────────────────────────────────────────
-void play_mpv_video(const char* path) {
+void set_mpv_wid(int64_t wid) {
     std::lock_guard<std::mutex> lk(mpv_mutex);
-    if (!mpv_ctx) { LOGE("play_mpv_video: null ctx"); return; }
-    LOGD("loadfile: %s", path);
-    const char* cmd[] = {"loadfile", path, nullptr};
-    int r = mpv_command(mpv_ctx, cmd);
-    if (r < 0) LOGE("loadfile failed: %s", mpv_error_string(r));
-}
-
-// ─────────────────────────────────────────────────────────────
-//  set_mpv_surface — called ONCE when the surface is created,
-//  and again with nullptr when the surface is destroyed.
-//
-//  Ownership of the ANativeWindow is transferred here.
-//  Caller must NOT call ANativeWindow_release() after this.
-// ─────────────────────────────────────────────────────────────
-void set_mpv_surface(ANativeWindow* new_window) {
-    std::lock_guard<std::mutex> lk(mpv_mutex);
-    if (!mpv_ctx) return;   // init_mpv_engine() must be called first
-
-    if (s_current_window) {
-        ANativeWindow_release(s_current_window);
-        s_current_window = nullptr;
-    }
-    s_current_window = new_window;  // take ownership
-
-    int64_t wid = (int64_t)new_window;
-    int r = mpv_set_property(mpv_ctx, "wid", MPV_FORMAT_INT64, &wid);
-    if (r < 0) LOGE("wid set failed: %s", mpv_error_string(r));
+    if (!mpv_ctx) return;
+    // mpv_set_option works for wid even after mpv_initialize (mpv-android pattern)
+    int r = mpv_set_option(mpv_ctx, "wid", MPV_FORMAT_INT64, &wid);
+    if (r < 0) LOGE("set wid failed: %s", mpv_error_string(r));
     else LOGD("wid=%" PRId64, wid);
 }
 
-// ─────────────────────────────────────────────────────────────
-//  set_mpv_surface_size — called from surfaceChanged and once
-//  after loadfile to ensure the VO has the correct dimensions.
-//
-//  SAFE to call multiple times — does NOT trigger VO teardown/
-//  recreate (unlike re-setting wid, which does).
-// ─────────────────────────────────────────────────────────────
 void set_mpv_surface_size(int w, int h) {
     std::lock_guard<std::mutex> lk(mpv_mutex);
-    s_surface_w = w;
-    s_surface_h = h;
+    s_surface_w = w; s_surface_h = h;
     if (!mpv_ctx || w <= 0 || h <= 0) return;
     char buf[32];
     snprintf(buf, sizeof(buf), "%dx%d", w, h);
@@ -154,7 +112,15 @@ void set_mpv_surface_size(int w, int h) {
     LOGD("android-surface-size: %s", buf);
 }
 
-// ─────────────────────────────────────────────────────────────
+void play_mpv_video(const char* path) {
+    std::lock_guard<std::mutex> lk(mpv_mutex);
+    if (!mpv_ctx) { LOGE("play_mpv_video: null ctx"); return; }
+    const char* cmd[] = {"loadfile", path, nullptr};
+    int r = mpv_command(mpv_ctx, cmd);
+    if (r < 0) LOGE("loadfile failed: %s", mpv_error_string(r));
+    else LOGD("loadfile: %s", path);
+}
+
 void toggle_vulkan_fsr(bool enable) {
     std::lock_guard<std::mutex> lk(mpv_mutex);
     if (!mpv_ctx) return;
@@ -165,16 +131,14 @@ void toggle_vulkan_fsr(bool enable) {
 double get_mpv_time() {
     std::lock_guard<std::mutex> lk(mpv_mutex);
     if (!mpv_ctx) return 0.0;
-    double t = 0.0;
-    mpv_get_property(mpv_ctx, "time-pos", MPV_FORMAT_DOUBLE, &t);
+    double t = 0.0; mpv_get_property(mpv_ctx, "time-pos", MPV_FORMAT_DOUBLE, &t);
     return t;
 }
 
 double get_mpv_duration() {
     std::lock_guard<std::mutex> lk(mpv_mutex);
     if (!mpv_ctx) return 0.0;
-    double d = 0.0;
-    mpv_get_property(mpv_ctx, "duration", MPV_FORMAT_DOUBLE, &d);
+    double d = 0.0; mpv_get_property(mpv_ctx, "duration", MPV_FORMAT_DOUBLE, &d);
     return d;
 }
 
@@ -210,8 +174,7 @@ std::string get_property_string_mpv_safe(const char* name) {
     if (!mpv_ctx) return "";
     char* raw = mpv_get_property_string(mpv_ctx, name);
     if (!raw) return "";
-    std::string result(raw);
-    mpv_free(raw);
+    std::string result(raw); mpv_free(raw);
     return result;
 }
 
@@ -235,22 +198,19 @@ int get_cache_percent_mpv() {
 int is_paused_for_cache_mpv() {
     std::lock_guard<std::mutex> lk(mpv_mutex);
     if (!mpv_ctx) return 0;
-    int v = 0;
-    mpv_get_property(mpv_ctx, "paused-for-cache", MPV_FORMAT_FLAG, &v);
+    int v = 0; mpv_get_property(mpv_ctx, "paused-for-cache", MPV_FORMAT_FLAG, &v);
     return v;
 }
 
 std::string get_track_list_mpv(const char* type) {
     std::lock_guard<std::mutex> lk(mpv_mutex);
     if (!mpv_ctx) return "";
-
     int64_t count = 0;
     mpv_get_property(mpv_ctx, "track-list/count", MPV_FORMAT_INT64, &count);
     if (count <= 0) return "";
 
     std::ostringstream out;
     bool first = true;
-
     for (int64_t i = 0; i < count; ++i) {
         std::string key_type = "track-list/" + std::to_string(i) + "/type";
         char* ttype = mpv_get_property_string(mpv_ctx, key_type.c_str());
@@ -259,24 +219,20 @@ std::string get_track_list_mpv(const char* type) {
         mpv_free(ttype);
         if (!match) continue;
 
-        std::string key_id = "track-list/" + std::to_string(i) + "/id";
         int64_t id = 0;
-        mpv_get_property(mpv_ctx, key_id.c_str(), MPV_FORMAT_INT64, &id);
+        mpv_get_property(mpv_ctx, ("track-list/" + std::to_string(i) + "/id").c_str(), MPV_FORMAT_INT64, &id);
 
-        std::string key_title = "track-list/" + std::to_string(i) + "/title";
-        char* title = mpv_get_property_string(mpv_ctx, key_title.c_str());
+        char* title = mpv_get_property_string(mpv_ctx, ("track-list/" + std::to_string(i) + "/title").c_str());
         std::string title_str = title ? title : "";
         if (title) mpv_free(title);
 
         if (title_str.empty()) {
-            std::string key_lang = "track-list/" + std::to_string(i) + "/lang";
-            char* lang = mpv_get_property_string(mpv_ctx, key_lang.c_str());
+            char* lang = mpv_get_property_string(mpv_ctx, ("track-list/" + std::to_string(i) + "/lang").c_str());
             if (lang) { title_str = lang; mpv_free(lang); }
         }
         if (title_str.empty()) title_str = "Track " + std::to_string(id);
 
-        std::string key_sel = "track-list/" + std::to_string(i) + "/selected";
-        char* sel = mpv_get_property_string(mpv_ctx, key_sel.c_str());
+        char* sel = mpv_get_property_string(mpv_ctx, ("track-list/" + std::to_string(i) + "/selected").c_str());
         bool selected = (sel && std::string(sel) == "yes");
         if (sel) mpv_free(sel);
 

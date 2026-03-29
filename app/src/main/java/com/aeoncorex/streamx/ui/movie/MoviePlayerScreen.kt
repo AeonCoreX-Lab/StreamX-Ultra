@@ -65,16 +65,17 @@ object StreamXCore {
         for (lib in libraries) {
             try {
                 System.loadLibrary(lib)
-                Log.d("StreamX_Native", "✅ Loaded: $lib")
+                Log.d("StreamX", "✅ $lib")
             } catch (e: Throwable) {
-                Log.e("StreamX_Native", "❌ Failed: $lib — ${e.message}")
                 throw RuntimeException("Failed to load '$lib': ${e.message}")
             }
         }
     }
 
     @JvmStatic external fun getTmdbKey(): String
-    @JvmStatic external fun initMpvEngine()
+
+    // ── CHANGED: appctx param — needed to register JavaVM with FFmpeg ──
+    @JvmStatic external fun initMpvEngine(appctx: Any?)
     @JvmStatic external fun playMpvVideo(path: String)
     @JvmStatic external fun setMpvSurface(surface: Surface?)
     @JvmStatic external fun setMpvSurfaceSize(width: Int, height: Int)
@@ -102,31 +103,24 @@ object StreamXCore {
         val raw = try { getTrackListNative(type) } catch (e: Exception) { return emptyList() }
         if (raw.isBlank()) return emptyList()
         return raw.split(";").mapNotNull { entry ->
-            val parts = entry.split("|")
-            if (parts.size < 3) null
-            else MpvTrack(
-                id       = parts[0].toIntOrNull() ?: return@mapNotNull null,
-                title    = parts[1].ifBlank { "Track ${parts[0]}" },
-                selected = parts[2] == "1"
-            )
+            val p = entry.split("|")
+            if (p.size < 3) null
+            else MpvTrack(p[0].toIntOrNull() ?: return@mapNotNull null, p[1].ifBlank { "Track ${p[0]}" }, p[2] == "1")
         }
     }
 }
 
 data class MpvTrack(val id: Int, val title: String, val selected: Boolean)
 
-data class QualityPreset(
-    val label: String, val subtitle: String,
-    val vf: String, val scale: String, val cscale: String, val deband: Boolean
-)
+data class QualityPreset(val label: String, val subtitle: String, val vf: String, val scale: String, val cscale: String, val deband: Boolean)
 
 val GPU_QUALITY_PRESETS = listOf(
-    QualityPreset("Auto",       "Balanced (Recommended)", "",            "bilinear",         "bilinear",         false),
-    QualityPreset("Cinematic",  "Best quality, High GPU", "",            "ewa_lanczossharp", "ewa_lanczossharp", true),
-    QualityPreset("High",       "Sharp, Medium GPU",      "",            "spline36",         "spline36",         false),
-    QualityPreset("Medium",     "Smooth, Low GPU",        "",            "bilinear",         "bilinear",         false),
-    QualityPreset("720p Scale", "Force 720p render",      "scale=1280:720","bilinear",       "bilinear",         false),
-    QualityPreset("480p Scale", "Force 480p, Save battery","scale=854:480","bilinear",       "bilinear",         false),
+    QualityPreset("Auto",       "Balanced (Recommended)", "",             "bilinear",         "bilinear",         false),
+    QualityPreset("Cinematic",  "Best quality, High GPU", "",             "ewa_lanczossharp", "ewa_lanczossharp", true),
+    QualityPreset("High",       "Sharp, Medium GPU",      "",             "spline36",         "spline36",         false),
+    QualityPreset("Medium",     "Smooth, Low GPU",        "",             "bilinear",         "bilinear",         false),
+    QualityPreset("720p Scale", "Force 720p render",      "scale=1280:720","bilinear",        "bilinear",         false),
+    QualityPreset("480p Scale", "Force 480p, Save battery","scale=854:480","bilinear",        "bilinear",         false),
 )
 
 fun applyQualityPreset(preset: QualityPreset) {
@@ -135,23 +129,20 @@ fun applyQualityPreset(preset: QualityPreset) {
         StreamXCore.setPropertyStringNative("cscale", preset.cscale)
         StreamXCore.setPropertyStringNative("deband", if (preset.deband) "yes" else "no")
         StreamXCore.setVideoFilter(preset.vf)
-    } catch (e: Exception) { Log.e("MPV", "applyQuality: ${e.message}") }
+    } catch (e: Exception) { Log.e("MPV", "quality: ${e.message}") }
 }
 
 @Composable
 fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     val context  = LocalContext.current
     val activity = context as? Activity
-    val decodedUrl = remember {
-        try { URLDecoder.decode(encodedUrl, "UTF-8") } catch (e: Exception) { encodedUrl }
-    }
+    val decodedUrl = remember { try { URLDecoder.decode(encodedUrl, "UTF-8") } catch (e: Exception) { encodedUrl } }
     val scope = rememberCoroutineScope()
 
     val movieTitle = remember {
         if (decodedUrl.startsWith("magnet:?")) {
-            try {
-                val dn = Uri.parse(decodedUrl).getQueryParameter("dn") ?: ""
-                dn.replace(Regex("\\b(1080p|720p|480p|BluRay|WEB-DL|HDR|x264|x265|\\d{4}).*"), "").trim()
+            try { (Uri.parse(decodedUrl).getQueryParameter("dn") ?: "")
+                .replace(Regex("\\b(1080p|720p|480p|BluRay|WEB-DL|HDR|x264|x265|\\d{4}).*"), "").trim()
             } catch (e: Exception) { "" }
         } else ""
     }
@@ -189,9 +180,13 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVolume    = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
 
-    // ── Init MPV ─────────────────────────────────────────────
+    // ── Init MPV — pass Application context so JavaVM is registered ──
     LaunchedEffect(Unit) {
-        try { StreamXCore.initMpvEngine() } catch (e: Exception) { Log.e("MPV", "Init", e) }
+        try {
+            // Pass appctx so av_jni_set_java_vm() can be called in C++.
+            // This is required for MPV's Android GPU VO to work.
+            StreamXCore.initMpvEngine(context.applicationContext)
+        } catch (e: Exception) { Log.e("MPV", "Init failed", e) }
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         activity?.window?.let { WindowCompat.getInsetsController(it, it.decorView) }
@@ -217,37 +212,25 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 withContext(Dispatchers.IO) { TorrentEngine.clearCache(context) }
                 var metadataTimeout = 0
                 var completed = false
-
                 TorrentEngine.start(context, decodedUrl).collect { state ->
                     when (state) {
                         is StreamState.Preparing -> {
                             statusMsg = state.message
                             if (++metadataTimeout > 240) {
-                                statusMsg = if (retryCount < maxRetries - 1)
-                                    "Timeout – retrying (${retryCount + 1}/$maxRetries)"
-                                else "Timeout – last attempt"
+                                statusMsg = if (retryCount < maxRetries - 1) "Timeout – retrying (${retryCount+1}/$maxRetries)" else "Timeout – last attempt"
                                 TorrentEngine.stop(); completed = true
                             }
                         }
                         is StreamState.Buffering -> {
-                            isPreBuffering  = true
-                            torrentProgress = state.progress
-                            statusMsg       = "Buffering ${state.progress}%"
-                            downloadSpeed   = "${state.speed} KB/s"
-                            seeds           = state.seeds
-                            metadataTimeout = 0
+                            isPreBuffering = true; torrentProgress = state.progress
+                            statusMsg = "Buffering ${state.progress}%"; downloadSpeed = "${state.speed} KB/s"; seeds = state.seeds; metadataTimeout = 0
                         }
-                        is StreamState.Ready -> {
-                            videoPath = state.filePath; isPreBuffering = false; statusMsg = ""; completed = true
-                        }
-                        is StreamState.Error -> {
-                            statusMsg = "Error: ${state.message}"; isPreBuffering = false; completed = true
-                        }
+                        is StreamState.Ready -> { videoPath = state.filePath; isPreBuffering = false; statusMsg = ""; completed = true }
+                        is StreamState.Error -> { statusMsg = "Error: ${state.message}"; isPreBuffering = false; completed = true }
                     }
                 }
                 if (completed) break
-                retryCount++
-                delay(2000)
+                retryCount++; delay(2000)
             } else {
                 videoPath = decodedUrl; isPreBuffering = false; statusMsg = ""; break
             }
@@ -260,94 +243,45 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         val path = videoPath ?: return@LaunchedEffect
         if (!isSurfaceReady) return@LaunchedEffect
 
-        Log.d("MPV", "Surface+Path ready → loadfile: $path")
+        Log.d("MPV", "Surface+Path ready → loadfile")
         try { StreamXCore.playMpvVideo(path) } catch (e: Exception) {
-            Log.e("MPV", "playMpvVideo failed: ${e.message}"); return@LaunchedEffect
+            Log.e("MPV", "playMpvVideo: ${e.message}"); return@LaunchedEffect
         }
 
-        // ─────────────────────────────────────────────────────────────
-        //  BLACK SCREEN ROOT CAUSE (DEFINITIVE):
-        //
-        //  The previous code called setMpvSurface() again after a 300ms
-        //  delay "as a belt-and-suspenders fix". This was the actual cause
-        //  of the black screen, not a fix for it.
-        //
-        //  Here is why:
-        //
-        //  1. loadfile → MPV's VO initialises with the wid already set
-        //     → VIDEO_RECONFIG fires (video parameters now known)
-        //
-        //  2. C++ event thread (now REMOVED) caught VIDEO_RECONFIG and
-        //     called mpv_set_property("wid", ...) again.
-        //     OR Kotlin called setMpvSurface() again after delay(300).
-        //
-        //  3. Re-setting wid causes MPV to TEAR DOWN and RE-CREATE the
-        //     entire VO (Video Output) → another VIDEO_RECONFIG fires.
-        //
-        //  4. Back to step 2 — INFINITE LOOP.
-        //     The VO is constantly being destroyed and rebuilt.
-        //     No frame is EVER rendered → permanent black screen.
-        //     Audio is unaffected (separate decoder thread).
-        //
-        //  FIX:
-        //  • Remove the C++ event thread entirely (done in mpv_handler.cpp)
-        //  • Do NOT call setMpvSurface() after loadfile
-        //  • Set wid ONCE (in surfaceCreated) — MPV keeps it stable
-        //  • After loadfile, only re-send android-surface-size (SAFE — does
-        //    not tear down the VO, just updates the render dimensions)
-        // ─────────────────────────────────────────────────────────────
-
-        // Wait for MPV's VO to finish its initial VIDEO_RECONFIG
-        delay(500)
-
-        // Re-send ONLY the surface dimensions — this is safe and does NOT
-        // trigger another VO teardown/recreate cycle.
+        // Re-send surface size after loadfile (safe — doesn't reset wid or VO)
+        delay(300)
         if (surfaceW > 0 && surfaceH > 0) {
             try { StreamXCore.setMpvSurfaceSize(surfaceW, surfaceH) } catch (e: Exception) { }
         }
 
-        // Poll for duration confirmation
         repeat(20) {
             delay(1000)
             val dur = try { StreamXCore.getMpvDuration() } catch (e: Exception) { 0.0 }
-            if (dur > 0) { Log.d("MPV", "Duration confirmed: $dur s"); return@LaunchedEffect }
+            if (dur > 0) { Log.d("MPV", "Duration: $dur s"); return@LaunchedEffect }
         }
-
-        // Still 0 after 20 s → reload (last resort, not a loop)
-        Log.w("MPV", "Duration 0 after 20s — final reload attempt")
+        Log.w("MPV", "Duration 0 after 20s — final reload")
         try { StreamXCore.playMpvVideo(path) } catch (e: Exception) { }
     }
 
-    // ── Time sync loop ────────────────────────────────────────
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
-            try {
-                currentTime = StreamXCore.getMpvTime()
-                val dur = StreamXCore.getMpvDuration()
-                if (dur > 0) totalDuration = dur
-            } catch (e: Exception) { }
+            try { currentTime = StreamXCore.getMpvTime(); val d = StreamXCore.getMpvDuration(); if (d > 0) totalDuration = d } catch (e: Exception) { }
             delay(1000)
         }
     }
 
-    // ── Mid-play cache monitor ────────────────────────────────
     LaunchedEffect(videoPath) {
         if (videoPath == null) return@LaunchedEffect
         while (true) {
-            try {
-                isMidBuffering = StreamXCore.isMpvPausedForCache()
-                cachePercent   = StreamXCore.getMpvCachePercent()
-            } catch (e: Exception) { }
+            try { isMidBuffering = StreamXCore.isMpvPausedForCache(); cachePercent = StreamXCore.getMpvCachePercent() } catch (e: Exception) { }
             delay(500)
         }
     }
 
-    // ── Auto-hide controls ────────────────────────────────────
     LaunchedEffect(isControlsVisible, showSettingsMenu) {
         if (isControlsVisible && !showSettingsMenu) { delay(4000); isControlsVisible = false }
     }
 
-    // ─────────────────────────────────────────────────────────
     Box(Modifier.fillMaxSize().background(Color.Black)) {
 
         // ── MPV SurfaceView ───────────────────────────────────
@@ -356,11 +290,11 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 SurfaceView(ctx).apply {
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(h: SurfaceHolder) {
-                            // Set wid ONCE here. Do NOT call this again after loadfile —
-                            // calling setMpvSurface again causes an infinite VIDEO_RECONFIG loop.
+                            // Pass Java Surface jobject — native-lib.cpp creates GlobalRef
+                            // and passes (int64_t)GlobalRef as wid. DO NOT use ANativeWindow.
                             try { StreamXCore.setMpvSurface(h.surface) } catch (e: Exception) { }
                             isSurfaceReady = true
-                            Log.d("MPV", "surfaceCreated → wid set once")
+                            Log.d("MPV", "surfaceCreated → wid set (jobject GlobalRef)")
                         }
                         override fun surfaceChanged(h: SurfaceHolder, fmt: Int, w: Int, height: Int) {
                             surfaceW = w; surfaceH = height
@@ -383,10 +317,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         Box(Modifier.fillMaxSize()
             .pointerInput(Unit) {
                 detectTapGestures(
-                    onTap = {
-                        if (showSettingsMenu) showSettingsMenu = false
-                        else isControlsVisible = !isControlsVisible
-                    },
+                    onTap = { if (showSettingsMenu) showSettingsMenu = false else isControlsVisible = !isControlsVisible },
                     onDoubleTap = { offset ->
                         if (isLocked || showSettingsMenu) return@detectTapGestures
                         val fwd = offset.x > size.width / 2
@@ -413,18 +344,12 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 val newV = (audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) + delta).coerceIn(0, maxVolume)
                                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newV, 0)
                                 volumeLevel = newV / maxVolume.toFloat()
-                                gestureIcon = Icons.Rounded.VolumeUp
-                                gestureText = "${(volumeLevel * 100).toInt()}%"
-                                dragAccumulator = 0f
+                                gestureIcon = Icons.Rounded.VolumeUp; gestureText = "${(volumeLevel * 100).toInt()}%"; dragAccumulator = 0f
                             }
                         } else {
                             brightnessLevel = (brightnessLevel - (dragAccumulator / (size.height / 2))).coerceIn(0.01f, 1f)
-                            val lp = activity?.window?.attributes
-                            lp?.screenBrightness = brightnessLevel
-                            activity?.window?.attributes = lp
-                            gestureIcon = Icons.Rounded.BrightnessMedium
-                            gestureText = "${(brightnessLevel * 100).toInt()}%"
-                            dragAccumulator = 0f
+                            val lp = activity?.window?.attributes; lp?.screenBrightness = brightnessLevel; activity?.window?.attributes = lp
+                            gestureIcon = Icons.Rounded.BrightnessMedium; gestureText = "${(brightnessLevel * 100).toInt()}%"; dragAccumulator = 0f
                         }
                     }
                 }
@@ -452,11 +377,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                     Text(statusMsg, color = Color.White, textAlign = TextAlign.Center, fontSize = 14.sp)
                     if (torrentProgress > 0) {
                         Spacer(Modifier.height(12.dp))
-                        LinearProgressIndicator(
-                            progress = { torrentProgress / 100f },
-                            modifier = Modifier.fillMaxWidth(0.7f).height(4.dp),
-                            color = Color.Cyan, trackColor = Color.White.copy(0.2f)
-                        )
+                        LinearProgressIndicator(progress = { torrentProgress / 100f }, modifier = Modifier.fillMaxWidth(0.7f).height(4.dp), color = Color.Cyan, trackColor = Color.White.copy(0.2f))
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                             Text("▼ $downloadSpeed", color = Color.Green, fontSize = 13.sp)
@@ -464,9 +385,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         }
                     }
                 }
-                IconButton(onClick = { navController.popBackStack() }, modifier = Modifier.align(Alignment.TopStart).padding(16.dp)) {
-                    Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
-                }
+                IconButton(onClick = { navController.popBackStack() }, modifier = Modifier.align(Alignment.TopStart).padding(16.dp)) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }
             }
         }
 
@@ -488,7 +407,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         if (!isPreBuffering || videoPath != null) {
             AnimatedVisibility(visible = isControlsVisible && !showSettingsMenu, enter = fadeIn(), exit = fadeOut()) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(0.4f))) {
-
                     Row(Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopStart), horizontalArrangement = Arrangement.SpaceBetween) {
                         IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -498,99 +416,47 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                     Text("S: $seeds", color = Color.LightGray, fontSize = 10.sp)
                                 }
                             }
-                            IconButton(onClick = {
-                                try { StreamXCore.cycleSubtitles() } catch (e: Exception) { }
-                                Toast.makeText(context, "Subtitle changed", Toast.LENGTH_SHORT).show()
-                            }) { Icon(Icons.Rounded.Subtitles, null, tint = Color.White, modifier = Modifier.size(28.dp)) }
-                            IconButton(onClick = { showSettingsMenu = true; activeSettingPage = "Main" }) {
-                                Icon(Icons.Rounded.Settings, null, tint = Color.White, modifier = Modifier.size(28.dp))
-                            }
+                            IconButton(onClick = { try { StreamXCore.cycleSubtitles() } catch (e: Exception) { }; Toast.makeText(context, "Subtitle changed", Toast.LENGTH_SHORT).show() }) { Icon(Icons.Rounded.Subtitles, null, tint = Color.White, modifier = Modifier.size(28.dp)) }
+                            IconButton(onClick = { showSettingsMenu = true; activeSettingPage = "Main" }) { Icon(Icons.Rounded.Settings, null, tint = Color.White, modifier = Modifier.size(28.dp)) }
                         }
                     }
-
                     if (!isLocked) {
                         Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(40.dp)) {
-                            IconButton(onClick = {
-                                val t = max(0.0, currentTime - 10.0)
-                                try { StreamXCore.seekMpvVideo(t - currentTime) } catch (e: Exception) { }
-                            }) { Icon(Icons.Rounded.Replay10, null, tint = Color.White, modifier = Modifier.size(48.dp)) }
-                            IconButton(onClick = { isPlaying = !isPlaying; try { StreamXCore.pauseMpvVideo(!isPlaying) } catch (e: Exception) { } }) {
-                                Icon(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(64.dp))
-                            }
-                            IconButton(onClick = {
-                                val t = min(totalDuration, currentTime + 10.0)
-                                try { StreamXCore.seekMpvVideo(t - currentTime) } catch (e: Exception) { }
-                            }) { Icon(Icons.Rounded.Forward10, null, tint = Color.White, modifier = Modifier.size(48.dp)) }
+                            IconButton(onClick = { try { StreamXCore.seekMpvVideo(max(0.0, currentTime - 10.0) - currentTime) } catch (e: Exception) { } }) { Icon(Icons.Rounded.Replay10,  null, tint = Color.White, modifier = Modifier.size(48.dp)) }
+                            IconButton(onClick = { isPlaying = !isPlaying; try { StreamXCore.pauseMpvVideo(!isPlaying) } catch (e: Exception) { } }) { Icon(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(64.dp)) }
+                            IconButton(onClick = { try { StreamXCore.seekMpvVideo(min(totalDuration, currentTime + 10.0) - currentTime) } catch (e: Exception) { } }) { Icon(Icons.Rounded.Forward10, null, tint = Color.White, modifier = Modifier.size(48.dp)) }
                         }
                     }
-
-                    IconButton(onClick = { isLocked = !isLocked }, modifier = Modifier.align(Alignment.CenterEnd).padding(32.dp)) {
-                        Icon(if (isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, null, tint = if (isLocked) Color.Red else Color.White)
-                    }
-
+                    IconButton(onClick = { isLocked = !isLocked }, modifier = Modifier.align(Alignment.CenterEnd).padding(32.dp)) { Icon(if (isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, null, tint = if (isLocked) Color.Red else Color.White) }
                     if (!isLocked) {
                         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(formatTime(currentTime.toLong()),   color = Color.White, fontSize = 12.sp)
+                                Text(formatTime(currentTime.toLong()), color = Color.White, fontSize = 12.sp)
                                 Text(formatTime(totalDuration.toLong()), color = Color.White, fontSize = 12.sp)
                             }
-                            Slider(
-                                value = currentTime.toFloat(),
-                                onValueChange = { v ->
-                                    val c = v.coerceIn(0f, totalDuration.toFloat())
-                                    try { StreamXCore.seekMpvVideo(c.toDouble() - currentTime) } catch (e: Exception) { }
-                                },
-                                valueRange = 0f..max(1f, totalDuration.toFloat()),
-                                colors = SliderDefaults.colors(thumbColor = Color.Cyan, activeTrackColor = Color.Cyan)
-                            )
+                            Slider(value = currentTime.toFloat(), onValueChange = { v -> try { StreamXCore.seekMpvVideo(v.coerceIn(0f, totalDuration.toFloat()).toDouble() - currentTime) } catch (e: Exception) { } }, valueRange = 0f..max(1f, totalDuration.toFloat()), colors = SliderDefaults.colors(thumbColor = Color.Cyan, activeTrackColor = Color.Cyan))
                         }
                     }
                 }
             }
 
-            // Settings panel
-            AnimatedVisibility(
-                visible = showSettingsMenu,
-                enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
-                exit  = slideOutHorizontally(targetOffsetX  = { it }) + fadeOut(),
-                modifier = Modifier.align(Alignment.CenterEnd)
-            ) {
+            AnimatedVisibility(visible = showSettingsMenu, enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(), exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(), modifier = Modifier.align(Alignment.CenterEnd)) {
                 Box(Modifier.fillMaxHeight().width(320.dp).background(Color(0xF01A1A2E)).padding(16.dp)) {
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 16.dp)) {
-                            if (activeSettingPage != "Main") {
-                                IconButton(onClick = { activeSettingPage = "Main" }, modifier = Modifier.size(24.dp)) {
-                                    Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
-                                }
-                                Spacer(Modifier.width(12.dp))
-                            }
-                            Text(
-                                when (activeSettingPage) {
-                                    "Quality" -> "Video Quality"; "Subtitles" -> "Subtitles"
-                                    "Audio"   -> "Audio Tracks";  else        -> "Settings"
-                                },
-                                color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold
-                            )
+                            if (activeSettingPage != "Main") { IconButton(onClick = { activeSettingPage = "Main" }, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }; Spacer(Modifier.width(12.dp)) }
+                            Text(when (activeSettingPage) { "Quality" -> "Video Quality"; "Subtitles" -> "Subtitles"; "Audio" -> "Audio Tracks"; else -> "Settings" }, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                         }
-
                         if (activeSettingPage == "Main") {
                             SettingsItem(Icons.Rounded.HighQuality,  "Video Quality", selectedQuality.label) { activeSettingPage = "Quality" }
                             SettingsItem(Icons.Rounded.Subtitles,    "Subtitles",     "Tracks & Download")   { subTracks = StreamXCore.getTrackList("sub"); activeSettingPage = "Subtitles" }
                             SettingsItem(Icons.Rounded.LibraryMusic, "Audio Track",   "Internal tracks")      { activeSettingPage = "Audio" }
-                        }
-
-                        else if (activeSettingPage == "Quality") {
+                        } else if (activeSettingPage == "Quality") {
                             Text("GPU Render Quality", color = Color.Gray, fontSize = 11.sp, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 8.dp))
                             LazyColumn {
                                 items(GPU_QUALITY_PRESETS) { preset ->
                                     val sel = selectedQuality.label == preset.label
-                                    Row(
-                                        Modifier.fillMaxWidth()
-                                            .background(if (sel) Color.Cyan.copy(0.12f) else Color.Transparent, RoundedCornerShape(10.dp))
-                                            .clickable { selectedQuality = preset; applyQualityPreset(preset); showSettingsMenu = false }
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
+                                    Row(Modifier.fillMaxWidth().background(if (sel) Color.Cyan.copy(0.12f) else Color.Transparent, RoundedCornerShape(10.dp)).clickable { selectedQuality = preset; applyQualityPreset(preset); showSettingsMenu = false }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Column(Modifier.weight(1f)) {
                                             Text(preset.label,    color = if (sel) Color.Cyan else Color.White, fontSize = 15.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
                                             Text(preset.subtitle, color = Color.Gray, fontSize = 11.sp)
@@ -599,55 +465,22 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                     }
                                 }
                             }
-                        }
-
-                        else if (activeSettingPage == "Subtitles") {
-                            Button(
-                                onClick = {
-                                    if (!isSearchingSub) {
-                                        isSearchingSub = true; subSearchMsg = "Searching…"
-                                        fetchSubtitle(movieTitle.ifBlank { "Movie" }, context) { msg ->
-                                            isSearchingSub = false; subSearchMsg = msg
-                                            subTracks = StreamXCore.getTrackList("sub")
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A5F))
-                            ) {
-                                if (isSearchingSub) {
-                                    CircularProgressIndicator(color = Color.Cyan, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Searching…", color = Color.White, fontSize = 12.sp)
-                                } else {
-                                    Icon(Icons.Rounded.Download, null, tint = Color.Cyan, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Download Subtitle Online", color = Color.White)
-                                }
+                        } else if (activeSettingPage == "Subtitles") {
+                            Button(onClick = { if (!isSearchingSub) { isSearchingSub = true; subSearchMsg = "Searching…"; fetchSubtitle(movieTitle.ifBlank { "Movie" }, context) { msg -> isSearchingSub = false; subSearchMsg = msg; subTracks = StreamXCore.getTrackList("sub") } } }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A5F))) {
+                                if (isSearchingSub) { CircularProgressIndicator(color = Color.Cyan, modifier = Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)); Text("Searching…", color = Color.White, fontSize = 12.sp) }
+                                else { Icon(Icons.Rounded.Download, null, tint = Color.Cyan, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Download Subtitle Online", color = Color.White) }
                             }
                             if (subSearchMsg.isNotEmpty()) Text(subSearchMsg, color = Color.Cyan, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
-                            Spacer(Modifier.height(14.dp))
-                            HorizontalDivider(color = Color.White.copy(0.1f))
-                            Spacer(Modifier.height(10.dp))
-                            Text("SUBTITLE TRACKS", color = Color.Gray, fontSize = 10.sp, letterSpacing = 1.sp)
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(14.dp)); HorizontalDivider(color = Color.White.copy(0.1f)); Spacer(Modifier.height(10.dp))
+                            Text("SUBTITLE TRACKS", color = Color.Gray, fontSize = 10.sp, letterSpacing = 1.sp); Spacer(Modifier.height(8.dp))
                             SubTrackRow("Disable", false) { StreamXCore.setSubTrack(-1); showSettingsMenu = false }
-                            if (subTracks.isEmpty()) {
-                                Text("No tracks found", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
-                            } else {
-                                subTracks.forEach { t -> SubTrackRow(t.title, t.selected) { StreamXCore.setSubTrack(t.id); showSettingsMenu = false } }
-                            }
-                        }
-
-                        else if (activeSettingPage == "Audio") {
+                            if (subTracks.isEmpty()) Text("No tracks found", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
+                            else subTracks.forEach { t -> SubTrackRow(t.title, t.selected) { StreamXCore.setSubTrack(t.id); showSettingsMenu = false } }
+                        } else if (activeSettingPage == "Audio") {
                             val audioTracks = remember(activeSettingPage) { StreamXCore.getTrackList("audio") }
-                            Text("AUDIO TRACKS", color = Color.Gray, fontSize = 10.sp, letterSpacing = 1.sp)
-                            Spacer(Modifier.height(8.dp))
-                            if (audioTracks.isEmpty()) {
-                                Text("No audio tracks found", color = Color.Gray, fontSize = 12.sp)
-                            } else {
-                                audioTracks.forEach { t -> SubTrackRow(t.title, t.selected) { StreamXCore.setAudioTrack(t.id); showSettingsMenu = false } }
-                            }
+                            Text("AUDIO TRACKS", color = Color.Gray, fontSize = 10.sp, letterSpacing = 1.sp); Spacer(Modifier.height(8.dp))
+                            if (audioTracks.isEmpty()) Text("No audio tracks found", color = Color.Gray, fontSize = 12.sp)
+                            else audioTracks.forEach { t -> SubTrackRow(t.title, t.selected) { StreamXCore.setAudioTrack(t.id); showSettingsMenu = false } }
                         }
                     }
                 }
@@ -659,12 +492,8 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 @Composable
 fun SettingsItem(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = Color.White, modifier = Modifier.size(24.dp))
-        Spacer(Modifier.width(16.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 16.sp)
-            Text(subtitle, color = Color.LightGray, fontSize = 12.sp)
-        }
+        Icon(icon, null, tint = Color.White, modifier = Modifier.size(24.dp)); Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) { Text(title, color = Color.White, fontSize = 16.sp); Text(subtitle, color = Color.LightGray, fontSize = 12.sp) }
         Icon(Icons.Rounded.ChevronRight, null, tint = Color.Gray)
     }
 }
@@ -672,38 +501,28 @@ fun SettingsItem(icon: ImageVector, title: String, subtitle: String, onClick: ()
 @Composable
 private fun SubTrackRow(label: String, selected: Boolean, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(if (selected) Icons.Rounded.RadioButtonChecked else Icons.Rounded.RadioButtonUnchecked,
-            null, tint = if (selected) Color.Cyan else Color.Gray, modifier = Modifier.size(18.dp))
+        Icon(if (selected) Icons.Rounded.RadioButtonChecked else Icons.Rounded.RadioButtonUnchecked, null, tint = if (selected) Color.Cyan else Color.Gray, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(12.dp))
-        Text(label, color = if (selected) Color.Cyan else Color.White, fontSize = 14.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+        Text(label, color = if (selected) Color.Cyan else Color.White, fontSize = 14.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
     }
 }
 
 private fun fetchSubtitle(title: String, context: Context, onComplete: (String) -> Unit) {
     CoroutineScope(Dispatchers.IO).launch {
         try {
-            val encoded = title.trim().replace(" ", "%20")
-            val conn = (URL("https://rest.opensubtitles.org/search/query-$encoded/sublanguageid-eng").openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                setRequestProperty("User-Agent", "TemporaryUserAgent")
-                setRequestProperty("X-User-Agent", "TemporaryUserAgent")
-                connectTimeout = 10_000; readTimeout = 10_000
+            val conn = (URL("https://rest.opensubtitles.org/search/query-${title.trim().replace(" ", "%20")}/sublanguageid-eng").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"; setRequestProperty("User-Agent", "TemporaryUserAgent"); setRequestProperty("X-User-Agent", "TemporaryUserAgent"); connectTimeout = 10_000; readTimeout = 10_000
             }
             if (conn.responseCode == 200) {
                 val arr = JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
                 var bestUrl = ""; var bestCount = -1
                 for (i in 0 until arr.length()) {
                     val obj = arr.getJSONObject(i)
-                    val lang = obj.optString("SubLanguageID", ""); val fmt = obj.optString("SubFormat", "")
-                    val dl = obj.optInt("SubDownloadsCnt", 0);     val url = obj.optString("SubDownloadLink", "")
+                    val lang = obj.optString("SubLanguageID", ""); val fmt = obj.optString("SubFormat", ""); val dl = obj.optInt("SubDownloadsCnt", 0); val url = obj.optString("SubDownloadLink", "")
                     if (lang == "eng" && fmt.equals("srt", ignoreCase = true) && dl > bestCount && url.isNotEmpty()) { bestCount = dl; bestUrl = url }
                 }
                 if (bestUrl.isEmpty() && arr.length() > 0) bestUrl = arr.getJSONObject(0).optString("SubDownloadLink", "")
-                withContext(Dispatchers.Main) {
-                    if (bestUrl.isNotEmpty()) { try { StreamXCore.addExternalSubtitle(bestUrl) } catch (e: Exception) { }; onComplete("✓ Subtitle loaded!") }
-                    else onComplete("No subtitle found for \"$title\"")
-                }
+                withContext(Dispatchers.Main) { if (bestUrl.isNotEmpty()) { try { StreamXCore.addExternalSubtitle(bestUrl) } catch (e: Exception) { }; onComplete("✓ Subtitle loaded!") } else onComplete("No subtitle found") }
             } else withContext(Dispatchers.Main) { onComplete("Server error: ${conn.responseCode}") }
         } catch (e: Exception) { withContext(Dispatchers.Main) { onComplete("Error: ${e.message?.take(50)}") } }
     }
