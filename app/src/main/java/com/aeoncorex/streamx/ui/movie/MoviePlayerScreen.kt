@@ -74,7 +74,6 @@ object StreamXCore {
 
     @JvmStatic external fun getTmdbKey(): String
 
-    // ── CHANGED: appctx param — needed to register JavaVM with FFmpeg ──
     @JvmStatic external fun initMpvEngine(appctx: Any?)
     @JvmStatic external fun playMpvVideo(path: String)
     @JvmStatic external fun setMpvSurface(surface: Surface?)
@@ -180,11 +179,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVolume    = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
 
-    // ── Init MPV — pass Application context so JavaVM is registered ──
+    // ── Init MPV ──────────────────────────────────────────────────
     LaunchedEffect(Unit) {
         try {
-            // Pass appctx so av_jni_set_java_vm() can be called in C++.
-            // This is required for MPV's Android GPU VO to work.
             StreamXCore.initMpvEngine(context.applicationContext)
         } catch (e: Exception) { Log.e("MPV", "Init failed", e) }
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
@@ -203,7 +200,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
     }
 
-    // ── Torrent / direct URL handling ─────────────────────────
+    // ── Torrent / direct URL handling ─────────────────────────────
     LaunchedEffect(decodedUrl) {
         var retryCount = 0
         val maxRetries = 3
@@ -238,7 +235,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         if (retryCount == maxRetries) statusMsg = "Failed after $maxRetries retries."
     }
 
-    // ── Start playback when BOTH path AND surface are ready ───
+    // ── Start playback when BOTH path AND surface are ready ───────
     LaunchedEffect(videoPath, isSurfaceReady) {
         val path = videoPath ?: return@LaunchedEffect
         if (!isSurfaceReady) return@LaunchedEffect
@@ -248,12 +245,15 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             Log.e("MPV", "playMpvVideo: ${e.message}"); return@LaunchedEffect
         }
 
-        // Re-send surface size after loadfile (safe — doesn't reset wid or VO)
-        delay(300)
+        // FIX: Send surface size again after loadfile.
+        // surfaceChanged may have fired before the path was ready,
+        // so MPV might not have the correct dimensions yet.
+        delay(200)
         if (surfaceW > 0 && surfaceH > 0) {
             try { StreamXCore.setMpvSurfaceSize(surfaceW, surfaceH) } catch (e: Exception) { }
         }
 
+        // Wait for duration to confirm playback started
         repeat(20) {
             delay(1000)
             val dur = try { StreamXCore.getMpvDuration() } catch (e: Exception) { 0.0 }
@@ -263,17 +263,42 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         try { StreamXCore.playMpvVideo(path) } catch (e: Exception) { }
     }
 
+    // ── FIX: Time update at 500ms instead of 1000ms ───────────────
+    // Previous 1000ms polling caused the seek bar to jump in 1-second
+    // increments making the UI feel choppy.
+    // 500ms is smooth enough without adding significant CPU load.
+    // We also use Dispatchers.IO to avoid blocking the main thread
+    // while waiting on the mpv_mutex in getMpvTime().
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
-            try { currentTime = StreamXCore.getMpvTime(); val d = StreamXCore.getMpvDuration(); if (d > 0) totalDuration = d } catch (e: Exception) { }
-            delay(1000)
+            withContext(Dispatchers.IO) {
+                try {
+                    val t = StreamXCore.getMpvTime()
+                    val d = StreamXCore.getMpvDuration()
+                    withContext(Dispatchers.Main) {
+                        currentTime = t
+                        if (d > 0) totalDuration = d
+                    }
+                } catch (e: Exception) { /* ignore */ }
+            }
+            delay(500) // was 1000ms — smoother seek bar
         }
     }
 
+    // ── Mid-play buffer monitoring ────────────────────────────────
     LaunchedEffect(videoPath) {
         if (videoPath == null) return@LaunchedEffect
         while (true) {
-            try { isMidBuffering = StreamXCore.isMpvPausedForCache(); cachePercent = StreamXCore.getMpvCachePercent() } catch (e: Exception) { }
+            withContext(Dispatchers.IO) {
+                try {
+                    val buffering = StreamXCore.isMpvPausedForCache()
+                    val pct       = StreamXCore.getMpvCachePercent()
+                    withContext(Dispatchers.Main) {
+                        isMidBuffering = buffering
+                        cachePercent   = pct
+                    }
+                } catch (e: Exception) { /* ignore */ }
+            }
             delay(500)
         }
     }
@@ -284,17 +309,30 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
 
-        // ── MPV SurfaceView ───────────────────────────────────
+        // ── MPV SurfaceView ───────────────────────────────────────
         AndroidView(
             factory = { ctx ->
                 SurfaceView(ctx).apply {
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(h: SurfaceHolder) {
-                            // Pass Java Surface jobject — native-lib.cpp creates GlobalRef
-                            // and passes (int64_t)GlobalRef as wid. DO NOT use ANativeWindow.
+                            // Pass Java Surface jobject as GlobalRef.
+                            // native-lib.cpp → env->NewGlobalRef(surface)
+                            //               → int64_t wid = reinterpret_cast<intptr_t>(ref)
+                            //               → mpv_set_option(wid)
+                            // MPV internally calls ANativeWindow_fromSurface(env, jobject).
                             try { StreamXCore.setMpvSurface(h.surface) } catch (e: Exception) { }
                             isSurfaceReady = true
-                            Log.d("MPV", "surfaceCreated → wid set (jobject GlobalRef)")
+
+                            // FIX: Send current surface size immediately on create.
+                            // surfaceChanged is guaranteed to fire after surfaceCreated,
+                            // but if MPV was already initialized and waiting, it needs
+                            // the dimensions right away to set android-surface-size.
+                            val sv = h.surfaceFrame
+                            if (sv.width() > 0 && sv.height() > 0) {
+                                surfaceW = sv.width(); surfaceH = sv.height()
+                                try { StreamXCore.setMpvSurfaceSize(sv.width(), sv.height()) } catch (e: Exception) { }
+                            }
+                            Log.d("MPV", "surfaceCreated → wid set (jobject GlobalRef) size=${sv.width()}x${sv.height()}")
                         }
                         override fun surfaceChanged(h: SurfaceHolder, fmt: Int, w: Int, height: Int) {
                             surfaceW = w; surfaceH = height
