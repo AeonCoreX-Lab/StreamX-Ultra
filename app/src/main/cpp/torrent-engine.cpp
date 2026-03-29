@@ -62,7 +62,7 @@ void TorrentSystem::start(const std::string& magnet, const std::string& saveDir)
     p.save_path  = saveDir;
     p.flags     &= ~lt::torrent_flags::paused;
     p.flags     &= ~lt::torrent_flags::auto_managed;
-    p.flags     |=  lt::torrent_flags::sequential_download; // ← critical for streaming
+    p.flags     |=  lt::torrent_flags::sequential_download;
 
     static const std::vector<std::string> trackers = {
         "http://tracker.bt4g.com:2095/announce",
@@ -119,7 +119,7 @@ void TorrentSystem::updateLoop() {
                  s.state == lt::torrent_status::finished    ||
                  s.state == lt::torrent_status::seeding) {
 
-            // ── Find video file once ──────────────────────────
+            // ── Identify video file once ─────────────────────
             if (finalFilePath.empty()) {
                 std::shared_ptr<const lt::torrent_info> info = handle.torrent_file();
                 if (info && info->is_valid()) {
@@ -139,9 +139,7 @@ void TorrentSystem::updateLoop() {
                     firstPieceIdx = (int)pr_first.piece;
                     lastPieceIdx  = (int)pr_last.piece;
 
-                    // ── Streaming piece priorities ────────────
-                    // First 50 pieces (≈12.5 MB): absolute top priority
-                    // Last 20 pieces: top priority (MP4 moov atom may be at end)
+                    // Top priority: first 50 + last 20 pieces
                     for (int i = 0; i < 50 && firstPieceIdx + i <= lastPieceIdx; ++i)
                         handle.piece_priority(lt::piece_index_t(firstPieceIdx + i), lt::top_priority);
                     for (int i = 0; i < 20 && lastPieceIdx - i >= firstPieceIdx; ++i)
@@ -154,42 +152,34 @@ void TorrentSystem::updateLoop() {
                 }
             }
 
-            // ── State 3: Ready to stream ─────────────────────────────────
+            // ────────────────────────────────────────────────────────────
+            //  Ready gate: dual condition before handing file to MPV.
             //
-            //  BUG THAT WAS HERE:
-            //  Previous code triggered Ready with only 5 header pieces
-            //  (~1.25 MB) confirmed.  While the header was readable, MPV's
-            //  demuxer immediately read 60 seconds ahead into sparse
-            //  (undownloaded) regions of the file.  The video decoder
-            //  received zeros → MediaCodec returned silent BLACK FRAMES.
-            //  Audio (software decoder) was more resilient → sound worked.
+            //  MIN_PROGRESS: 5% → 8%
             //
-            //  This explains the observed symptoms:
-            //    - Movie plays at 3%, or 1%, or 6% randomly (sparse regions
-            //      happen to have data at those offsets)
-            //    - After 10-12s of play, hits first sparse gap → black screen
-            //    - Backward seek → lands in sparse area → silent black screen
+            //  WHY INCREASED:
+            //  At 5% of a 4GB 1080p file = 200MB.
+            //  At 4Mbps bitrate, 200MB = 400 seconds of content.
+            //  At 588 KB/s (4.7Mbps) download vs 4Mbps playback, margin is
+            //  only 0.7Mbps → very thin buffer against speed fluctuations.
+            //  If download drops briefly below 4Mbps (peers slow), MPV
+            //  hits the frontier → paused-for-cache → "froze after minutes".
             //
-            //  FIX: dual gate —
-            //    1. progress >= 5%:  ensures ~5% of the file is downloaded
-            //       sequentially, giving MPV's demuxer a dense 20-second
-            //       read-ahead window without hitting sparse gaps.
-            //    2. HEADER_PIECES (30) confirmed: guarantees MPV can always
-            //       read the container header correctly (no zeros at start).
+            //  At 8% = 320MB / 640 seconds at 4Mbps.
+            //  This gives ~2× more safety margin before the first frontier hit.
+            //  The extra 3% (120MB) takes about 200 extra seconds to download
+            //  at 588KB/s — a worthwhile trade for smooth playback.
             //
-            //  With sequential_download + 5% gate, the first 5% of the file
-            //  is always fully downloaded before playback starts. MPV's
-            //  demuxer (readahead=20s) stays within that downloaded window.
-            // ─────────────────────────────────────────────────────────────
+            //  NOTE: cache-pause-initial=yes in MPV also helps recover from
+            //  frontier hits by automatically pausing+buffering when they occur.
+            // ────────────────────────────────────────────────────────────
 
-            static const int HEADER_PIECES  = 30;   // 30 × ~256KB = 7.5 MB header check
-            static const int MIN_PROGRESS   = 5;    // 5% of total file downloaded
+            static const int HEADER_PIECES = 30;
+            static const int MIN_PROGRESS  = 8;   // ← changed from 5
 
             if (!finalFilePath.empty() && firstPieceIdx >= 0) {
-                // Gate 1: overall progress >= 5%
                 bool progressOk = (currentStatus.progress >= MIN_PROGRESS);
 
-                // Gate 2: first HEADER_PIECES of video all confirmed present
                 int toCheck = std::min(HEADER_PIECES, lastPieceIdx - firstPieceIdx + 1);
                 int ready   = 0;
                 for (int i = 0; i < toCheck; ++i)
@@ -198,12 +188,12 @@ void TorrentSystem::updateLoop() {
 
                 if (progressOk && headerOk) {
                     currentStatus.state = 3;
-                    LOGD("READY  progress=%d%%  header=%d/%d pieces confirmed",
-                         currentStatus.progress, ready, toCheck);
+                    LOGD("READY  progress=%d%%  header=%d/%d  speed=%ld",
+                         currentStatus.progress, ready, toCheck, currentStatus.speed);
                 } else {
                     currentStatus.state = 2;
-                    LOGD("Buffering  progress=%d%%  header=%d/%d  progressOk=%d headerOk=%d",
-                         currentStatus.progress, ready, toCheck, progressOk, headerOk);
+                    LOGD("Buffering  progress=%d%%  header=%d/%d",
+                         currentStatus.progress, ready, toCheck);
                 }
             } else {
                 currentStatus.state = 2;
