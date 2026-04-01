@@ -1,8 +1,8 @@
 // Top-level build.gradle.kts
 plugins {
-    // Android Gradle Plugin 8.7.3 (Android 15 Ready)
-    id("com.android.application") version "8.7.3" apply false
-    id("com.android.library") version "8.7.3" apply false
+    // Android Gradle Plugin 9.0.1 (Android 16 Ready)
+    id("com.android.application") version "9.0.1" apply false
+    id("com.android.library") version "9.0.1" apply false
     
     // Kotlin 2.0.21 (Latest with K2 compiler)
     id("org.jetbrains.kotlin.android") version "2.0.21" apply false
