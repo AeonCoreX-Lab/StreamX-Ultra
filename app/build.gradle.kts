@@ -198,7 +198,7 @@ dependencies {
     }
     implementation("com.grack:nanojson:1.2")
 
-    implementation("androidx.compose.foundation:foundation:1.10.3")
+    implementation("androidx.compose.foundation:foundation:1.10.6")
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
     // Firebase
