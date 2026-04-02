@@ -1,6 +1,6 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.plugin.compose")  // This already brings Kotlin Android plugin
+       id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services")
 }
 
@@ -24,9 +24,10 @@ android {
 
         externalNativeBuild {
             cmake {
+                // FIX: Added explicit flags to bypass NDK 29 aligned_alloc issue
                 cppFlags(
-                    "-std=c++17",
-                    "-U_FORTIFY_SOURCE",
+                    "-std=c++17", 
+                    "-U_FORTIFY_SOURCE", 
                     "-D_FORTIFY_SOURCE=0",
                     "-DBOOST_ASIO_DISABLE_STD_ALIGNED_ALLOC",
                     "-DBOOST_ASIO_HAS_STD_ALIGNED_ALLOC=0"
@@ -38,6 +39,7 @@ android {
 
                 val rustBuildDir = File(project.layout.buildDirectory.get().asFile, "rust/targets").absolutePath
 
+                // --- FIX: FETCH GITHUB SECRET AND PASS TO CMAKE/RUST ---
                 val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "api_key_not_found"
                 buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
 
@@ -50,7 +52,7 @@ android {
                     "-DANDROID_PLATFORM=android-28",
                     "-D_FORTIFY_SOURCE=0",
                     "-DRUST_BUILD_DIR=$rustBuildDir",
-                    "-DTMDB_API_KEY=$tmdbApiKey"
+                    "-DTMDB_API_KEY=$tmdbApiKey" // <--- PASSING SECRET TO CMAKE
                 )
 
                 abiFilters("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
@@ -67,22 +69,23 @@ android {
 
     packaging {
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            excludes += "META-INF/DEPENDENCIES"
-            excludes += "META-INF/INDEX.LIST"
+             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+             excludes += "META-INF/DEPENDENCIES"
+             excludes += "META-INF/INDEX.LIST"
         }
         jniLibs {
-            pickFirsts += setOf(
-                "**/libc++_shared.so",
-                "**/libmpv.so",
-                "**/libavcodec.so",
-                "**/libavdevice.so",
-                "**/libavfilter.so",
-                "**/libavformat.so",
-                "**/libavutil.so",
-                "**/libswresample.so",
-                "**/libswscale.so"
-            )
+             // FIX: Prevent Duplicate Native Libraries Error (CMake imported vs jniLibs)
+             pickFirsts += setOf(
+                 "**/libc++_shared.so",
+                 "**/libmpv.so",
+                 "**/libavcodec.so",
+                 "**/libavdevice.so",
+                 "**/libavfilter.so",
+                 "**/libavformat.so",
+                 "**/libavutil.so",
+                 "**/libswresample.so",
+                 "**/libswscale.so"
+             )
         }
     }
 
@@ -130,7 +133,7 @@ android {
     }
 }
 
-// Custom Rust Build Task (unchanged)
+// Custom Rust Build Task
 tasks.register("cargoBuild") {
     description = "Builds the Rust library using cargo-ndk"
     val rustRoot = file("src/main/rust")
@@ -147,6 +150,7 @@ tasks.register("cargoBuild") {
             println("🔨 Building Rust for $androidAbi ($rustTarget)...")
             exec {
                 workingDir = rustRoot
+                // Pass the TMDB API KEY to cargo build
                 val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "api_key_not_found"
                 environment("TMDB_API_KEY", tmdbApiKey)
                 commandLine("cargo", "ndk", "-t", androidAbi, "-o", "$rustRoot/jniLibs", "build", "--release")
@@ -172,7 +176,7 @@ afterEvaluate {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.18.0")
+    implementation("androidx.core:core-ktx:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation(platform("androidx.compose:compose-bom:2026.03.01"))
