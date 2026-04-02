@@ -5,7 +5,7 @@ plugins {
     id("com.android.library") version "9.0.1" apply false
 
     // Kotlin 2.1.20 (latest stable, supports Gradle 9.x)
-    id("org.jetbrains.kotlin.android") version "2.1.20" apply false
+    id("org.jetbrains.kotlin.android") version "2.3.20" apply false
 
     // Compose compiler plugin (same version as Kotlin)
     id("org.jetbrains.kotlin.plugin.compose") version "2.1.20" apply false
