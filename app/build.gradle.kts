@@ -1,7 +1,6 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.compose")  // This already brings Kotlin Android plugin
     id("com.google.gms.google-services")
 }
 
@@ -25,10 +24,9 @@ android {
 
         externalNativeBuild {
             cmake {
-                // FIX: Added explicit flags to bypass NDK 29 aligned_alloc issue
                 cppFlags(
-                    "-std=c++17", 
-                    "-U_FORTIFY_SOURCE", 
+                    "-std=c++17",
+                    "-U_FORTIFY_SOURCE",
                     "-D_FORTIFY_SOURCE=0",
                     "-DBOOST_ASIO_DISABLE_STD_ALIGNED_ALLOC",
                     "-DBOOST_ASIO_HAS_STD_ALIGNED_ALLOC=0"
@@ -37,10 +35,9 @@ android {
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
                 val envNdk = System.getenv("ANDROID_NDK_HOME")
                 val ndkPath = if (!envNdk.isNullOrBlank()) envNdk else android.ndkDirectory.absolutePath
-                
+
                 val rustBuildDir = File(project.layout.buildDirectory.get().asFile, "rust/targets").absolutePath
-                
-                // --- FIX: FETCH GITHUB SECRET AND PASS TO CMAKE/RUST ---
+
                 val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "api_key_not_found"
                 buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
 
@@ -53,7 +50,7 @@ android {
                     "-DANDROID_PLATFORM=android-28",
                     "-D_FORTIFY_SOURCE=0",
                     "-DRUST_BUILD_DIR=$rustBuildDir",
-                    "-DTMDB_API_KEY=$tmdbApiKey" // <--- PASSING SECRET TO CMAKE
+                    "-DTMDB_API_KEY=$tmdbApiKey"
                 )
 
                 abiFilters("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
@@ -70,23 +67,22 @@ android {
 
     packaging {
         resources {
-             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-             excludes += "META-INF/DEPENDENCIES"
-             excludes += "META-INF/INDEX.LIST"
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/DEPENDENCIES"
+            excludes += "META-INF/INDEX.LIST"
         }
         jniLibs {
-             // FIX: Prevent Duplicate Native Libraries Error (CMake imported vs jniLibs)
-             pickFirsts += setOf(
-                 "**/libc++_shared.so",
-                 "**/libmpv.so",
-                 "**/libavcodec.so",
-                 "**/libavdevice.so",
-                 "**/libavfilter.so",
-                 "**/libavformat.so",
-                 "**/libavutil.so",
-                 "**/libswresample.so",
-                 "**/libswscale.so"
-             )
+            pickFirsts += setOf(
+                "**/libc++_shared.so",
+                "**/libmpv.so",
+                "**/libavcodec.so",
+                "**/libavdevice.so",
+                "**/libavfilter.so",
+                "**/libavformat.so",
+                "**/libavutil.so",
+                "**/libswresample.so",
+                "**/libswscale.so"
+            )
         }
     }
 
@@ -134,7 +130,7 @@ android {
     }
 }
 
-// Custom Rust Build Task
+// Custom Rust Build Task (unchanged)
 tasks.register("cargoBuild") {
     description = "Builds the Rust library using cargo-ndk"
     val rustRoot = file("src/main/rust")
@@ -151,7 +147,6 @@ tasks.register("cargoBuild") {
             println("🔨 Building Rust for $androidAbi ($rustTarget)...")
             exec {
                 workingDir = rustRoot
-                // Pass the TMDB API KEY to cargo build
                 val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "api_key_not_found"
                 environment("TMDB_API_KEY", tmdbApiKey)
                 commandLine("cargo", "ndk", "-t", androidAbi, "-o", "$rustRoot/jniLibs", "build", "--release")
@@ -159,7 +154,7 @@ tasks.register("cargoBuild") {
 
             val sourceFile = File(rustRoot, "target/$rustTarget/release/libstreamx_core.a")
             val destDir = File(buildDir, "rust/targets/$rustTarget/release")
-            
+
             if (sourceFile.exists()) {
                 destDir.mkdirs()
                 sourceFile.copyTo(File(destDir, "libstreamx_core.a"), overwrite = true)
@@ -222,6 +217,6 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
     implementation("com.valentinilk.shimmer:compose-shimmer:1.3.0")
-    
+
     implementation("androidx.compose.material:material-icons-extended:1.6.7")
 }
