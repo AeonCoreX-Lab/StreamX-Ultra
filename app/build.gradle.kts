@@ -219,7 +219,7 @@ dependencies {
 
     // UI Utilities
     implementation("io.coil-kt:coil-compose:2.6.0")
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.datastore:datastore-preferences:1.2.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
     implementation("com.valentinilk.shimmer:compose-shimmer:1.3.0")
 
