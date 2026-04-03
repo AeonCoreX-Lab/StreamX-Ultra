@@ -7,7 +7,7 @@ plugins {
     // NOTE: 'org.jetbrains.kotlin.android' is removed because AGP 9.0+ has built-in Kotlin
 
     // Compose compiler plugin (Bumpted to match AGP 9.0's internal Kotlin 2.2.10 dependency)
-    id("org.jetbrains.kotlin.plugin.compose") version "2.2.10" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "2.3.20" apply false
 
     // Google Services
     id("com.google.gms.google-services") version "4.4.2" apply false
