@@ -4,11 +4,10 @@ plugins {
     id("com.android.application") version "9.0.1" apply false
     id("com.android.library") version "9.0.1" apply false
 
-    // Kotlin 2.1.20 (latest stable, supports Gradle 9.x)
-    id("org.jetbrains.kotlin.android") version "2.1.20" apply false
+    // NOTE: 'org.jetbrains.kotlin.android' is removed because AGP 9.0+ has built-in Kotlin
 
-    // Compose compiler plugin (same version as Kotlin)
-    id("org.jetbrains.kotlin.plugin.compose") version "2.1.20" apply false
+    // Compose compiler plugin (Bumpted to match AGP 9.0's internal Kotlin 2.2.10 dependency)
+    id("org.jetbrains.kotlin.plugin.compose") version "2.2.10" apply false
 
     // Google Services
     id("com.google.gms.google-services") version "4.4.2" apply false
