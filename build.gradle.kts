@@ -1,7 +1,7 @@
 // Top-level build.gradle.kts
 plugins {
     // Android Gradle Plugin 9.0.1 (compatible with Gradle 9.4.1)
-    id("com.android.application") version "9.0.1" apply false
+    id("com.android.application") version "9.1.0" apply false
     id("com.android.library") version "9.1.0" apply false
 
     // NOTE: 'org.jetbrains.kotlin.android' is removed because AGP 9.0+ has built-in Kotlin
