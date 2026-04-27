@@ -199,5 +199,5 @@ dependencies {
     implementation("com.valentinilk.shimmer:compose-shimmer:1.3.0")
 
     // Start.io Ads
-    implementation("com.startapp:inapp-sdk:5.2.6")
+    implementation("com.startapp:inapp-sdk:5.3.0")
 }
