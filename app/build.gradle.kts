@@ -264,6 +264,6 @@ dependencies {
     implementation("com.valentinilk.shimmer:compose-shimmer:1.3.0")
 
     // Start.io ads — instant setup, no verification
-    implementation("com.startapp:inapp-sdk:5.+")
+    implementation("com.startapp:inapp-sdk:5.2.6")
 }
 >>>>>>> f89298d (fixed build errors)
