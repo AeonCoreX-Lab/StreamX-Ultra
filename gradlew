@@ -245,4 +245,8 @@ eval "set -- $(
         tr '\n' ' '
     )" '"$@"'
 
+<<<<<<< HEAD
 exec "$JAVACMD" "$@"
+=======
+exec "$JAVACMD" "$@"
+>>>>>>> f89298d (fixed build errors)

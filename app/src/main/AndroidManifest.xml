@@ -8,11 +8,11 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    
+
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"  android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
     <application
@@ -29,19 +29,53 @@
         android:theme="@style/Theme.StreamXUltra"
         tools:targetApi="31">
 
+        <!-- ── Main Activity ─────────────────────────────────── -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:theme="@style/Theme.StreamXUltra"
             android:supportsPictureInPicture="true"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden|uiMode">
-            
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
+        <!-- ── Payment Success Deep Link ─────────────────────── -->
+        <!--
+            LemonSqueezy payment complete হলে এই URL-এ redirect করে:
+              streamx://payment/success
+            এই Activity সেটা receive করে Firestore থেকে isPremium চেক করে।
+        -->
+        <activity
+            android:name=".ui.premium.PaymentSuccessActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.StreamXUltra">
+
+            <intent-filter android:autoVerify="true">
+                <action   android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="streamx"
+                    android:host="payment"
+                    android:pathPrefix="/success" />
+            </intent-filter>
+        </activity>
+
+        <!-- ── AdMob App ID ──────────────────────────────────── -->
+        <!--
+            Value আসে GitHub Secret ADMOB_APP_ID → build.gradle manifestPlaceholders
+            APK-এ hardcode নেই, সম্পূর্ণ secure।
+        -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="${admobAppId}" />
+
+        <!-- ── FileProvider ──────────────────────────────────── -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"
@@ -52,5 +86,5 @@
                 android:resource="@xml/provider_paths" />
         </provider>
 
-        </application>
+    </application>
 </manifest>

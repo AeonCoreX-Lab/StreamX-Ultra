@@ -122,10 +122,13 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
     var resizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var showSettingsSheet by remember { mutableStateOf(false) }
 
-    // --- EPG States (New) ---
-    var currentProgramTitle by remember { mutableStateOf("Loading Stream Info...") }
-    var nextProgramTitle by remember { mutableStateOf("Upcoming...") }
-    var epgProgress by remember { mutableFloatStateOf(0f) }
+    // --- EPG States — REAL-TIME from EpgRepository ---
+    var currentProgramTitle by remember { mutableStateOf("Loading...") }
+    var nextProgramTitle    by remember { mutableStateOf("") }
+    var epgProgress         by remember { mutableFloatStateOf(0f) }
+    var epgSource           by remember { mutableStateOf("") }
+    var currentProgramTime  by remember { mutableStateOf("") }
+    var nextProgramTime     by remember { mutableStateOf("") }
     
     // --- Dialogs ---
     var showQualityDialog by remember { mutableStateOf(false) }
@@ -168,36 +171,44 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
         exoPlayer.playWhenReady = true
     }
 
-    // Stats & EPG Engine (Updated)
-    LaunchedEffect(exoPlayer) {
+    // Stats & Real-Time EPG Engine
+    LaunchedEffect(exoPlayer, streamUrl) {
         while (isActive) {
-            // 1. Stats Update
+            // 1. Network stats
             val currentRxBytes = TrafficStats.getTotalRxBytes()
             downloadSpeed = formatSpeed(currentRxBytes - startRxBytes)
             totalDataUsed = formatData(TrafficStats.getUidRxBytes(android.os.Process.myUid()))
             startRxBytes = currentRxBytes
 
-            // 2. EPG Simulation Logic (Real-time based on clock)
-            val now = Calendar.getInstance()
-            val hour = now.get(Calendar.HOUR_OF_DAY)
-            
-            // Dummy Schedule Generation based on Hour
-            val titles = listOf("Morning News", "Tech Talk Live", "Live Sports: Final", "Music Hits", "Movie: Cyber World", "Late Night Show")
-            val programIndex = hour % titles.size
-            
-            // Set Start/End times (Assuming 1 hour programs for demo)
-            val start = Calendar.getInstance().apply { set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0) }
-            val end = (start.clone() as Calendar).apply { add(Calendar.HOUR, 1) }
-            
-            currentProgramTitle = titles[programIndex]
-            nextProgramTitle = titles[(programIndex + 1) % titles.size]
+            // 2. Real-time EPG — fetch from EpgRepository
+            try {
+                val epgState = EpgRepository.getEPG(
+                    streamUrl   = streamUrl,
+                    channelName = streamUrl.substringAfterLast("/")
+                        .substringBeforeLast(".")
+                        .replace(Regex("[_-]"), " ")
+                )
 
-            // Calculate Progress Bar
-            val totalDuration = end.timeInMillis - start.timeInMillis
-            val passed = now.timeInMillis - start.timeInMillis
-            epgProgress = (passed.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
-            
-            delay(1000)
+                epgState.current?.let { prog ->
+                    currentProgramTitle = prog.title
+                    currentProgramTime  = buildString {
+                        append(EpgRepository.formatTime(prog.startTime))
+                        append(" - ")
+                        append(EpgRepository.formatTime(prog.endTime))
+                    }
+                }
+                epgState.next?.let { prog ->
+                    nextProgramTitle = prog.title
+                    nextProgramTime  = EpgRepository.formatTime(prog.startTime)
+                }
+                epgProgress = epgState.progress
+                epgSource   = epgState.source
+            } catch (e: Exception) {
+                // Keep previous values on error
+            }
+
+            // Update every 30s (EPG changes slowly)
+            delay(30_000)
         }
     }
 
@@ -355,18 +366,21 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
             CyberSlider(icon = Icons.Default.VolumeUp, level = currentVolume.toFloat(), max = maxVolume.toFloat(), color = NeonBlue)
         }
 
-        // 5. Controls (LIVE WITH EPG)
+        // 5. Controls (LIVE WITH REAL-TIME EPG)
         AnimatedVisibility(visible = isControlsVisible, enter = fadeIn(), exit = fadeOut()) {
             AdvancedPlayerControls(
-                title = "STREAMX ULTRA LIVE",
-                networkSpeed = downloadSpeed,
-                dataUsed = totalDataUsed,
-                isPlaying = isPlaying,
-                isLocked = isLocked,
-                qualityLabel = currentQualityLabel,
-                currentProgram = currentProgramTitle,
-                nextProgram = nextProgramTitle,
-                epgProgress = epgProgress,
+                title              = streamUrl.substringAfterLast("/").substringBeforeLast(".").replace(Regex("[_-]"), " ").ifEmpty { "LIVE" },
+                networkSpeed       = downloadSpeed,
+                dataUsed           = totalDataUsed,
+                isPlaying          = isPlaying,
+                isLocked           = isLocked,
+                qualityLabel       = currentQualityLabel,
+                currentProgram     = currentProgramTitle,
+                currentProgramTime = currentProgramTime,
+                nextProgram        = nextProgramTitle,
+                nextProgramTime    = nextProgramTime,
+                epgProgress        = epgProgress,
+                epgSource          = epgSource,
                 onBack = { navController.popBackStack() },
                 onPlayPause = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
                 onLockToggle = { isLocked = !isLocked },
@@ -480,7 +494,7 @@ fun PlayerScreen(navController: NavController, encodedUrl: String) {
 }
 
 // -----------------------------------------------------------------------------
-// IMPROVED UI COMPONENTS (LIVE FOCUSED + EPG)
+// IMPROVED UI COMPONENTS (LIVE FOCUSED + REAL-TIME EPG)
 // -----------------------------------------------------------------------------
 
 @Composable
@@ -491,9 +505,12 @@ fun AdvancedPlayerControls(
     isPlaying: Boolean,
     isLocked: Boolean,
     qualityLabel: String,
-    currentProgram: String, // New
-    nextProgram: String,    // New
-    epgProgress: Float,     // New
+    currentProgram: String,
+    currentProgramTime: String = "",
+    nextProgram: String,
+    nextProgramTime: String = "",
+    epgProgress: Float,
+    epgSource: String = "",
     onBack: () -> Unit,
     onPlayPause: () -> Unit,
     onLockToggle: () -> Unit,
@@ -505,7 +522,7 @@ fun AdvancedPlayerControls(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(0.4f)) // Dim Overlay
+            .background(Color.Black.copy(0.4f))
     ) {
         // --- LOCKED STATE ---
         if (isLocked) {
@@ -533,21 +550,17 @@ fun AdvancedPlayerControls(
         ) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White) }
             Spacer(Modifier.width(8.dp))
-            
             Column(modifier = Modifier.weight(1f)) {
                 Text(title, color = LiveRed, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1)
                 Text("$qualityLabel • $networkSpeed • $dataUsed", color = Color.LightGray, fontSize = 10.sp)
             }
-            
-            IconButton(onClick = onPipClick) { Icon(Icons.Default.PictureInPictureAlt, null, tint = Color.White) }
-            IconButton(onClick = onResizeToggle) { Icon(Icons.Default.AspectRatio, null, tint = Color.White) }
-            IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Settings, null, tint = Color.White) }
+            IconButton(onClick = onPipClick)      { Icon(Icons.Default.PictureInPictureAlt, null, tint = Color.White) }
+            IconButton(onClick = onResizeToggle)   { Icon(Icons.Default.AspectRatio, null, tint = Color.White) }
+            IconButton(onClick = onSettingsClick)  { Icon(Icons.Default.Settings, null, tint = Color.White) }
         }
 
-        // --- CENTER CONTROLS (Only Play/Pause) ---
-        Box(
-            modifier = Modifier.align(Alignment.Center)
-        ) {
+        // --- CENTER PLAY/PAUSE ---
+        Box(modifier = Modifier.align(Alignment.Center)) {
             Box(
                 modifier = Modifier
                     .size(72.dp)
@@ -563,45 +576,95 @@ fun AdvancedPlayerControls(
             }
         }
 
-        // --- BOTTOM BAR (EPG + CONTROLS) ---
+        // --- BOTTOM BAR (REAL-TIME EPG) ---
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.9f))))
-                .padding(16.dp)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.95f))))
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            // 1. Current Program & LIVE Tag
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    text = currentProgram, 
-                    color = Color.White, 
-                    fontWeight = FontWeight.Bold, 
-                    fontSize = 18.sp,
-                    modifier = Modifier.weight(1f)
-                )
-                Box(Modifier.background(LiveRed, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                    Text("LIVE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            // Current program title + LIVE badge
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = currentProgram.ifEmpty { "Loading..." },
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        maxLines = 1
+                    )
+                    if (currentProgramTime.isNotEmpty()) {
+                        Text(
+                            text = currentProgramTime,
+                            color = NeonBlue.copy(0.85f),
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                // LIVE badge
+                Box(
+                    Modifier
+                        .background(LiveRed, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text("● LIVE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black)
                 }
             }
-            
+
             Spacer(Modifier.height(8.dp))
-            
-            // 2. Dynamic EPG Progress Bar
-            Box(Modifier.fillMaxWidth().height(4.dp).background(Color.White.copy(0.2f), RoundedCornerShape(2.dp))) {
-                Box(Modifier.fillMaxWidth(epgProgress).fillMaxHeight().background(NeonBlue, RoundedCornerShape(2.dp)))
+
+            // EPG progress bar
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(Color.White.copy(0.15f), RoundedCornerShape(2.dp))
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(epgProgress.coerceIn(0f, 1f))
+                        .fillMaxHeight()
+                        .background(
+                            Brush.horizontalGradient(listOf(NeonBlue, NeonPurple)),
+                            RoundedCornerShape(2.dp)
+                        )
+                )
             }
-            
+
             Spacer(Modifier.height(8.dp))
-            
-            // 3. Next Program & Bottom Actions
+
+            // Next program + controls
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Next: $nextProgram", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                
+                Column(modifier = Modifier.weight(1f)) {
+                    if (nextProgram.isNotEmpty()) {
+                        Text(
+                            text = "Next: $nextProgram",
+                            color = Color.Gray,
+                            fontSize = 12.sp,
+                            maxLines = 1
+                        )
+                        if (nextProgramTime.isNotEmpty()) {
+                            Text(
+                                text = "At $nextProgramTime",
+                                color = Color.Gray.copy(0.7f),
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                    if (epgSource.isNotEmpty()) {
+                        Text(
+                            text = "EPG: $epgSource",
+                            color = Color.Gray.copy(0.4f),
+                            fontSize = 9.sp
+                        )
+                    }
+                }
                 Row {
                     IconButton(onClick = onLockToggle) {
                         Icon(Icons.Default.LockOpen, null, tint = Color.White)

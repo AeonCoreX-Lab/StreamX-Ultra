@@ -19,6 +19,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.aeoncorex.streamx.ads.AdManager
 import com.aeoncorex.streamx.navigation.AppNavigation
 import com.aeoncorex.streamx.ui.music.MusicManager
 import com.aeoncorex.streamx.ui.movie.TorrentEngine
@@ -36,13 +37,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        
+
+        // ── AdMob init (App Open Ad + Interstitial pre-load) ──────
+        // Must be called before setContent so the App Open Ad
+        // is ready when onStart fires right after onCreate.
+        AdManager.initialize(application)
+
         lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                TorrentEngine.clearCache(applicationContext)
-            } catch (e: Exception) {
-                Log.e("MainActivity", "Cache clear failed")
-            }
+            try { TorrentEngine.clearCache(applicationContext) }
+            catch (e: Exception) { Log.e("MainActivity", "Cache clear failed") }
         }
 
         checkPermissions()
@@ -67,14 +70,15 @@ class MainActivity : ComponentActivity() {
     private fun checkPermissions() {
         val permissions = mutableListOf(
             Manifest.permission.RECORD_AUDIO,
-            // FIX: Added storage permissions for torrent downloading
             Manifest.permission.WRITE_EXTERNAL_STORAGE,
             Manifest.permission.READ_EXTERNAL_STORAGE
-        ) 
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
-        val notGranted = permissions.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        val notGranted = permissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
         if (notGranted.isNotEmpty()) permissionLauncher.launch(notGranted.toTypedArray())
     }
 

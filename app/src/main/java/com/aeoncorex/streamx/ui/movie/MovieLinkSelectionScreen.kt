@@ -1,6 +1,8 @@
 package com.aeoncorex.streamx.ui.movie
 
+import android.app.Activity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -8,290 +10,201 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.aeoncorex.streamx.ads.AdManager
 import java.net.URLDecoder
 import java.net.URLEncoder
 
+// ── TORRENT ONLY — web servers সরানো হয়েছে ──────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MovieLinkSelectionScreen(
     navController: NavController,
-    imdbId: String,
-    tmdbId: Int,
-    title: String,
-    type: String,
-    season: Int,
-    episode: Int
+    imdbId: String, tmdbId: Int, title: String,
+    type: String, season: Int, episode: Int
 ) {
-    // FIX: remember(title) ensures updates if title changes
-    val decodedTitle = remember(title) { try { URLDecoder.decode(title, "UTF-8") } catch(e: Exception) { title } }
-    
-    // States
-    var torrentLinks by remember { mutableStateOf<List<StreamLink>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-
-    // --- WEB SERVER LINKS GENERATION ---
-    val webServers = remember(imdbId, tmdbId, type, season, episode) {
-        ServerLinkGenerator.generateLinks(
-            imdbId = if (imdbId == "null" || imdbId.isEmpty()) null else imdbId,
-            tmdbId = if (tmdbId == 0) null else tmdbId,
-            isSeries = type.equals("SERIES", ignoreCase = true) || type.equals("TV", ignoreCase = true),
-            season = season,
-            episode = episode
-        )
+    val context      = LocalContext.current
+    val activity     = context as? Activity
+    val decodedTitle = remember(title) {
+        try { URLDecoder.decode(title, "UTF-8") } catch (_: Exception) { title }
     }
 
-    // Fetch Torrents
+    var torrentLinks by remember { mutableStateOf<List<StreamLink>>(emptyList()) }
+    var isLoading    by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var adLoading    by remember { mutableStateOf(false) }
+
     LaunchedEffect(decodedTitle, season, episode) {
-        isLoading = true
-        errorMessage = null
+        isLoading = true; errorMessage = null
         try {
             val movieType = if (type.equals("MOVIE", true)) MovieType.MOVIE else MovieType.SERIES
-            val isAnime = decodedTitle.contains("Naruto", true) || 
-                          decodedTitle.contains("One Piece", true) || 
-                          decodedTitle.contains("Demon Slayer", true) ||
-                          decodedTitle.contains("Jujutsu", true)
-
+            val isAnime   = listOf("Naruto","One Piece","Demon Slayer","Jujutsu","Attack on Titan","Dragon Ball")
+                .any { decodedTitle.contains(it, ignoreCase = true) }
             val validImdb = if (imdbId != "null" && imdbId.isNotEmpty()) imdbId else null
-
-            val links = TorrentRepository.getStreamLinks(
-                type = movieType,
-                title = decodedTitle,
-                imdbId = validImdb,
-                season = season,
-                episode = episode,
-                isAnime = isAnime
+            torrentLinks  = TorrentRepository.getStreamLinks(
+                type = movieType, title = decodedTitle, imdbId = validImdb,
+                season = season, episode = episode, isAnime = isAnime
             )
-            torrentLinks = links
         } catch (e: Exception) {
-            errorMessage = "Search Error: ${e.localizedMessage}"
-        } finally {
-            isLoading = false
+            errorMessage = "Search failed: ${e.localizedMessage}"
+        } finally { isLoading = false }
+    }
+
+    fun playTorrent(magnet: String) {
+        if (activity == null) return
+        adLoading = true
+        AdManager.showInterstitial(activity) {
+            adLoading = false
+            val enc = URLEncoder.encode(magnet, "UTF-8")
+            navController.navigate("torrent_player/$enc")
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { 
-                    Column {
-                        Text("SELECT SOURCE", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        Text(if(season > 0) "$decodedTitle (S$season E$episode)" else decodedTitle, color = Color.Gray, fontSize = 12.sp, maxLines = 1)
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        // FIX: Changed Icons.AutoMirrored.Filled.ArrowBack to Icons.Default.ArrowBack
-                        Icon(Icons.Default.ArrowBack, "Back", tint = Color.Cyan)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0F0F15))
-            )
-        },
-        containerColor = Color.Black
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .background(Brush.verticalGradient(listOf(Color(0xFF0F0F15), Color.Black)))
-        ) {
-            LazyColumn(contentPadding = PaddingValues(16.dp)) {
-                
-                // --- SECTION 1: FAST WEB SERVERS ---
-                item {
-                    Text("⚡ FAST CLOUD SERVERS (NO DOWNLOAD)", color = Color.Green, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-                }
-                
-                if (webServers.isEmpty()) {
-                    item { Text("No server links available (Missing IDs)", color = Color.Gray, fontSize = 12.sp) }
-                } else {
-                    items(webServers) { server ->
-                        ServerCard(server) {
-                            val encodedUrl = URLEncoder.encode(server.url, "UTF-8")
-                            navController.navigate("webview_player/$encodedUrl")
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text("4K / 1080P Torrents", color = Color.White,
+                                fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                if (season > 0) "$decodedTitle · S${season}E${episode}" else decodedTitle,
+                                color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                            )
                         }
-                    }
-                }
-
-                item { 
-                    Spacer(Modifier.height(20.dp))
-                    Divider(color = Color.DarkGray, thickness = 1.dp)
-                    Spacer(Modifier.height(20.dp))
-                }
-
-                   // --- SECTION 2: TORRENTS ---
-                item {
-                    Text("💎 4K/1080p TORRENTS (NATIVE PLAYER)", color = Color.Cyan, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
-                }
-
-                if (isLoading) {
-                    item {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Cyan, strokeWidth = 2.dp)
-                            Spacer(Modifier.width(10.dp))
-                            Text("Scanning P2P Networks...", color = Color.Gray, fontSize = 12.sp)
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { navController.popBackStack() }) {
+                            Icon(Icons.Default.ArrowBack, null, tint = Color.Cyan)
                         }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0A0A14))
+                )
+            },
+            containerColor = Color.Black
+        ) { padding ->
+            Box(
+                Modifier.fillMaxSize().padding(padding)
+                    .background(Brush.verticalGradient(listOf(Color(0xFF0A0A14), Color.Black)))
+            ) {
+                when {
+                    isLoading -> Column(
+                        Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator(color = Color.Cyan, modifier = Modifier.size(36.dp), strokeWidth = 3.dp)
+                        Spacer(Modifier.height(12.dp))
+                        Text("Scanning P2P Networks…", color = Color.Gray, fontSize = 13.sp)
+                        Text("YTS · RARBG · EZTV · 1337x", color = Color.Gray.copy(0.5f), fontSize = 11.sp)
                     }
-                } else if (errorMessage != null) {
-                    item { Text("Error: $errorMessage", color = Color.Red, fontSize = 12.sp) }
-                } else if (torrentLinks.isEmpty()) {
-                    item { Text("No torrents found. Try Cloud Servers.", color = Color.Gray) }
-                } else {
-                    items(torrentLinks) { link ->
-                        StreamLinkCard(link) {
-                            val encodedUrl = URLEncoder.encode(link.magnet, "UTF-8")
-                            // Pass to the Native Player Screen we updated earlier
-                            navController.navigate("movie_player/$encodedUrl")
+                    errorMessage != null -> Column(
+                        Modifier.align(Alignment.Center).padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(Icons.Rounded.SearchOff, null, tint = Color.Gray, modifier = Modifier.size(44.dp))
+                        Spacer(Modifier.height(12.dp))
+                        Text(errorMessage!!, color = Color.Gray, textAlign = TextAlign.Center, fontSize = 13.sp)
+                    }
+                    torrentLinks.isEmpty() -> Column(
+                        Modifier.align(Alignment.Center).padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(Icons.Rounded.CloudOff, null, tint = Color.Gray, modifier = Modifier.size(44.dp))
+                        Spacer(Modifier.height(12.dp))
+                        Text("No torrents found", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text("Try instant stream instead", color = Color.Gray, fontSize = 13.sp)
+                        Spacer(Modifier.height(16.dp))
+                        Button(
+                            onClick = { navController.popBackStack() },
+                            colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E2A1E))
+                        ) { Text("← Use Instant Play", color = Color.Cyan) }
+                    }
+                    else -> LazyColumn(
+                        contentPadding     = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        item {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
+                                Icon(Icons.Rounded.DownloadForOffline, null, tint = Color.Cyan, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("${torrentLinks.size} torrent sources found",
+                                    color = Color.Cyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
+                        items(torrentLinks) { link ->
+                            TorrentCard(link) { playTorrent(link.magnet) }
+                        }
+                        item { Spacer(Modifier.height(20.dp)) }
                     }
                 }
+            }
+        }
+
+        if (adLoading) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(0.88f)), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Color.Cyan, modifier = Modifier.size(40.dp))
             }
         }
     }
 }
 
 @Composable
-fun StreamLinkCard(link: StreamLink, onClick: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A20)),
-        shape = RoundedCornerShape(8.dp),
+fun TorrentCard(link: StreamLink, onClick: () -> Unit) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
+            .background(Color(0xFF0F0F1A), RoundedCornerShape(10.dp))
+            .border(1.dp, Color.White.copy(0.07f), RoundedCornerShape(10.dp))
             .clickable { onClick() }
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Seeds Icon
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(40.dp)) {
-                Icon(Icons.Default.ArrowDownward, null, tint = Color.Green, modifier = Modifier.size(20.dp))
-                Text("${link.seeds}", color = Color.Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
-            
-            Spacer(Modifier.width(12.dp))
-            
-            Column(modifier = Modifier.weight(1f)) {
-                Text(link.title, color = Color.White, fontWeight = FontWeight.Medium, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(link.size, color = Color.Gray, fontSize = 11.sp)
-                    Spacer(Modifier.width(8.dp))
-                    Box(modifier = Modifier.background(Color.DarkGray, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 2.dp)) {
-                        Text(link.source, color = Color.Cyan, fontSize = 9.sp)
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    // Quality Badge
-                    Box(modifier = Modifier.background(Color.DarkGray, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 2.dp)) {
-                        Text(link.quality, color = Color.Yellow, fontSize = 9.sp)
-                    }
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(44.dp)) {
+            val seedColor = if (link.seeds > 20) Color.Green else if (link.seeds > 5) Color.Yellow else Color.Red
+            Icon(Icons.Rounded.ArrowUpward, null, tint = seedColor, modifier = Modifier.size(18.dp))
+            Text("${link.seeds}", color = seedColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text("seeds", color = Color.Gray, fontSize = 9.sp)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(link.title, color = Color.White, fontSize = 13.sp,
+                fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(5.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val (qbg, qfg) = when (link.quality) {
+                    "4K","2160P" -> Color(0xFF1A0A00) to Color(0xFFFF6D00)
+                    "1080P"      -> Color(0xFF001A0A) to Color(0xFF00E676)
+                    "720P"       -> Color(0xFF001A1A) to Color(0xFF00E5FF)
+                    else         -> Color(0xFF1A1A1A) to Color.Gray
+                }
+                Box(Modifier.background(qbg, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                    Text(link.quality, color = qfg, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+                Box(
+                    Modifier.background(Color(0xFF0A0A1A), RoundedCornerShape(4.dp))
+                        .border(1.dp, Color.Cyan.copy(0.2f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) { Text(link.source.take(8), color = Color.Cyan.copy(0.8f), fontSize = 9.sp) }
+                if (link.size.isNotEmpty()) {
+                    Text(link.size, color = Color.Gray, fontSize = 10.sp,
+                        modifier = Modifier.align(Alignment.CenterVertically))
                 }
             }
-            
-            Icon(Icons.Default.PlayCircle, null, tint = Color.Cyan, modifier = Modifier.size(32.dp))
         }
-    }
-}
-
-object ServerLinkGenerator {
-    fun generateLinks(
-        imdbId: String?,
-        tmdbId: Int?,
-        isSeries: Boolean,
-        season: Int,
-        episode: Int
-    ): List<ServerLink> {
-        val servers = mutableListOf<ServerLink>()
-
-        // ------------------------------------------------------------
-        // 1. CLOUD STREAM (VidSrc.win) - NEW ULTIMATE SERVER
-        // ------------------------------------------------------------
-        // This is the "Next Level" player request
-        if (tmdbId != null) {
-             val url = if (isSeries) "https://vidsrc.win/tv.html?id=$tmdbId&s=$season&e=$episode"
-                       else "https://vidsrc.win/movie.html?id=$tmdbId"
-             // High priority label
-             servers.add(ServerLink("Vidsrc Win (next level player)", url))
-        } else if (imdbId != null) {
-             val url = if (isSeries) "https://vidsrc.win/tv.html?id=$imdbId&s=$season&e=$episode"
-                       else "https://vidsrc.win/movie.html?id=$imdbId"
-             servers.add(ServerLink("Vidsrc Win (next level player)", url))
-        }
-        
-        // 2. SuperEmbed (Prioritize TMDB)
-        if (tmdbId != null) {
-            val url = if (isSeries) "https://multiembed.mov/?video_id=$tmdbId&tmdb=1&s=$season&e=$episode"
-                      else "https://multiembed.mov/?video_id=$tmdbId&tmdb=1"
-            servers.add(ServerLink("SuperEmbed (TMDB - Fast)", url))
-        } else if (imdbId != null) {
-            val url = if (isSeries) "https://multiembed.mov/?video_id=$imdbId&s=$season&e=$episode"
-                      else "https://multiembed.mov/?video_id=$imdbId"
-            servers.add(ServerLink("SuperEmbed (IMDb - Fast)", url))
-        }
-
-        // 3. 2Embed
-        if (tmdbId != null) {
-            val url = if (isSeries) "https://www.2embed.stream/embed/tv/$tmdbId/$season/$episode"
-                      else "https://www.2embed.stream/embed/movie/$tmdbId"
-            servers.add(ServerLink("2Embed (TMDB - Clean)", url))
-        } else if (imdbId != null) {
-            val url = if (isSeries) "https://www.2embed.stream/embed/tv/$imdbId/$season/$episode"
-                      else "https://www.2embed.stream/embed/movie/$imdbId"
-            servers.add(ServerLink("2Embed (IMDb - Clean)", url))
-        }
-
-        // 4. VidSrc Pro
-        if (imdbId != null) {
-            val url = if (isSeries) "https://vidsrc.xyz/embed/tv?imdb=$imdbId&season=$season&episode=$episode"
-                      else "https://vidsrc.xyz/embed/movie?imdb=$imdbId"
-            servers.add(ServerLink("VidSrc Pro (IMDb - Multi)", url))
-        } else if (tmdbId != null) {
-             val url = if (isSeries) "https://vidsrc.xyz/embed/tv?tmdb=$tmdbId&season=$season&episode=$episode"
-                      else "https://vidsrc.xyz/embed/movie?tmdb=$tmdbId"
-            servers.add(ServerLink("VidSrc Pro (TMDB - Multi)", url))
-        }
-        
-        return servers
-    }
-}
-
-data class ServerLink(val name: String, val url: String)
-
-@Composable
-fun ServerCard(server: ServerLink, onClick: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF202025)),
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clickable { onClick() }
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(Icons.Default.Public, null, tint = Color.Green, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(16.dp))
-            Column {
-                Text(server.name, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Text(server.url.take(40) + "...", color = Color.Gray, fontSize = 10.sp)
-            }
-            Spacer(Modifier.weight(1f))
-            Icon(Icons.Default.PlayCircleOutline, null, tint = Color.White)
-        }
+        Icon(Icons.Rounded.PlayCircle, null, tint = Color.Cyan, modifier = Modifier.size(30.dp))
     }
 }

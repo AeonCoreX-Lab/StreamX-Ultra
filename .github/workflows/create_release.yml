@@ -34,7 +34,6 @@ jobs:
       - name: Set NDK Env
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
 
-      # cargo-ndk না থাকলে Gradle স্ক্রিপ্ট ফেইল করবে
       - name: Install Rust and Cargo-NDK
         run: |
           rustup target add aarch64-linux-android
@@ -114,7 +113,7 @@ jobs:
             done
           done
 
-          # ── MPV C++ header files (official repo) ──────────────────────
+          # ── MPV C++ header files ───────────────────────────────────
           echo "📂 Downloading mpv header files..."
           mkdir -p ${{ github.workspace }}/app/src/main/cpp/include/mpv
           curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/client.h    -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/client.h
@@ -122,11 +121,7 @@ jobs:
           curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render_gl.h -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/render_gl.h
           curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/stream_cb.h -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/stream_cb.h
 
-          # ── FFmpeg C++ header files ────────────────────────────────────
-          # FIX: mpv_handler.cpp uses <libavcodec/jni.h> which lives inside
-          # FFmpeg's include tree.  The mpv-android buildscripts install
-          # headers to  buildscripts/prefix/<arch>/include/.  We copy them
-          # once (arm64 prefix has identical public headers for all arches).
+          # ── FFmpeg C++ header files ────────────────────────────────
           echo "📂 Copying FFmpeg header files..."
           FFMPEG_INCLUDE_BASE=$(find ${{ github.workspace }}/mpv-android/buildscripts/prefix \
             -maxdepth 2 -type d -name "include" | head -n 1)
@@ -146,7 +141,7 @@ jobs:
               fi
             done
           else
-            echo "❌ ERROR: FFmpeg headers not found. Cannot compile mpv_handler.cpp."
+            echo "❌ ERROR: FFmpeg headers not found."
             exit 1
           fi
 
@@ -169,11 +164,16 @@ jobs:
 
       - name: Build Signed Release APK
         env:
-          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
-          RELEASE_KEYSTORE_FILE: ${{ github.workspace }}/release.keystore
+          TMDB_API_KEY:              ${{ secrets.TMDB_API_KEY }}
+          # GEMINI_API_KEY removed — AI system removed from app
+          STARTAPP_APP_ID:           ${{ secrets.STARTAPP_APP_ID }}
+          ADMOB_APP_ID:              ${{ secrets.ADMOB_APP_ID }}
+          ADMOB_INTERSTITIAL_ID:     ${{ secrets.ADMOB_INTERSTITIAL_ID }}
+          ADMOB_APP_OPEN_ID:         ${{ secrets.ADMOB_APP_OPEN_ID }}
+          RELEASE_KEYSTORE_FILE:     ${{ github.workspace }}/release.keystore
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          RELEASE_KEY_ALIAS:         ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD:      ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
           ./gradlew assembleRelease \
             -PRELEASE_KEYSTORE_FILE=${{ env.RELEASE_KEYSTORE_FILE }} \
@@ -210,9 +210,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: app/build/outputs/apk/release/*.apk
-          name: "StreamX Ultra ${{ github.ref_name }}"
+          files:    app/build/outputs/apk/release/*.apk
+          name:     "StreamX Ultra ${{ github.ref_name }}"
           tag_name: ${{ github.ref_name }}
-          body: ${{ steps.build_changelog.outputs.changelog }}
+          body:     ${{ steps.build_changelog.outputs.changelog }}
         env:
           GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
