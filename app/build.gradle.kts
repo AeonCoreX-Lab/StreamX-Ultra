@@ -196,7 +196,7 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.datastore:datastore-preferences:1.2.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:$lifecycleVersion")
-    implementation("com.valentinilk.shimmer:compose-shimmer:1.3.0")
+    implementation("com.valentinilk.shimmer:compose-shimmer:1.4.0")
 
     // Start.io Ads
     implementation("com.startapp:inapp-sdk:5.2.6")
