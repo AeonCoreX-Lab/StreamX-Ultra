@@ -1,0 +1,6 @@
+[submodule "premium-core"]
+	path = premium-core
+	url = https://github.com/cybernahid-dev/streamx-premium-core.git
+[submodule "streamx-premium-core"]
+	path = streamx-premium-core
+	url = https://github.com/cybernahid-dev/streamx-premium-core.git

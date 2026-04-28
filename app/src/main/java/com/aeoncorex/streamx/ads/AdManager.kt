@@ -108,12 +108,12 @@ object AdManager {
     }
 
     fun isPremiumCached(): Boolean = try {
-        com.aeoncorex.streamx.ai.PremiumManager.isPremiumCached()
+        com.aeoncorex.streamx.ui.premium.PremiumManager.isPremiumCached()
     } catch (_: Exception) { false }
 
     private suspend fun isPremiumSafe(): Boolean = try {
         kotlinx.coroutines.withContext(Dispatchers.IO) {
-            com.aeoncorex.streamx.ai.PremiumManager.isPremium()
+            com.aeoncorex.streamx.ui.premium.PremiumManager.isPremium()
         }
     } catch (_: Exception) { isPremiumCached() }
 }

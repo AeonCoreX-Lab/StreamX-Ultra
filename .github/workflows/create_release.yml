@@ -18,6 +18,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          submodules: "recursive"
+          token: ${{ secrets.ACCESS_TOKEN }}
+        with:
           fetch-depth: 0
 
       - name: Set up JDK

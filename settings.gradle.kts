@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "StreamX Ultra"
 include(":app")
+include(":premium-core")

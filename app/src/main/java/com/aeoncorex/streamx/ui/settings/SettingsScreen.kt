@@ -27,7 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.aeoncorex.streamx.ai.PremiumManager
+import com.aeoncorex.streamx.ui.premium.PremiumManager
 import com.aeoncorex.streamx.ui.home.CyberMeshBackground
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.firestore.ktx.firestore

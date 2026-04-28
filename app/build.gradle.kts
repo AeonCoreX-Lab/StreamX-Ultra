@@ -144,6 +144,7 @@ val cargoBuildTask = tasks.register<CargoBuildTask>("cargoBuild") {
 tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configureEach { dependsOn(cargoBuildTask) }
 
 dependencies {
+    implementation(project(":premium-core"))
     // Version Variables
     val media3Version = "1.10.0"
     val lifecycleVersion = "2.8.0"

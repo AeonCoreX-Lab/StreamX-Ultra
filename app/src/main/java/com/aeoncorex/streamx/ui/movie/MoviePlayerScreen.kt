@@ -55,8 +55,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.navigation.NavController
-import com.aeoncorex.streamx.ai.AiSceneExplainer
-import com.aeoncorex.streamx.ai.PremiumManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -185,9 +183,6 @@ val SUBTITLE_COLOR_PRESETS = listOf(
     ColorPreset("No BG",    Color.White,       Color.Transparent),
     ColorPreset("Dark BG",  Color.White,       Color.Black.copy(0.90f)),
 )
-
-// ── AI state ────────────────────────────────────────────────────────
-enum class AiOverlayState { HIDDEN, LOADING, SPEAKING, DONE, ERROR }
 
 // ═══════════════════════════════════════════════════════════════════
 //  Helper functions
@@ -364,27 +359,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var liveCaptionEnabled by remember { mutableStateOf(false) }
 
     // ── AI Scene Explainer state ──────────────────────────────────
-    var aiOverlayState     by remember { mutableStateOf(AiOverlayState.HIDDEN) }
-    var aiExplanationText  by remember { mutableStateOf("") }
-    var aiRevealedText     by remember { mutableStateOf("") }   // word-by-word reveal
-    var aiErrorText        by remember { mutableStateOf("") }
-    var showPremiumGate    by remember { mutableStateOf(false) }
-
-    // ── AeonCore v2.0: Aura Frame state ──────────────────────────
-    // auraActive = true → movie shrinks, Aura Frame shows
-    var auraActive         by remember { mutableStateOf(false) }
-    var waveAmplitude      by remember { mutableFloatStateOf(0f) }
-
-    // Animated movie window size: fullscreen (1f) → pip (0f)
-    val auraTransition     by animateFloatAsState(
-        targetValue   = if (auraActive) 1f else 0f,
-        animationSpec = tween(600, easing = FastOutSlowInEasing),
-        label         = "aura_transition"
-    )
-
-    // AiSceneExplainer lives for the entire screen lifetime
-    val aiExplainer = remember { AiSceneExplainer(context) }
-
     // ── Audio / system ────────────────────────────────────────────
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVolume    = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
@@ -408,7 +382,6 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             try { StreamXCore.pauseMpvVideo(true) } catch (e: Exception) {}
-            aiExplainer.shutdown()   // ← shutdown TTS
             TorrentEngine.stop()
             TorrentEngine.clearCache(context)
         }
@@ -535,11 +508,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = {
-                            if (aiOverlayState != AiOverlayState.HIDDEN) return@detectTapGestures
                             if (showSettingsMenu) showSettingsMenu = false else isControlsVisible = !isControlsVisible
                         },
                         onDoubleTap = { offset ->
-                            if (isLocked || showSettingsMenu || aiOverlayState != AiOverlayState.HIDDEN) return@detectTapGestures
+                            if (isLocked || showSettingsMenu) return@detectTapGestures
                             val fwd = offset.x > size.width / 2
                             val target = (currentTime + if (fwd) 10.0 else -10.0).coerceIn(0.0, totalDuration)
                             try { StreamXCore.seekMpvAbsolute(target); currentTime = target } catch (e: Exception) {}
@@ -553,7 +525,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         onDragStart = { showGestureOverlay = true; dragAccumulator = 0f },
                         onDragEnd   = { scope.launch { delay(500); showGestureOverlay = false }; dragAccumulator = 0f }
                     ) { change, dragAmount ->
-                        if (isLocked || showSettingsMenu || aiOverlayState != AiOverlayState.HIDDEN) return@detectVerticalDragGestures
+                        if (isLocked || showSettingsMenu) return@detectVerticalDragGestures
                         dragAccumulator += dragAmount
                         val now = System.currentTimeMillis()
                         if (now - lastUpdateTime > 50 && abs(dragAccumulator) > 5f) {
@@ -656,7 +628,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         // ── Player controls ───────────────────────────────────────
         if (!isPreBuffering || videoPath != null) {
             AnimatedVisibility(
-                visible = isControlsVisible && !showSettingsMenu && aiOverlayState == AiOverlayState.HIDDEN,
+                visible = isControlsVisible && !showSettingsMenu,
                 enter   = fadeIn(), exit = fadeOut()
             ) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(0.4f))) {
@@ -673,58 +645,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             }
 
                             // ── AI Scene Explain button (AeonCore v2.0) ──
-                            IconButton(onClick = {
-                                scope.launch {
-                                    val isPremium = PremiumManager.isPremium()
-                                    if (!isPremium) {
-                                        showPremiumGate = true
-                                    } else {
-                                        isPlaying = false
-                                        try { StreamXCore.pauseMpvVideo(true) } catch (e: Exception) {}
-                                        aiRevealedText = ""
 
-                                        aiExplainer.explain(
-                                            movieTitle      = movieTitle.ifBlank { "this movie" },
-                                            currentTimeSecs = currentTime,
-                                            captureFrame    = { outputPath ->
-                                                try {
-                                                    StreamXCore.commandNative(arrayOf("screenshot-to-file", outputPath, "video")); true
-                                                } catch (e: Exception) { Log.e("MoviePlayer", "Frame capture: ${e.message}"); false }
-                                            },
-                                            onLoading       = {
-                                                aiOverlayState = AiOverlayState.LOADING
-                                                auraActive     = true   // ← trigger Aura Frame
-                                            },
-                                            onExplanation   = { text ->
-                                                aiExplanationText = text
-                                                aiOverlayState    = AiOverlayState.SPEAKING
-                                            },
-                                            onSpeakStart    = { /* aura already active */ },
-                                            onAmplitude     = { amp -> waveAmplitude = amp },
-                                            onWordSpoken    = { words -> aiRevealedText = words },
-                                            onSpeakDone     = {
-                                                aiOverlayState = AiOverlayState.DONE
-                                            },
-                                            onError         = { msg ->
-                                                aiErrorText    = msg
-                                                aiOverlayState = AiOverlayState.ERROR
-                                                auraActive     = false
-                                                waveAmplitude  = 0f
-                                                isPlaying = true
-                                                try { StreamXCore.pauseMpvVideo(false) } catch (e: Exception) {}
-                                                scope.launch { delay(3000); aiOverlayState = AiOverlayState.HIDDEN }
-                                            }
-                                        )
-                                    }
-                                }
-                            }) {
-                                Icon(
-                                    Icons.Rounded.AutoAwesome,
-                                    contentDescription = "AI Scene Explain",
-                                    tint     = Color(0xFFB388FF),   // purple-ish = AI brand color
-                                    modifier = Modifier.size(28.dp)
-                                )
-                            }
 
                             // Live Caption button
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -909,430 +830,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         // ══════════════════════════════════════════════════════════
         //  AeonCore v2.0 — Aura Frame Experience
         // ══════════════════════════════════════════════════════════
-        AnimatedVisibility(
-            visible  = auraActive,
-            enter    = fadeIn(tween(400)),
-            exit     = fadeOut(tween(500)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            AuraFrameExperience(
-                state            = aiOverlayState,
-                movieTitle       = movieTitle,
-                revealedText     = aiRevealedText,
-                fullText         = aiExplanationText,
-                errorText        = aiErrorText,
-                waveAmplitude    = waveAmplitude,
-                auraTransition   = auraTransition,
-                onDismiss        = {
-                    aiExplainer.stopSpeaking()
-                    aiOverlayState = AiOverlayState.HIDDEN
-                    auraActive     = false
-                    waveAmplitude  = 0f
-                    isPlaying      = true
-                    try { StreamXCore.pauseMpvVideo(false) } catch (e: Exception) {}
-                }
-            )
-        }
-
-        // ── Premium gate overlay ──────────────────────────────────
-        AnimatedVisibility(
-            visible  = showPremiumGate,
-            enter    = fadeIn() + slideInVertically { it / 4 },
-            exit     = fadeOut() + slideOutVertically { it / 4 },
-            modifier = Modifier.fillMaxSize()
-        ) {
-            PremiumGateOverlay(
-                onDismiss = { showPremiumGate = false },
-                onUpgrade = {
-                    showPremiumGate = false
-                    // TODO: Navigate to subscription/purchase screen
-                    Toast.makeText(context, "Opening subscription…", Toast.LENGTH_SHORT).show()
-                }
-            )
-        }
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════
-//  AeonCore v2.0 — Aura Frame Experience
-//  ──────────────────────────────────────
-//  Full-screen split experience:
-//  • Top: movie window (floating, neon aura border, slow-loop)
-//  • Middle: Waveform visualizer (real-time amplitude bars)
-//  • Bottom: Word-by-word text reveal + metadata cards + "Got It" button
-// ═══════════════════════════════════════════════════════════════════
-@Composable
-private fun AuraFrameExperience(
-    state:          AiOverlayState,
-    movieTitle:     String,
-    revealedText:   String,
-    fullText:       String,
-    errorText:      String,
-    waveAmplitude:  Float,
-    auraTransition: Float,   // 0→1 as aura opens
-    onDismiss:      () -> Unit
-) {
-    val Purple     = Color(0xFF7C4DFF)
-    val PurpleL    = Color(0xFFB388FF)
-    val Gold       = Color(0xFFFFD700)
-    val infiniteT  = rememberInfiniteTransition(label = "aura")
-
-    // Aura glow pulse
-    val auraPulse by infiniteT.animateFloat(
-        initialValue = 0.5f, targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "pulse"
-    )
-
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(listOf(Color(0xFF06040F), Color(0xFF080412), Color(0xFF060210)))
-            )
-    ) {
-
-        // ── Decorative background glows ───────────────────────────
-        Box(Modifier.size(400.dp).offset((-80).dp, (-80).dp)
-            .background(Brush.radialGradient(listOf(Purple.copy(0.12f), Color.Transparent)), CircleShape))
-        Box(Modifier.size(300.dp).align(Alignment.BottomEnd).offset(60.dp, 80.dp)
-            .background(Brush.radialGradient(listOf(Gold.copy(0.07f), Color.Transparent)), CircleShape))
-
-        Column(
-            Modifier.fillMaxSize().padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-
-            // ── Movie window (Aura Frame) ─────────────────────────
-            // Shrinks in from full → pip via auraTransition
-            val pipHeight = (180 + 80 * (1f - auraTransition)).dp
-
-            Box(
-                Modifier
-                    .fillMaxWidth(0.65f + 0.35f * (1f - auraTransition))
-                    .height(pipHeight)
-                    .graphicsLayer {
-                        scaleX = 0.65f + 0.35f * (1f - auraTransition)
-                        scaleY = 0.65f + 0.35f * (1f - auraTransition)
-                    }
-                    .clip(RoundedCornerShape(16.dp))
-                    // Neon aura border — pulses with AI speech
-                    .border(
-                        width = (2 + 1.5f * (if (state == AiOverlayState.SPEAKING) auraPulse else 0.5f)).dp,
-                        brush = Brush.sweepGradient(
-                            listOf(Purple.copy(auraPulse), PurpleL, Gold.copy(auraPulse * 0.8f), Purple.copy(auraPulse))
-                        ),
-                        shape = RoundedCornerShape(16.dp)
-                    )
-                    .background(Color.Black)
-                    .align(Alignment.CenterHorizontally)
-            ) {
-                // "Scene from movie" placeholder label
-                // The actual MPV surface is behind this overlay —
-                // user sees the paused frame through the transparent Aura overlay
-                Box(Modifier.fillMaxSize().background(Color.Black.copy(0.3f)), contentAlignment = Alignment.BottomStart) {
-                    Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.AutoAwesome, null, tint = PurpleL, modifier = Modifier.size(10.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Scene captured", color = PurpleL.copy(0.7f), fontSize = 9.sp, letterSpacing = 0.5.sp)
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(20.dp))
-
-            when (state) {
-
-                // ── LOADING ───────────────────────────────────────
-                AiOverlayState.LOADING -> {
-                    AuraLoadingSection(infiniteT, Purple, PurpleL)
-                }
-
-                // ── SPEAKING ──────────────────────────────────────
-                AiOverlayState.SPEAKING, AiOverlayState.DONE -> {
-                    // Waveform visualizer
-                    AuraWaveform(amplitude = waveAmplitude, isActive = state == AiOverlayState.SPEAKING, Purple, PurpleL)
-
-                    Spacer(Modifier.height(16.dp))
-
-                    // AI label
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(28.dp).background(Purple.copy(0.2f), CircleShape).border(1.dp, PurpleL.copy(0.5f), CircleShape), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Rounded.AutoAwesome, null, tint = PurpleL, modifier = Modifier.size(14.dp))
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = if (state == AiOverlayState.SPEAKING) "AeonCore AI • Speaking…" else "AeonCore AI • Analysis complete",
-                            color = PurpleL, fontSize = 11.sp, fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(Modifier.height(14.dp))
-
-                    // Word-by-word text reveal inside a glassy card
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(Color.White.copy(0.04f), RoundedCornerShape(14.dp))
-                            .border(1.dp, Purple.copy(0.2f), RoundedCornerShape(14.dp))
-                            .padding(16.dp)
-                    ) {
-                        Text(
-                            text       = if (state == AiOverlayState.SPEAKING) revealedText else fullText,
-                            color      = Color.White,
-                            fontSize   = 15.sp,
-                            lineHeight = 24.sp,
-                            textAlign  = TextAlign.Start
-                        )
-                    }
-
-                    Spacer(Modifier.height(16.dp))
-
-                    // Metadata chips
-                    AuraMetadataChips(movieTitle, PurpleL, Gold)
-
-                    Spacer(Modifier.weight(1f))
-
-                    // "Got it!" button — only visible when DONE
-                    if (state == AiOverlayState.DONE) {
-                        Button(
-                            onClick   = onDismiss,
-                            modifier  = Modifier.fillMaxWidth().height(52.dp),
-                            colors    = ButtonDefaults.buttonColors(containerColor = Purple),
-                            shape     = RoundedCornerShape(14.dp)
-                        ) {
-                            Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Got it! Resume Movie", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        }
-                    } else {
-                        // Dismiss anytime during speech
-                        TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Default.Close, null, modifier = Modifier.size(14.dp), tint = Color.Gray)
-                            Spacer(Modifier.width(4.dp))
-                            Text("Skip & Resume", color = Color.Gray, fontSize = 12.sp)
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                }
-
-                // ── ERROR ─────────────────────────────────────────
-                AiOverlayState.ERROR -> {
-                    Spacer(Modifier.height(24.dp))
-                    Icon(Icons.Rounded.ErrorOutline, null, tint = Color(0xFFFF5252), modifier = Modifier.size(44.dp))
-                    Spacer(Modifier.height(12.dp))
-                    Text("AI Unavailable", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
-                    Text(errorText, color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center)
-                    Spacer(Modifier.height(20.dp))
-                    Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3A1A1A)), shape = RoundedCornerShape(12.dp)) {
-                        Text("OK", color = Color(0xFFFF5252), fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                AiOverlayState.HIDDEN -> {}
-            }
-        }
-    }
-}
-
-// ── Aura Loading section ──────────────────────────────────────────
-@Composable
-private fun AuraLoadingSection(
-    infiniteT: InfiniteTransition,
-    purple: Color, purpleL: Color
-) {
-    val scale by infiniteT.animateFloat(
-        initialValue = 0.9f, targetValue = 1.1f,
-        animationSpec = infiniteRepeatable(tween(800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "ls"
-    )
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(72.dp).scale(scale)
-            .background(Brush.radialGradient(listOf(purple.copy(0.35f), Color.Transparent)), CircleShape)
-            .border(1.5.dp, purpleL.copy(0.8f), CircleShape), contentAlignment = Alignment.Center) {
-            Icon(Icons.Rounded.AutoAwesome, null, tint = purpleL, modifier = Modifier.size(32.dp))
-        }
-        Spacer(Modifier.height(20.dp))
-        Text("Analyzing scene…", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(6.dp))
-        Text("Gemini 2.5 Flash Vision reading context", color = Color.Gray, fontSize = 12.sp)
-        Spacer(Modifier.height(18.dp))
-        LinearProgressIndicator(
-            modifier   = Modifier.width(160.dp).height(2.dp).clip(RoundedCornerShape(1.dp)),
-            color      = purpleL,
-            trackColor = Color.White.copy(0.08f)
-        )
-    }
-}
-
-// ── Waveform visualizer ───────────────────────────────────────────
-@Composable
-private fun AuraWaveform(amplitude: Float, isActive: Boolean, purple: Color, purpleL: Color) {
-    val barCount = 28
-    val infiniteT = rememberInfiniteTransition(label = "wv")
-
-    Row(
-        Modifier.fillMaxWidth().height(56.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-        verticalAlignment     = Alignment.CenterVertically
-    ) {
-        repeat(barCount) { i ->
-            // Each bar has a phase offset for organic wave look
-            val phase = (i.toFloat() / barCount) * (2 * PI).toFloat()
-            val animVal by infiniteT.animateFloat(
-                initialValue = 0.1f,
-                targetValue  = 1f,
-                animationSpec = infiniteRepeatable(
-                    tween((300 + i * 18).coerceIn(200, 700), delayMillis = (i * 22).coerceIn(0, 400), easing = FastOutSlowInEasing),
-                    RepeatMode.Reverse
-                ),
-                label = "b$i"
-            )
-
-            val heightFraction = if (isActive) {
-                val wave = (sin(phase + animVal * PI.toFloat()) * 0.4f + 0.5f)
-                (wave * amplitude * 0.9f + 0.1f).coerceIn(0.08f, 1f)
-            } else {
-                0.08f + i % 3 * 0.03f  // idle low bars
-            }
-
-            val barColor = when {
-                heightFraction > 0.7f -> purple
-                heightFraction > 0.4f -> purpleL
-                else                  -> purpleL.copy(0.4f)
-            }
-
-            Box(
-                Modifier
-                    .weight(1f)
-                    .fillMaxHeight(heightFraction)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(barColor)
-            )
-        }
-    }
-}
-
-// ── Metadata chips ────────────────────────────────────────────────
-@Composable
-private fun AuraMetadataChips(movieTitle: String, purpleL: Color, gold: Color) {
-    val chips = listOf(
-        Icons.Rounded.Videocam       to "Cinematography",
-        Icons.Rounded.Lightbulb      to "Director's Eye",
-        Icons.Rounded.EmojiObjects   to "Hidden Detail",
-        Icons.Rounded.Person         to "Cast Insight",
-    )
-
-    val infiniteT = rememberInfiniteTransition(label = "chips")
-
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(chips.size) { i ->
-            val (icon, label) = chips[i]
-
-            // Staggered float-in
-            val offsetY by infiniteT.animateFloat(
-                initialValue = 0f, targetValue = -4f,
-                animationSpec = infiniteRepeatable(
-                    tween(1200 + i * 200, delayMillis = i * 150, easing = FastOutSlowInEasing),
-                    RepeatMode.Reverse
-                ),
-                label = "chip$i"
-            )
-
-            Row(
-                Modifier
-                    .offset(y = offsetY.dp)
-                    .background(Color.White.copy(0.05f), RoundedCornerShape(20.dp))
-                    .border(1.dp, purpleL.copy(0.2f), RoundedCornerShape(20.dp))
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(icon, null, tint = if (i % 2 == 0) purpleL else gold, modifier = Modifier.size(13.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(label, color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-            }
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  Premium Gate Overlay
-// ═══════════════════════════════════════════════════════════════════
-@Composable
-private fun PremiumGateOverlay(onDismiss: () -> Unit, onUpgrade: () -> Unit) {
-    Box(
-        Modifier.fillMaxSize().background(Color.Black.copy(0.85f)).clickable { onDismiss() },
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .fillMaxWidth(0.85f)
-                .background(
-                    Brush.verticalGradient(listOf(Color(0xFF1A1230), Color(0xFF0D0818))),
-                    RoundedCornerShape(24.dp)
-                )
-                .border(1.dp, Color(0xFFB388FF).copy(0.4f), RoundedCornerShape(24.dp))
-                .padding(32.dp)
-                .clickable(enabled = false) {}   // absorb clicks — don't dismiss
-        ) {
-            // Crown icon
-            Box(
-                Modifier.size(72.dp).background(
-                    Brush.radialGradient(listOf(Color(0xFFFFD700).copy(0.25f), Color.Transparent)),
-                    CircleShape
-                ).border(2.dp, Color(0xFFFFD700).copy(0.6f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Rounded.WorkspacePremium, null, tint = Color(0xFFFFD700), modifier = Modifier.size(36.dp))
-            }
-
-            Spacer(Modifier.height(20.dp))
-            Text("Premium Feature", color = Color(0xFFFFD700), fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "AI Scene Explain is available for\nStreamX Premium subscribers.",
-                color = Color.LightGray, fontSize = 14.sp,
-                textAlign = TextAlign.Center, lineHeight = 22.sp
-            )
-
-            Spacer(Modifier.height(24.dp))
-            HorizontalDivider(color = Color.White.copy(0.08f))
-            Spacer(Modifier.height(20.dp))
-
-            // Benefits list
-            listOf(
-                Icons.Rounded.AutoAwesome      to "AI scene analysis & voice explanation",
-                Icons.Rounded.VolumeUp         to "Human-like voice narration",
-                Icons.Rounded.Movie            to "Works with all movies in real-time",
-                Icons.Rounded.AllInclusive     to "Unlimited explanations per session",
-            ).forEach { (icon, text) ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(icon, null, tint = Color(0xFFB388FF), modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text(text, color = Color.White, fontSize = 13.sp)
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            Button(
-                onClick  = onUpgrade,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C4DFF)),
-                shape    = RoundedCornerShape(14.dp)
-            ) {
-                Icon(Icons.Rounded.WorkspacePremium, null, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Upgrade to Premium", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            }
-
-            Spacer(Modifier.height(12.dp))
-            TextButton(onClick = onDismiss) { Text("Maybe later", color = Color.Gray, fontSize = 13.sp) }
-        }
-    }
-}
 
 // ═══════════════════════════════════════════════════════════════════
 //  Subtitle Style Page

@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.aeoncorex.streamx.R
-import com.aeoncorex.streamx.ai.PremiumManager
+import com.aeoncorex.streamx.ui.premium.PremiumManager
 import com.aeoncorex.streamx.ui.home.CyberMeshBackground
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.auth.ktx.auth
