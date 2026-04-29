@@ -154,6 +154,11 @@ val cargoBuildTask = tasks.register<CargoBuildTask>("cargoBuild") {
 
 tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configureEach { dependsOn(cargoBuildTask) }
 
+// ── Exclude protolite-well-known-types globally (conflicts with protobuf-javalite) ──
+configurations.all {
+    exclude(group = "com.google.firebase", module = "protolite-well-known-types")
+}
+
 dependencies {
     implementation(project(":premium-core"))
     // Version Variables

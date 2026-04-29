@@ -68,12 +68,7 @@ val NeonPurple = Color(0xFFBC13FE)
 val GlassBlack = Color(0xCC000000)
 val LiveRed = Color(0xFFFF0044)
 
-// --- EPG Data Structure (New) ---
-data class EPGProgram(
-    val title: String,
-    val startTime: Calendar,
-    val endTime: Calendar
-)
+// EPGProgram is defined in EpgRepository.kt — imported via same package
 
 fun isInternetAvailable(context: Context): Boolean {
     val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager

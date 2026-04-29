@@ -75,10 +75,16 @@ object AdManager {
             val ad = interstitialAd
             if (ad == null) { loadInterstitial(activity); onDone(); return@launch }
             try {
-                ad.showAd {
-                    loadInterstitial(activity)
-                    onDone()
-                }
+                ad.showAd(object : com.startapp.sdk.adsbase.adlisteners.AdDisplayListener {
+                    override fun adHidden(a: com.startapp.sdk.adsbase.StartAppAd?) {
+                        loadInterstitial(activity); onDone()
+                    }
+                    override fun adDisplayed(a: com.startapp.sdk.adsbase.StartAppAd?) {}
+                    override fun adClicked(a: com.startapp.sdk.adsbase.StartAppAd?) {}
+                    override fun adNotDisplayed(a: com.startapp.sdk.adsbase.StartAppAd?) {
+                        loadInterstitial(activity); onDone()
+                    }
+                })
             } catch (_: Exception) {
                 loadInterstitial(activity)
                 onDone()
@@ -97,9 +103,19 @@ object AdManager {
             willShow = true
             try {
                 val ad = StartAppAd(activity)
-                ad.loadAd {
-                    ad.showAd { onAdComplete() }
-                }
+                ad.loadAd(object : com.startapp.sdk.adsbase.adlisteners.AdEventListener {
+                    override fun onReceiveAd(loadedAd: com.startapp.sdk.adsbase.Ad?) {
+                        try {
+                            ad.showAd(object : com.startapp.sdk.adsbase.adlisteners.AdDisplayListener {
+                                override fun adHidden(a: com.startapp.sdk.adsbase.StartAppAd?) { onAdComplete() }
+                                override fun adDisplayed(a: com.startapp.sdk.adsbase.StartAppAd?) {}
+                                override fun adClicked(a: com.startapp.sdk.adsbase.StartAppAd?) {}
+                                override fun adNotDisplayed(a: com.startapp.sdk.adsbase.StartAppAd?) { onAdComplete() }
+                            })
+                        } catch (_: Exception) { onAdComplete() }
+                    }
+                    override fun onFailedToReceiveAd(failedAd: com.startapp.sdk.adsbase.Ad?) { onAdComplete() }
+                })
             } catch (_: Exception) {
                 onAdComplete()
             }

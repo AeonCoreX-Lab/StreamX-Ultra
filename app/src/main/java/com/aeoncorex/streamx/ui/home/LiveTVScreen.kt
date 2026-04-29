@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.getValue
@@ -120,8 +121,6 @@ fun LiveTVScreen(navController: NavController) {
     var showNoInternetDialog by remember { mutableStateOf(false) }
     var isRefreshing by remember { mutableStateOf(false) }
 
-    val pullRefreshState = rememberPullToRefreshState()
-
     val favoriteIds by context.dataStore.data
         .map { preferences -> preferences[FAVORITES_KEY] ?: emptySet() }
         .collectAsState(initial = emptySet())
@@ -194,15 +193,6 @@ fun LiveTVScreen(navController: NavController) {
 
     LaunchedEffect(Unit) { fetchData(false) }
 
-    if (pullRefreshState.isRefreshing) {
-        LaunchedEffect(true) {
-            isRefreshing = true
-            fetchData(false)
-            delay(1000)
-            pullRefreshState.endRefresh()
-        }
-    }
-
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -215,7 +205,18 @@ fun LiveTVScreen(navController: NavController) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .nestedScroll(pullRefreshState.nestedScrollConnection)
+        ) {
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                isRefreshing = true
+                scope.launch {
+                    fetchData(false)
+                    delay(1000)
+                    isRefreshing = false
+                }
+            },
+            modifier = Modifier.fillMaxSize()
         ) {
 
             val filteredChannels = remember(searchQuery, selectedCategory, allChannels.value, favoriteIds) {
@@ -424,6 +425,8 @@ fun LiveTVScreen(navController: NavController) {
                 }
             }
         }
+        } // end PullToRefreshBox
+        } // end outer Box
     }
 
     // Dialogs (Logic unchanged)

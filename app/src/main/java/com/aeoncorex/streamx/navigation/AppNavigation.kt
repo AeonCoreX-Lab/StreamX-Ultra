@@ -161,7 +161,7 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         composable("music_player") { MusicPlayerScreen(navController) }
 
         // ── Other screens ─────────────────────────────────────────
-        composable("settings") { SettingsScreen(navController, themeViewModel) }
+        composable("settings") { SettingsScreen(navController) }
         composable("account")  { AccountScreen(navController) }
         composable("theme")    { ThemeScreen(navController, themeViewModel) }
         composable("privacy")  { PrivacyPolicyScreen(navController) }
