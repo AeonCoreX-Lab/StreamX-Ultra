@@ -20,7 +20,6 @@ jobs:
         with:
           submodules: "recursive"
           token: ${{ secrets.ACCESS_TOKEN }}
-        with:
           fetch-depth: 0
 
       - name: Set up JDK
@@ -29,13 +28,13 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       
-      - name: Setup Android NDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          ndk-version: '29.0.14206865'
 
-      - name: Set NDK Env
-        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
+      - name: Install Android NDK
+        run: |
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
 
       - name: Install Rust and Cargo-NDK
         run: |

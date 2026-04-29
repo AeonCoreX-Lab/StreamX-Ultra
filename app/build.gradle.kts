@@ -8,10 +8,15 @@ import org.gradle.process.ExecOperations
 //  3. exec {} in doLast → abstract class + @Inject ExecOperations
 //  4. afterEvaluate+withType → withType().configureEach (lazy)
 //  5. layout.buildDirectory.get() → layout.buildDirectory.dir().get()
+//  6. android.ndkDirectory → REMOVED in AGP 9.0, use env var fallback
 //
 //  AI (MediaPipe/Gemini) completely removed — not needed
 //  AdMob/AppLovin replaced with Start.io
 // ═══════════════════════════════════════════════════════════════════
+
+// Top-level NDK version constant — single source of truth for NDK path resolution.
+// android.ndkDirectory was removed in AGP 9.0; we resolve the path manually.
+val NDK_VERSION = "29.0.14206865"
 
 plugins {
     id("com.android.application")
@@ -22,7 +27,7 @@ plugins {
 android {
     namespace = "com.aeoncorex.streamx"
     compileSdk = 36
-    ndkVersion = "29.0.14206865"
+    ndkVersion = NDK_VERSION
 
     defaultConfig {
         applicationId = "com.aeoncorex.streamx"
@@ -47,7 +52,13 @@ android {
                 
                 val vcpkgRoot    = System.getenv("VCPKG_ROOT") ?: ""
                 val envNdk       = System.getenv("ANDROID_NDK_HOME")
-                val ndkPath      = if (!envNdk.isNullOrBlank()) envNdk else android.ndkDirectory.absolutePath
+                // android.ndkDirectory was removed in AGP 9.0 — resolve path from env vars only
+                val ndkPath      = if (!envNdk.isNullOrBlank()) {
+                    envNdk
+                } else {
+                    val androidHome = System.getenv("ANDROID_HOME") ?: ""
+                    "$androidHome/ndk/$NDK_VERSION"
+                }
                 val rustBuildDir = layout.buildDirectory.dir("rust/targets").get().asFile.absolutePath
                 
                 arguments += listOf(
