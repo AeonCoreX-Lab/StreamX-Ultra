@@ -31,7 +31,7 @@ jobs:
           submodules: false
 
       - name: Setup Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Upload docs folder
         uses: actions/upload-pages-artifact@v3
