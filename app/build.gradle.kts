@@ -191,7 +191,7 @@ dependencies {
     implementation("com.grack:nanojson:1.2")
 
     // Firebase (Auth + Firestore + FCM)
-    implementation(platform("com.google.firebase:firebase-bom:34.11.0"))
+    implementation(platform("com.google.firebase:firebase-bom:34.12.0"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-messaging")
     implementation("com.google.firebase:firebase-firestore") {
