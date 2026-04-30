@@ -44,7 +44,7 @@ fun SettingsScreen(navController: NavController) {
 
     // ── Real-time premium status ──────────────────────────────────
     val uid       = Firebase.auth.currentUser?.uid
-    var isPremium by remember { mutableStateOf(PremiumManager.isPremiumCached()) }
+    var isPremium by remember { mutableStateOf<Boolean>(PremiumManager.isPremiumCached()) }
 
     DisposableEffect(uid) {
         if (uid == null) return@DisposableEffect onDispose {}

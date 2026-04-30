@@ -76,12 +76,12 @@ object AdManager {
             if (ad == null) { loadInterstitial(activity); onDone(); return@launch }
             try {
                 ad.showAd(object : com.startapp.sdk.adsbase.adlisteners.AdDisplayListener {
-                    override fun adHidden(a: com.startapp.sdk.adsbase.StartAppAd?) {
+                    override fun adHidden(a: com.startapp.sdk.adsbase.Ad?) {
                         loadInterstitial(activity); onDone()
                     }
-                    override fun adDisplayed(a: com.startapp.sdk.adsbase.StartAppAd?) {}
-                    override fun adClicked(a: com.startapp.sdk.adsbase.StartAppAd?) {}
-                    override fun adNotDisplayed(a: com.startapp.sdk.adsbase.StartAppAd?) {
+                    override fun adDisplayed(a: com.startapp.sdk.adsbase.Ad?) {}
+                    override fun adClicked(a: com.startapp.sdk.adsbase.Ad?) {}
+                    override fun adNotDisplayed(a: com.startapp.sdk.adsbase.Ad?) {
                         loadInterstitial(activity); onDone()
                     }
                 })
@@ -107,10 +107,10 @@ object AdManager {
                     override fun onReceiveAd(loadedAd: com.startapp.sdk.adsbase.Ad?) {
                         try {
                             ad.showAd(object : com.startapp.sdk.adsbase.adlisteners.AdDisplayListener {
-                                override fun adHidden(a: com.startapp.sdk.adsbase.StartAppAd?) { onAdComplete() }
-                                override fun adDisplayed(a: com.startapp.sdk.adsbase.StartAppAd?) {}
-                                override fun adClicked(a: com.startapp.sdk.adsbase.StartAppAd?) {}
-                                override fun adNotDisplayed(a: com.startapp.sdk.adsbase.StartAppAd?) { onAdComplete() }
+                                override fun adHidden(a: com.startapp.sdk.adsbase.Ad?) { onAdComplete() }
+                                override fun adDisplayed(a: com.startapp.sdk.adsbase.Ad?) {}
+                                override fun adClicked(a: com.startapp.sdk.adsbase.Ad?) {}
+                                override fun adNotDisplayed(a: com.startapp.sdk.adsbase.Ad?) { onAdComplete() }
                             })
                         } catch (_: Exception) { onAdComplete() }
                     }

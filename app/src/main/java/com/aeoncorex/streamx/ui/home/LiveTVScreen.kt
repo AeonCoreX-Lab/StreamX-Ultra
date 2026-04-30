@@ -427,9 +427,8 @@ fun LiveTVScreen(navController: NavController) {
         }
         } // end PullToRefreshBox
         } // end outer Box
-    }
 
-    // Dialogs (Logic unchanged)
+    // Dialogs
     if (showLinkSelectorDialog && selectedChannelForLinks != null) {
         LinkSelectorDialog(selectedChannelForLinks!!, { showLinkSelectorDialog = false }) { selectedUrl ->
             showLinkSelectorDialog = false
@@ -450,16 +449,8 @@ fun LiveTVScreen(navController: NavController) {
     }
 
     if (showNoInternetDialog) {
-        AlertDialog(
-            onDismissRequest = { },
-            icon = { Icon(Icons.Rounded.SignalWifiOff, null, tint = primaryColor) },
-            title = { Text("OFFLINE MODE", color = Color.White) },
-            text = { Text("Neural Uplink Disconnected. Check connection.", color = Color.Gray) },
-            confirmButton = { Button(onClick = { showNoInternetDialog = false; isLoading = true; fetchData(true) }, colors = ButtonDefaults.buttonColors(containerColor = primaryColor)) { Text("RECONNECT", color = Color.Black) } },
-            dismissButton = { TextButton(onClick = { (context as? Activity)?.finish() }) { Text("EXIT SYSTEM", color = Color.Gray) } },
-            containerColor = surfaceColor,
-            shape = RoundedCornerShape(16.dp)
-        )
+        // Handled globally by MainScreen — just keep state for reconnect logic
+        LaunchedEffect(showNoInternetDialog) { /* global overlay active */ }
     }
 }
 

@@ -28,6 +28,7 @@ import com.aeoncorex.streamx.ui.movie.MovieLinkSelectionScreen
 import com.aeoncorex.streamx.ui.movie.MoviePlayerScreen       // MPV torrent player (renamed internally)
 import com.aeoncorex.streamx.ui.movie.ExoMoviePlayerScreen   // New instant ExoPlayer
 import com.aeoncorex.streamx.ui.movie.ExoSourceSelectionScreen // NEW: web source selection
+import com.aeoncorex.streamx.ui.notifications.NotificationsScreen
 
 // ── REMOVED: AdBlockWebView (WebView player no longer needed) ─────
 // ── REMOVED: webview_player route ────────────────────────────────
@@ -168,5 +169,6 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         composable("about")    { AboutScreen(navController) }
         composable("copyright"){ CopyrightScreen(navController) }
         composable("premium")  { PremiumScreen(navController) }
+        composable("notifications") { NotificationsScreen() }
     }
 }
