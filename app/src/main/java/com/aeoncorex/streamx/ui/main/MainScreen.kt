@@ -3,6 +3,7 @@ package com.aeoncorex.streamx.ui.main
 import android.app.Activity
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable

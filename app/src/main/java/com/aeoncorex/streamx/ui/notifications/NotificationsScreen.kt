@@ -58,17 +58,21 @@ fun NotificationsScreen() {
 
     // Read tracking — persisted in SharedPrefs
     val prefs = remember { context.getSharedPreferences("notif_read", 0) }
+    // Use immutable Set<String> so the + operator resolves correctly
     var readIds by remember {
-        mutableStateOf(prefs.getStringSet("read_ids", emptySet())?.toMutableSet() ?: mutableSetOf())
+        mutableStateOf<Set<String>>(
+            prefs.getStringSet("read_ids", emptySet<String>()) ?: emptySet()
+        )
     }
 
     fun markRead(id: String) {
-        readIds = (readIds + id).toMutableSet()
-        prefs.edit().putStringSet("read_ids", readIds).apply()
+        val updated = readIds + id
+        readIds = updated
+        prefs.edit().putStringSet("read_ids", updated).apply()
     }
 
     fun markAllRead() {
-        val allIds = notifications.map { it.id }.toMutableSet()
+        val allIds: Set<String> = notifications.map { it.id }.toSet()
         readIds = allIds
         prefs.edit().putStringSet("read_ids", allIds).apply()
     }
@@ -102,7 +106,7 @@ fun NotificationsScreen() {
         onDispose { listener.remove() }
     }
 
-    val unreadCount = notifications.count { it.id !in readIds }
+    val unreadCount: Int = notifications.count { it.id !in readIds }
 
     Column(
         modifier = Modifier
@@ -182,7 +186,7 @@ fun NotificationsScreen() {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(notifications, key = { it.id }) { notif ->
-                        val isRead     = notif.id in readIds
+                        val isRead: Boolean = readIds.contains(notif.id)
                         val isExpanded = expandedId == notif.id
 
                         NotificationItem(
@@ -463,7 +467,7 @@ fun rememberUnreadCount(): State<Int> {
             .whereEqualTo("active", true)
             .addSnapshotListener { snapshot, _ ->
                 val readIds = prefs.getStringSet("read_ids", emptySet()) ?: emptySet()
-                count = snapshot?.documents?.count { it.id !in readIds } ?: 0
+                count = snapshot?.documents?.count { doc -> !readIds.contains(doc.id) } ?: 0
             }
         onDispose { listener.remove() }
     }

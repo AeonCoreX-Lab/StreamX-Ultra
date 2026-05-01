@@ -104,7 +104,7 @@ object AdManager {
             try {
                 val ad = StartAppAd(activity)
                 ad.loadAd(object : com.startapp.sdk.adsbase.adlisteners.AdEventListener {
-                    override fun onReceiveAd(loadedAd: com.startapp.sdk.adsbase.Ad?) {
+                    override fun onReceiveAd(loadedAd: com.startapp.sdk.adsbase.Ad) {
                         try {
                             ad.showAd(object : com.startapp.sdk.adsbase.adlisteners.AdDisplayListener {
                                 override fun adHidden(a: com.startapp.sdk.adsbase.Ad?) { onAdComplete() }
