@@ -16,6 +16,7 @@ jobs:
         with:
           submodules: "recursive"
           token: ${{ secrets.ACCESS_TOKEN }}
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
