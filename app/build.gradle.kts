@@ -187,11 +187,11 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.8.8")
 
     // Networking & Utilities
-    implementation("com.squareup.retrofit2:retrofit:2.11.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
-    implementation("com.squareup.retrofit2:converter-scalars:2.11.0")
-    implementation("org.jsoup:jsoup:1.17.2")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.retrofit2:retrofit:3.0.0")
+    implementation("com.squareup.retrofit2:converter-gson:3.0.0")
+    implementation("com.squareup.retrofit2:converter-scalars:3.0.0")
+    implementation("org.jsoup:jsoup:1.22.2")
+    implementation("com.squareup.okhttp3:okhttp:5.3.2")
 
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.0") {
         exclude(group = "com.github.TeamNewPipe", module = "nanojson")
