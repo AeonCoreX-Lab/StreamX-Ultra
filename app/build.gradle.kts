@@ -154,9 +154,15 @@ val cargoBuildTask = tasks.register<CargoBuildTask>("cargoBuild") {
 
 tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configureEach { dependsOn(cargoBuildTask) }
 
-// ── Exclude protolite-well-known-types globally (conflicts with protobuf-javalite) ──
-configurations.configureEach {
-    exclude(group = "com.google.firebase", module = "protolite-well-known-types")
+// ── Protobuf conflict resolution ──────────────────────────────────────────────────
+// protolite-well-known-types must NOT be excluded — Firestore needs com.google.type.LatLng
+// at runtime (NoClassDefFoundError otherwise). Force protobuf-javalite everywhere and
+// exclude only the legacy protobuf-lite artifact to avoid duplicate-class errors.
+configurations.all {
+    resolutionStrategy {
+        force("com.google.protobuf:protobuf-javalite:3.25.5")
+    }
+    exclude(group = "com.google.protobuf", module = "protobuf-lite")
 }
 
 dependencies {
@@ -194,10 +200,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:34.11.0"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-messaging")
-    implementation("com.google.firebase:firebase-firestore") {
-        exclude(group = "com.google.firebase", module = "protolite-well-known-types")
-        exclude(group = "com.google.protobuf",  module = "protobuf-lite")
-    }
+    implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
