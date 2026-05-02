@@ -1,17 +1,68 @@
 version: 2
 updates:
-  # 1. Gradle ডিপেন্ডেন্সি আপডেট (Retrofit, jlibtorrent, etc.)
+
+  # ─── Gradle dependencies ───────────────────────────────────────────
+  # groups ব্যবহার করা হয়েছে যাতে প্রতিটা library-র জন্য আলাদা branch না হয়।
+  # প্রতিটা group = মাত্র ১টা branch + ১টা PR।
   - package-ecosystem: "gradle"
     directory: "/"
     schedule:
-      interval: "daily" # প্রতিদিন লেটেস্ট আপডেট চেক করবে
-    open-pull-requests-limit: 10 # একসাথে ১০টির বেশি PR খুলবে না (যাতে স্প্যাম না হয়)
+      interval: "weekly"        # daily দিলে প্রতিদিন branch ভরে যায়; weekly যথেষ্ট
+      day: "monday"
+    open-pull-requests-limit: 5
     labels:
       - "dependencies"
       - "version-update"
+    groups:
 
-  # 2. GitHub Actions আপডেট (যদি আপনি CI/CD ব্যবহার করেন)
+      # Compose BOM + সব Compose আর্টিফ্যাক্ট একটা PR-এ
+      compose:
+        patterns:
+          - "androidx.compose*"
+          - "androidx.activity:activity-compose"
+          - "androidx.navigation:navigation-compose"
+          - "androidx.lifecycle:lifecycle-runtime-compose"
+
+      # Firebase BOM + সব Firebase মডিউল একটা PR-এ
+      firebase:
+        patterns:
+          - "com.google.firebase*"
+          - "com.google.android.gms*"
+
+      # AndroidX (lifecycle, core, datastore, media3 ইত্যাদি)
+      androidx:
+        patterns:
+          - "androidx.*"
+        exclude-patterns:
+          - "androidx.compose*"
+          - "androidx.activity:activity-compose"
+          - "androidx.navigation:navigation-compose"
+          - "androidx.lifecycle:lifecycle-runtime-compose"
+
+      # Network লাইব্রেরি (Retrofit, OkHttp, Jsoup)
+      networking:
+        patterns:
+          - "com.squareup.retrofit2*"
+          - "com.squareup.okhttp3*"
+          - "org.jsoup*"
+
+      # বাকি সব (Coil, shimmer, Start.io ইত্যাদি) একটা PR-এ
+      other-libs:
+        patterns:
+          - "*"
+
+  # ─── GitHub Actions ────────────────────────────────────────────────
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "ci"
+    groups:
+      # সব Actions একটা PR-এ
+      github-actions:
+        patterns:
+          - "*"
