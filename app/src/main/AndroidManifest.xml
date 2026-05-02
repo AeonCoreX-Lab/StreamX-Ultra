@@ -66,15 +66,6 @@
             </intent-filter>
         </activity>
 
-        <!-- ── AdMob App ID ──────────────────────────────────── -->
-        <!--
-            Value আসে GitHub Secret ADMOB_APP_ID → build.gradle manifestPlaceholders
-            APK-এ hardcode নেই, সম্পূর্ণ secure।
-        -->
-        <meta-data
-            android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="${admobAppId}" />
-
         <!-- ── FileProvider ──────────────────────────────────── -->
         <provider
             android:name="androidx.core.content.FileProvider"
