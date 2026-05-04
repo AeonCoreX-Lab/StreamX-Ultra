@@ -49,7 +49,7 @@
             android:name=".ui.premium.PaymentSuccessActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:theme="@style/Theme.StreamX">
+            android:theme="@style/Theme.StreamXUltra">
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
