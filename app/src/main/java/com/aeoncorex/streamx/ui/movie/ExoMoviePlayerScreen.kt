@@ -181,6 +181,15 @@ fun ExoMoviePlayerScreen(
             if (isPlaying && !isAdPlaying && !AdManager.isPremiumCached()) {
                 adTimerSeconds--
                 if (adTimerSeconds <= 0) {
+                    isAdPlaying    = true
+                    exoPlayer.pause()
+                    // Actually show the video/interstitial ad
+                    AdManager.showTimedAd(activity) {
+                        isAdPlaying    = false
+                        showAdPrompt   = false
+                        adTimerSeconds = AdManager.AD_INTERVAL_SECONDS
+                        exoPlayer.play()
+                    }
                     showAdPrompt   = true
                     adTimerSeconds = AdManager.AD_INTERVAL_SECONDS
                 }
@@ -302,7 +311,7 @@ fun ExoMoviePlayerScreen(
                         .padding(horizontal = 10.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = "${formatTime(adTimerSeconds)} | Enter the ad  ",
+                        text = "${formatTime(adTimerSeconds)} | Ad coming",
                         color = Color.White, fontSize = 11.sp
                     )
                 }
@@ -322,7 +331,7 @@ fun ExoMoviePlayerScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("${formatTime(adTimerSeconds)} | Enter the ad", color = Color.White, fontSize = 13.sp)
+                Text("Ad playing…", color = Color.White, fontSize = 13.sp)
                 Text(
                     text = "Go ad-free >",
                     color = Color.Yellow,

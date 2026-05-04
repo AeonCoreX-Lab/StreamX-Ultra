@@ -163,6 +163,7 @@ jobs:
           # GEMINI_API_KEY removed — AI system removed from app
           # AdMob removed — replaced by Start.io (no secret needed in build)
           STARTAPP_APP_ID:       ${{ secrets.STARTAPP_APP_ID }}
+          BACKEND_BASE_URL:   ${{ secrets.BACKEND_BASE_URL}}
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload Debug APK

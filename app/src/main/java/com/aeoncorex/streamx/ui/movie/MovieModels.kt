@@ -104,4 +104,64 @@ data class FullMovieDetails(
     val imdbId: String?
 )
 
-data class CastMember(val name: String, val role: String, val imageUrl: String)
+data class CastMember(val name: String, val role: String, val imageUrl: String, val personId: Int = 0)
+
+// ── Person / Actor detail models ──────────────────────────────────
+data class PersonDetails(
+    val id:             Int,
+    val name:           String,
+    val biography:      String,
+    val birthday:       String?,
+    val deathday:       String?,
+    val placeOfBirth:   String?,
+    val gender:         Int,           // 1=Female, 2=Male
+    val knownFor:       String,        // e.g. "Acting"
+    val popularity:     Double,
+    val profileUrl:     String,
+    val knownForMovies: List<Movie>,   // top known-for titles
+    val socialLinks:    PersonSocials,
+)
+
+data class PersonSocials(
+    val instagramId: String? = null,
+    val twitterId:   String? = null,
+    val facebookId:  String? = null,
+    val imdbId:      String? = null,
+)
+
+// TMDB Person API response
+data class PersonResponse(
+    val id: Int,
+    val name: String,
+    val biography: String?,
+    @com.google.gson.annotations.SerializedName("birthday")         val birthday: String?,
+    @com.google.gson.annotations.SerializedName("deathday")         val deathday: String?,
+    @com.google.gson.annotations.SerializedName("place_of_birth")   val placeOfBirth: String?,
+    val gender: Int?,
+    @com.google.gson.annotations.SerializedName("known_for_department") val knownFor: String?,
+    val popularity: Double?,
+    @com.google.gson.annotations.SerializedName("profile_path")     val profilePath: String?,
+)
+
+data class PersonCombinedCredits(
+    val cast: List<PersonCastItem>,
+)
+
+data class PersonCastItem(
+    val id:            Int,
+    val title:         String?,
+    val name:          String?,
+    @com.google.gson.annotations.SerializedName("poster_path")      val posterPath: String?,
+    @com.google.gson.annotations.SerializedName("vote_average")     val rating: Double?,
+    @com.google.gson.annotations.SerializedName("media_type")       val mediaType: String?,
+    @com.google.gson.annotations.SerializedName("release_date")     val releaseDate: String?,
+    @com.google.gson.annotations.SerializedName("first_air_date")   val firstAirDate: String?,
+    val popularity: Double?,
+)
+
+data class PersonExternalIds(
+    @com.google.gson.annotations.SerializedName("instagram_id") val instagramId: String?,
+    @com.google.gson.annotations.SerializedName("twitter_id")   val twitterId:   String?,
+    @com.google.gson.annotations.SerializedName("facebook_id")  val facebookId:  String?,
+    @com.google.gson.annotations.SerializedName("imdb_id")      val imdbId:      String?,
+)

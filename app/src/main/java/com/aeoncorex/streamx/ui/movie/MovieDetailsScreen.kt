@@ -154,26 +154,28 @@ fun MovieDetailsScreen(
                                 Spacer(Modifier.height(16.dp))
 
                                 // ── Button row ────────────────────────────────
-                                Row(modifier = Modifier.fillMaxWidth()) {
+                                Row(modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
 
-                                    // 1. PLAY NOW (ExoPlayer — instant, Movie Box style)
+                                    // 1. PLAY NOW
                                     Button(
                                         onClick = {
                                             if (type == MovieType.MOVIE) playNow(0, 0)
                                             else playNow(selectedSeason, 1)
                                         },
                                         colors   = ButtonDefaults.buttonColors(containerColor = Color.White),
-                                        shape    = RoundedCornerShape(4.dp),
-                                        modifier = Modifier.weight(1.2f).height(45.dp)
+                                        shape    = RoundedCornerShape(6.dp),
+                                        modifier = Modifier.weight(1.3f).height(46.dp)
                                     ) {
-                                        Icon(Icons.Default.PlayArrow, null, tint = Color.Black)
+                                        Icon(Icons.Default.PlayArrow, null,
+                                            tint = Color.Black, modifier = Modifier.size(18.dp))
                                         Spacer(Modifier.width(4.dp))
-                                        Text("Play Now", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text("Play Now", color = Color.Black,
+                                            fontWeight = FontWeight.Bold, fontSize = 13.sp,
+                                            maxLines = 1)
                                     }
 
-                                    Spacer(Modifier.width(8.dp))
-
-                                    // 2. PLAY WITH TORRENT (MPV — 4K/1080P torrents)
+                                    // 2. 1337x TORRENT
                                     OutlinedButton(
                                         onClick = {
                                             if (type == MovieType.MOVIE) playWithTorrent(0, 0)
@@ -181,27 +183,36 @@ fun MovieDetailsScreen(
                                         },
                                         colors  = ButtonDefaults.outlinedButtonColors(contentColor = Color.Cyan),
                                         border  = androidx.compose.foundation.BorderStroke(1.dp, Color.Cyan.copy(0.6f)),
-                                        shape   = RoundedCornerShape(4.dp),
-                                        modifier = Modifier.weight(1f).height(45.dp)
+                                        shape   = RoundedCornerShape(6.dp),
+                                        modifier = Modifier.weight(1f).height(46.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp),
                                     ) {
-                                        Icon(Icons.Rounded.Download, null, tint = Color.Cyan,
-                                            modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Rounded.Download, null,
+                                            tint = Color.Cyan, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(4.dp))
-                                        Text("Torrent", color = Color.Cyan, fontSize = 13.sp)
+                                        Text("Torrent", color = Color.Cyan,
+                                            fontSize = 12.sp, maxLines = 1)
                                     }
 
-                                    // 3. TRAILER (if available)
+                                    // 3. TRAILER
                                     if (movie.trailerKey != null) {
-                                        Spacer(Modifier.width(8.dp))
-                                        Button(
+                                        OutlinedButton(
                                             onClick = {
                                                 context.startActivity(Intent(Intent.ACTION_VIEW,
                                                     Uri.parse("vnd.youtube:${movie.trailerKey}")))
                                             },
-                                            colors   = ButtonDefaults.buttonColors(containerColor = Color.White.copy(0.2f)),
-                                            shape    = RoundedCornerShape(4.dp),
-                                            modifier = Modifier.weight(0.8f).height(45.dp)
-                                        ) { Text("Trailer", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+                                            colors  = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                            border  = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(0.3f)),
+                                            shape   = RoundedCornerShape(6.dp),
+                                            modifier = Modifier.weight(0.85f).height(46.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp),
+                                        ) {
+                                            Icon(Icons.Rounded.PlayCircle, null,
+                                                tint = Color.White, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Trailer", color = Color.White,
+                                                fontSize = 12.sp, maxLines = 1)
+                                        }
                                     }
                                 }
                             }
@@ -275,16 +286,31 @@ fun MovieDetailsScreen(
                         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             items(movie.cast) { actor ->
-                                Column(horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier.width(80.dp)) {
-                                    AsyncImage(model = actor.imageUrl, contentDescription = null,
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .width(80.dp)
+                                        .clickable {
+                                            if (actor.personId > 0)
+                                                navController.navigate("person_detail/${actor.personId}")
+                                        }
+                                ) {
+                                    AsyncImage(
+                                        model = actor.imageUrl,
+                                        contentDescription = actor.name,
                                         contentScale = ContentScale.Crop,
-                                        modifier = Modifier.size(70.dp).clip(CircleShape).border(1.dp, Color.Gray, CircleShape))
-                                    Spacer(Modifier.height(4.dp))
+                                        modifier = Modifier
+                                            .size(70.dp)
+                                            .clip(CircleShape)
+                                            .border(1.5.dp, Color(0xFF7C3AED).copy(0.6f), CircleShape)
+                                    )
+                                    Spacer(Modifier.height(5.dp))
                                     Text(actor.name, color = Color.LightGray, fontSize = 10.sp,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(actor.role, color = Color.DarkGray, fontSize = 10.sp,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                    Text(actor.role, color = Color.Gray, fontSize = 9.sp,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                                 }
                             }
                         }

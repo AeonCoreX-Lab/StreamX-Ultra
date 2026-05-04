@@ -167,6 +167,7 @@ jobs:
       - name: Build Signed Release APK
         env:
           TMDB_API_KEY:              ${{ secrets.TMDB_API_KEY }}
+          BACKEND_BASE_URL:   ${{ secrets.BACKEND_BASE_URL}}
           # GEMINI_API_KEY removed — AI system removed from app
           STARTAPP_APP_ID:           ${{ secrets.STARTAPP_APP_ID }}
           RELEASE_KEYSTORE_FILE:     ${{ github.workspace }}/release.keystore

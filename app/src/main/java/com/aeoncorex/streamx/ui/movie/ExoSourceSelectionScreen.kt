@@ -70,18 +70,24 @@ fun ExoSourceSelectionScreen(
     }
 
     // ── State ──────────────────────────────────────────────────────
+    var isUsingFallback  by remember { mutableStateOf(false) }
     var analysingSource  by remember { mutableStateOf("") }
     var isAnalysing      by remember { mutableStateOf(false) }
-    var sources          by remember { mutableStateOf<List<MovieSourceScraper.StreamSource>>(emptyList()) }
+    var sources          by remember { mutableStateOf<List<StreamSourceRepository.StreamResult>>(emptyList()) }
     var errorMsg         by remember { mutableStateOf<String?>(null) }
     var selectedLang     by remember { mutableStateOf("English") }
     var adLoading        by remember { mutableStateOf(false) }
+    var torrentResults   by remember { mutableStateOf<List<TorrentStreamRepository.TorrentResult>>(emptyList()) }
+    var isTorrentLoading by remember { mutableStateOf(false) }
+    var torrentBuffer    by remember { mutableIntStateOf(0) }
+    var isStreamingTorrent by remember { mutableStateOf(false) }
     var backdropUrl      by remember { mutableStateOf("") }
     var movieDetails     by remember { mutableStateOf<FullMovieDetails?>(null) }
 
+    // Source sites shown in "Analysing from [site]" UI — matches backend order
     val sourceSites = listOf(
-        "vidsrc.win", "multiembed.mov", "fzmovie.net",
-        "2embed.stream", "123moviesfree.net"
+        "vidlink.pro", "embed.su", "vidsrc.xyz",
+        "autoembed.cc", "2embed.stream", "123freemovies.net", "fzmovie.net", "1337xx.to"
     )
     val languages = listOf("English", "Hindi", "Tamil", "Telugu", "Bengali")
 
@@ -102,7 +108,21 @@ fun ExoSourceSelectionScreen(
             delay(600)  // visual effect like Movie Box
         }
 
-        val results = MovieSourceScraper.getSources(
+        // Also search 1337x in parallel for dubbed/torrent sources
+        isTorrentLoading = true
+        kotlinx.coroutines.launch {
+            val torrents = TorrentStreamRepository.search(
+                title    = decodedTitle,
+                type     = if (movieType == "TV" || movieType == "SERIES") MovieType.SERIES else MovieType.MOVIE,
+                season   = season,
+                episode  = episode,
+                language = selectedLang,
+            )
+            torrentResults   = torrents
+            isTorrentLoading = false
+        }
+
+        val results = StreamSourceRepository.getSources(
             tmdbId   = if (tmdbId > 0) tmdbId else null,
             imdbId   = if (imdbId.isNotEmpty() && imdbId != "null") imdbId else null,
             title    = decodedTitle,
@@ -112,22 +132,23 @@ fun ExoSourceSelectionScreen(
             language = selectedLang
         )
 
-        isAnalysing = false
+        isAnalysing     = false
         analysingSource = ""
+        isUsingFallback = StreamSourceRepository.lastUsedFallback
 
-        if (results.isEmpty()) errorMsg = "No sources found. Try a different language or torrent."
+        if (results.isEmpty()) errorMsg = "No sources found. Try a different language."
         else sources = results
     }
 
-    fun playSource(source: MovieSourceScraper.StreamSource) {
+    fun playSource(source: StreamSourceRepository.StreamResult) {
         if (activity == null) return
         adLoading = true
         AdManager.showInterstitial(activity) {
             adLoading = false
-            val encodedUrl  = URLEncoder.encode(source.url, "UTF-8")
+            val encodedUrl   = URLEncoder.encode(source.url, "UTF-8")
             val encodedTitle = URLEncoder.encode(decodedTitle, "UTF-8")
-            val encLang     = URLEncoder.encode(source.language, "UTF-8")
-            val encImdb     = URLEncoder.encode(imdbId.ifEmpty { "null" }, "UTF-8")
+            val encLang      = URLEncoder.encode(source.language, "UTF-8")
+            val encImdb      = URLEncoder.encode(imdbId.ifEmpty { "null" }, "UTF-8")
             navController.navigate(
                 "exo_player/$encodedUrl/$encodedTitle/${source.quality}/$encLang/$encImdb/$type/$season/$episode"
             )
@@ -241,10 +262,43 @@ fun ExoSourceSelectionScreen(
             HorizontalDivider(color = Color.White.copy(0.08f), modifier = Modifier.padding(horizontal = 16.dp))
             Spacer(Modifier.height(8.dp))
 
-            // Resources label (Movie Box shows "Resources Uploaded by...")
-            Text("Resources",
-                color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 16.dp))
+            // Resources label + optional Device Mode badge
+            Row(
+                Modifier.padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Resources",
+                    color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                if (isUsingFallback) {
+                    Surface(
+                        color  = Color(0xFF1A2A3A),
+                        shape  = RoundedCornerShape(6.dp),
+                        border = androidx.compose.foundation.BorderStroke(
+                            0.5.dp, Color.Cyan.copy(alpha = 0.4f)
+                        )
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.PhoneAndroid, null,
+                                tint     = Color.Cyan,
+                                modifier = Modifier.size(10.dp)
+                            )
+                            Text(
+                                "Device Mode",
+                                color    = Color.Cyan,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+                    }
+                }
+            }
 
             Spacer(Modifier.height(8.dp))
 
@@ -274,17 +328,15 @@ fun ExoSourceSelectionScreen(
                 }
                 sources.isNotEmpty() -> {
                     LazyColumn(
-                        contentPadding           = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                        verticalArrangement      = Arrangement.spacedBy(8.dp)
+                        contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Group by quality and show best first
                         val sorted = sources.sortedWith(
-                            compareByDescending<MovieSourceScraper.StreamSource> {
+                            compareByDescending<StreamSourceRepository.StreamResult> {
                                 when (it.quality) { "4K" -> 4; "1080P" -> 3; "720P" -> 2; "480P" -> 1; else -> 0 }
-                            }.thenByDescending { it.type == MovieSourceScraper.StreamType.HLS }
+                            }.thenByDescending { it.type == "HLS" }
                         )
 
-                        // First item: auto-play best quality (shown as main green button)
                         item {
                             val best = sorted.first()
                             Button(
@@ -303,14 +355,13 @@ fun ExoSourceSelectionScreen(
                             }
                         }
 
-                        // Additional quality options
                         if (sorted.size > 1) {
                             item {
                                 Text("More options", color = Color.Gray, fontSize = 11.sp,
                                     modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
                             }
                             items(sorted.drop(1).take(6)) { source ->
-                                SourceCard(source) { playSource(source) }
+                                SourceResultCard(source) { playSource(source) }
                             }
                         }
 
@@ -323,7 +374,7 @@ fun ExoSourceSelectionScreen(
 }
 
 @Composable
-private fun SourceCard(source: MovieSourceScraper.StreamSource, onClick: () -> Unit) {
+private fun SourceResultCard(source: StreamSourceRepository.StreamResult, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth()
             .background(Color(0xFF111118), RoundedCornerShape(8.dp))
@@ -332,14 +383,13 @@ private fun SourceCard(source: MovieSourceScraper.StreamSource, onClick: () -> U
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val typeIcon = if (source.type == MovieSourceScraper.StreamType.HLS)
-            Icons.Rounded.PlayCircle else Icons.Rounded.VideoFile
+        val typeIcon = if (source.type == "HLS") Icons.Rounded.PlayCircle else Icons.Rounded.VideoFile
         Icon(typeIcon, null, tint = Color.Cyan, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(source.label.ifEmpty { "${source.quality} • ${source.sourceSite}" },
+            Text(source.label.ifEmpty { "${source.quality} • ${source.source}" },
                 color = Color.White, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${source.type.name} • ${source.language}",
+            Text("${source.type} • ${source.language}",
                 color = Color.Gray, fontSize = 11.sp)
         }
         Text(source.quality,

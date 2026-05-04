@@ -59,7 +59,29 @@ interface TmdbApi {
         @Path("season_number") seasonNumber: Int,
         @Query("api_key") apiKey: String
     ): SeasonDetailResponse
+
+    @GET("3/person/{person_id}")
+    suspend fun getPersonDetails(
+        @Path("person_id") personId: Int,
+        @Query("api_key") apiKey: String,
+        @Query("append_to_response") appendTo: String = "combined_credits,external_ids",
+    ): PersonApiResponse
 }
+
+data class PersonApiResponse(
+    val id: Int,
+    val name: String,
+    val biography: String?,
+    val birthday: String?,
+    val deathday: String?,
+    @com.google.gson.annotations.SerializedName("place_of_birth")       val placeOfBirth: String?,
+    val gender: Int?,
+    @com.google.gson.annotations.SerializedName("known_for_department") val knownFor: String?,
+    val popularity: Double?,
+    @com.google.gson.annotations.SerializedName("profile_path")         val profilePath: String?,
+    @com.google.gson.annotations.SerializedName("combined_credits")     val credits: PersonCombinedCredits?,
+    @com.google.gson.annotations.SerializedName("external_ids")         val externalIds: PersonExternalIds?,
+)
 
 // ═══════════════════════════════════════════════════════════════════
 //  MovieRepository
@@ -78,8 +100,8 @@ interface TmdbApi {
 object MovieRepository {
 
     // ── Vercel backend URL (same base as other endpoints) ─────────
-    private const val VERCEL_TMDB_ENDPOINT =
-        "https://YOUR_APP_NAME.vercel.app/api/tmdb-key"
+    private val VERCEL_TMDB_ENDPOINT get() =
+        "${com.aeoncorex.streamx.BuildConfig.BACKEND_BASE_URL}/api/tmdb-key"
 
     // ── In-memory key cache ───────────────────────────────────────
     private var cachedKey:     String = ""
@@ -237,7 +259,7 @@ object MovieRepository {
                     runtime         = if (res.runtime != null) "${res.runtime} min" else "N/A",
                     genres          = res.genres?.map { it.name } ?: emptyList(),
                     cast            = res.credits?.cast?.take(10)?.map {
-                        CastMember(it.name, it.character ?: "", IMAGE_BASE_URL + it.profilePath)
+                        CastMember(it.name, it.character ?: "", IMAGE_BASE_URL + it.profilePath, it.id)
                     } ?: emptyList(),
                     director        = res.credits?.crew?.find { it.job == "Director" }?.name ?: "Unknown",
                     trailerKey      = res.videos?.results
@@ -262,6 +284,60 @@ object MovieRepository {
             } catch (e: Exception) {
                 Log.e("MovieRepo", "Episodes error: ${e.localizedMessage}")
                 emptyList()
+            }
+        }
+
+    // ── Person / Actor Detail ─────────────────────────────────────────
+    suspend fun fetchPersonDetails(personId: Int): PersonDetails? =
+        withContext(Dispatchers.IO) {
+            val key = getApiKey()
+            if (key.isEmpty()) return@withContext null
+            try {
+                val r = api.getPersonDetails(personId, key)
+                val genderStr = when (r.gender) { 1 -> "Female"; 2 -> "Male"; else -> "Unknown" }
+
+                // Top known-for movies (max 12, sorted by popularity)
+                val knownForMovies = r.credits?.cast
+                    ?.sortedByDescending { it.popularity ?: 0.0 }
+                    ?.take(12)
+                    ?.map { item ->
+                        val title = item.title ?: item.name ?: "Unknown"
+                        val type  = if (item.mediaType == "tv") MovieType.SERIES else MovieType.MOVIE
+                        val year  = (item.releaseDate ?: item.firstAirDate)?.take(4) ?: ""
+                        Movie(
+                            id          = item.id,
+                            title       = title,
+                            description = "",
+                            posterUrl   = if (!item.posterPath.isNullOrBlank()) "$IMAGE_BASE_URL${item.posterPath}" else "",
+                            backdropUrl = "",
+                            rating      = String.format("%.1f", item.rating ?: 0.0),
+                            year        = year,
+                            type        = type,
+                        )
+                    } ?: emptyList()
+
+                PersonDetails(
+                    id           = r.id,
+                    name         = r.name,
+                    biography    = r.biography ?: "",
+                    birthday     = r.birthday,
+                    deathday     = r.deathday,
+                    placeOfBirth = r.placeOfBirth,
+                    gender       = r.gender ?: 0,
+                    knownFor     = r.knownFor ?: "Acting",
+                    popularity   = r.popularity ?: 0.0,
+                    profileUrl   = if (!r.profilePath.isNullOrBlank()) "$IMAGE_BASE_URL${r.profilePath}" else "",
+                    knownForMovies = knownForMovies,
+                    socialLinks  = PersonSocials(
+                        instagramId = r.externalIds?.instagramId,
+                        twitterId   = r.externalIds?.twitterId,
+                        facebookId  = r.externalIds?.facebookId,
+                        imdbId      = r.externalIds?.imdbId,
+                    ),
+                )
+            } catch (e: Exception) {
+                Log.e("MovieRepo", "Person error: ${e.localizedMessage}")
+                null
             }
         }
 }

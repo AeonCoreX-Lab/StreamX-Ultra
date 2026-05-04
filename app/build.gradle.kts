@@ -40,9 +40,11 @@ android {
 
         val tmdbApiKey  = System.getenv("TMDB_API_KEY")    ?: "api_key_not_found"
         val startappId  = System.getenv("STARTAPP_APP_ID") ?: "0"
+        val vercelUrl   = System.getenv("BACKEND_BASE_URL") ?: ""
 
         buildConfigField("String", "TMDB_API_KEY",    "\"$tmdbApiKey\"")
         buildConfigField("String", "STARTAPP_APP_ID", "\"$startappId\"")
+        buildConfigField("String", "BACKEND_BASE_URL", "\"$vercelUrl\"")
 
         externalNativeBuild {
             cmake {
@@ -158,7 +160,7 @@ tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configu
 // protolite-well-known-types must NOT be excluded — Firestore needs com.google.type.LatLng
 // at runtime (NoClassDefFoundError otherwise). Force protobuf-javalite everywhere and
 // exclude only the legacy protobuf-lite artifact to avoid duplicate-class errors.
-configurations.all {
+configurations.configureEach {
     resolutionStrategy {
         force("com.google.protobuf:protobuf-javalite:3.25.5")
     }
@@ -221,4 +223,8 @@ dependencies {
 
     // Start.io Ads
     implementation("com.startapp:inapp-sdk:5.2.6")
+
+    // ── Torrent Streaming (1337x) ─────────────────────────────────────
+    // TorrentStream-Android: streams magnet links → local HTTP → ExoPlayer
+    implementation("com.github.TorrentStream-Android:TorrentStream-Android:2.7.0")
 }

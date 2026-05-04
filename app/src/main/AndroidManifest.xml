@@ -44,25 +44,20 @@
         </activity>
 
         <!-- ── Payment Success Deep Link ─────────────────────── -->
-        <!--
-            LemonSqueezy payment complete হলে এই URL-এ redirect করে:
-              streamx://payment/success
-            এই Activity সেটা receive করে Firestore থেকে isPremium চেক করে।
-        -->
+        <!-- Gumroad Payment Success Deep Link -->
         <activity
             android:name=".ui.premium.PaymentSuccessActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:theme="@style/Theme.StreamXUltra">
-
+            android:theme="@style/Theme.StreamX">
             <intent-filter android:autoVerify="true">
-                <action   android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="streamx"
-                    android:host="payment"
-                    android:pathPrefix="/success" />
+                <!-- streamx://payment/success?plan=monthly -->
+                <data android:scheme="streamx"
+                      android:host="payment"
+                      android:pathPrefix="/success" />
             </intent-filter>
         </activity>
 

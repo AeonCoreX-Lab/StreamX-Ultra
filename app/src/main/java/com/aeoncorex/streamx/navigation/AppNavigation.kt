@@ -29,6 +29,7 @@ import com.aeoncorex.streamx.ui.movie.MoviePlayerScreen       // MPV torrent pla
 import com.aeoncorex.streamx.ui.movie.ExoMoviePlayerScreen   // New instant ExoPlayer
 import com.aeoncorex.streamx.ui.movie.ExoSourceSelectionScreen // NEW: web source selection
 import com.aeoncorex.streamx.ui.notifications.NotificationsScreen
+import com.aeoncorex.streamx.ui.movie.PersonDetailScreen
 
 // ── REMOVED: AdBlockWebView (WebView player no longer needed) ─────
 // ── REMOVED: webview_player route ────────────────────────────────
@@ -170,5 +171,9 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         composable("copyright"){ CopyrightScreen(navController) }
         composable("premium")  { PremiumScreen(navController) }
         composable("notifications") { NotificationsScreen() }
+        composable("person_detail/{personId}") { backStackEntry ->
+            val personId = backStackEntry.arguments?.getString("personId")?.toIntOrNull() ?: return@composable
+            PersonDetailScreen(personId = personId, navController = navController)
+        }
     }
 }
