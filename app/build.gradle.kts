@@ -162,7 +162,7 @@ tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configu
 // exclude only the legacy protobuf-lite artifact to avoid duplicate-class errors.
 configurations.configureEach {
     resolutionStrategy {
-        force("com.google.protobuf:protobuf-javalite:3.25.5")
+        force("com.google.protobuf:protobuf-javalite:4.34.1")
     }
     exclude(group = "com.google.protobuf", module = "protobuf-lite")
 }
@@ -193,10 +193,10 @@ dependencies {
     implementation("org.jsoup:jsoup:1.22.2")
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
 
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.0") {
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.1") {
         exclude(group = "com.github.TeamNewPipe", module = "nanojson")
     }
-    implementation("com.grack:nanojson:1.2")
+    implementation("com.grack:nanojson:1.10")
 
     // Firebase (Auth + Firestore + FCM)
     implementation(platform("com.google.firebase:firebase-bom:34.11.0"))
@@ -204,7 +204,7 @@ dependencies {
     implementation("com.google.firebase:firebase-messaging")
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
 
     // Media3 ExoPlayer — HLS/DASH instant streaming
     implementation("androidx.media3:media3-exoplayer:$media3Version")
@@ -219,10 +219,10 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.datastore:datastore-preferences:1.2.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:$lifecycleVersion")
-    implementation("com.valentinilk.shimmer:compose-shimmer:1.3.0")
+    implementation("com.valentinilk.shimmer:compose-shimmer:1.4.0")
 
     // Start.io Ads
-    implementation("com.startapp:inapp-sdk:5.2.6")
+    implementation("com.startapp:inapp-sdk:5.3.0")
 
     // ── Torrent Streaming ──────────────────────────────────────────────
     // Native TorrentEngine (C++ libtorrent via JNI) handles magnet → stream
