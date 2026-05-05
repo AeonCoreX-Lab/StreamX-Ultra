@@ -224,7 +224,7 @@ dependencies {
     // Start.io Ads
     implementation("com.startapp:inapp-sdk:5.2.6")
 
-    // ── Torrent Streaming (1337x) ─────────────────────────────────────
-    // TorrentStream-Android: streams magnet links → local HTTP → ExoPlayer
-    implementation("com.github.TorrentStream-Android:TorrentStream-Android:2.7.0")
+    // ── Torrent Streaming ──────────────────────────────────────────────
+    // Native TorrentEngine (C++ libtorrent via JNI) handles magnet → stream
+    // No external library needed — see TorrentEngine.kt + streamx-native .so
 }

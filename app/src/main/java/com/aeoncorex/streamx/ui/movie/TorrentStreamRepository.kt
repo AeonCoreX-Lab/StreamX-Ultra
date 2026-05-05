@@ -3,40 +3,31 @@ package com.aeoncorex.streamx.ui.movie
 import android.content.Context
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
-import com.torrentstream.TorrentOptions
-import com.torrentstream.TorrentStream
-import com.torrentstream.TorrentStreamNotInitializedException
-import com.torrentstream.listener.TorrentListener
-import com.torrentstream.model.TorrentModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 // ═══════════════════════════════════════════════════════════════════
 //  TorrentStreamRepository
 //  ─────────────────────────
-//  Handles the full 1337x torrent → stream URL flow:
+//  1. search()      → /api/search-1337x  → TorrentResult list
+//  2. getMagnet()   → /api/get-magnet    → magnet link
+//  3. getStreamUrl()→ native TorrentEngine (C++ libtorrent via JNI)
+//                     buffers pieces → returns local file path
 //
-//  1. search()   → calls /api/search-1337x  → returns TorrentResult list
-//  2. getMagnet()→ calls /api/get-magnet    → returns magnet link
-//  3. getStreamUrl() → TorrentStream-Android buffers magnet
-//                   → returns localhost HTTP URL for ExoPlayer
-//
-//  Covers: Hollywood, Bollywood, Hindi dubs, Anime, K-Drama,
-//          C-Drama, Documentaries, TV Series
+//  Uses native TorrentEngine.kt + streamx-native .so
+//  NOT the deprecated TorrentStream-Android Java library.
 // ═══════════════════════════════════════════════════════════════════
 object TorrentStreamRepository {
 
     private const val TAG = "TorrentStreamRepo"
+    private const val MIN_BUFFER_TO_PLAY = 3   // % before ExoPlayer opens file
 
-    private val SEARCH_URL  get() = "${com.aeoncorex.streamx.BuildConfig.BACKEND_BASE_URL}/api/search-1337x"
-    private val MAGNET_URL  get() = "${com.aeoncorex.streamx.BuildConfig.BACKEND_BASE_URL}/api/get-magnet"
+    private val SEARCH_URL get() = "${com.aeoncorex.streamx.BuildConfig.BACKEND_BASE_URL}/api/search-1337x"
+    private val MAGNET_URL get() = "${com.aeoncorex.streamx.BuildConfig.BACKEND_BASE_URL}/api/get-magnet"
 
     data class TorrentResult(
         val title:      String,
@@ -49,7 +40,7 @@ object TorrentStreamRepository {
         var magnet:     String? = null,
     )
 
-    // ── Search 1337x ──────────────────────────────────────────────
+    // ── Search 1337x via backend ──────────────────────────────────
     suspend fun search(
         title:    String,
         type:     MovieType,
@@ -69,7 +60,7 @@ object TorrentStreamRepository {
         }.toString()
 
         try {
-            val resp = post(SEARCH_URL, body, idToken)
+            val resp     = post(SEARCH_URL, body, idToken)
             val json     = JSONObject(resp)
             val torrents = json.optJSONArray("torrents") ?: return@withContext emptyList()
             val results  = mutableListOf<TorrentResult>()
@@ -86,23 +77,19 @@ object TorrentStreamRepository {
                     mirror     = t.optString("mirror", ""),
                 ))
             }
-
             Log.d(TAG, "1337x: ${results.size} results for '$title'")
-            results
-
+            results.sortedByDescending { it.seeders }
         } catch (e: Exception) {
             Log.e(TAG, "search failed: ${e.message}")
             emptyList()
         }
     }
 
-    // ── Get magnet link for a torrent result ──────────────────────
+    // ── Get magnet link ───────────────────────────────────────────
     suspend fun getMagnet(result: TorrentResult): String? = withContext(Dispatchers.IO) {
         if (!result.magnet.isNullOrBlank()) return@withContext result.magnet
-
         val idToken = getToken() ?: return@withContext null
         val body    = JSONObject().apply { put("torrentUrl", result.torrentUrl) }.toString()
-
         try {
             val resp   = post(MAGNET_URL, body, idToken)
             val magnet = JSONObject(resp).optString("magnet").ifBlank { null }
@@ -115,102 +102,72 @@ object TorrentStreamRepository {
         }
     }
 
-    // ── Start torrent streaming → return localhost HTTP URL ───────
-    // TorrentStream-Android buffers the most-needed pieces first
-    // and serves them via a local HTTP server ExoPlayer can play
+    // ── Stream via native TorrentEngine ──────────────────────────
     suspend fun getStreamUrl(
-        context:     Context,
-        magnet:      String,
-        result:      TorrentResult,
-        onProgress:  (Int) -> Unit = {},   // 0-100 buffer %
+        context:        Context,
+        magnet:         String,
+        result:         TorrentResult,
+        onProgress:     (Int) -> Unit                                  = {},
+        onStatusUpdate: (speed: Long, seeds: Int, peers: Int) -> Unit  = { _, _, _ -> },
     ): String = withContext(Dispatchers.IO) {
 
-        suspendCancellableCoroutine { cont ->
-            try {
-                val options = TorrentOptions.Builder()
-                    .saveLocation(context.cacheDir)
-                    .removeFilesAfterStop(true)
-                    .build()
+        Log.d(TAG, "Native engine starting: ${result.title}")
+        var readyPath: String? = null
+        var errorMsg:  String? = null
+        var lastPct    = 0
 
-                TorrentStream.init(options)
-
-                TorrentStream.getInstance().addListener(object : TorrentListener {
-                    override fun onStreamReady(torrent: TorrentModel) {
-                        val streamUrl = torrent.videoFile?.absolutePath
-                            ?: "http://127.0.0.1:${TorrentStream.getInstance().port}/${torrent.videoFile?.name}"
-                        Log.d(TAG, "Stream ready: $streamUrl")
-                        if (cont.isActive) cont.resume(streamUrl)
-                    }
-
-                    override fun onStreamProgress(
-                        torrent:  TorrentModel,
-                        status:   com.torrentstream.model.StreamStatus,
-                    ) {
-                        onProgress(status.bufferProgress)
-                        Log.v(TAG, "Buffer: ${status.bufferProgress}% seeds:${status.seeds}")
-                    }
-
-                    override fun onStreamPrepared(torrent: TorrentModel) {
-                        Log.d(TAG, "Prepared: ${torrent.videoFile?.name}")
-                    }
-
-                    override fun onStreamStarted(torrent: TorrentModel) {
-                        Log.d(TAG, "Started streaming: ${torrent.videoFile?.name}")
-                    }
-
-                    override fun onStreamStopped() {
-                        Log.d(TAG, "Stream stopped")
-                    }
-
-                    override fun onStreamError(torrent: TorrentModel?, e: Exception) {
-                        Log.e(TAG, "Stream error: ${e.message}")
-                        if (cont.isActive) cont.resumeWithException(e)
-                    }
-                })
-
-                TorrentStream.getInstance().startStream(magnet)
-
-                cont.invokeOnCancellation {
-                    try { TorrentStream.getInstance().stopStream() } catch (_: Exception) {}
+        TorrentEngine.start(context, magnet).collect { state ->
+            when (state) {
+                is StreamState.Preparing -> {
+                    Log.d(TAG, "Preparing: ${state.message}")
+                    onProgress(0)
                 }
-
-            } catch (e: TorrentStreamNotInitializedException) {
-                Log.e(TAG, "TorrentStream not initialized: ${e.message}")
-                cont.resumeWithException(e)
-            } catch (e: Exception) {
-                Log.e(TAG, "getStreamUrl error: ${e.message}")
-                cont.resumeWithException(e)
+                is StreamState.Buffering -> {
+                    lastPct = state.progress
+                    onProgress(state.progress)
+                    onStatusUpdate(state.speed, state.seeds, state.peers)
+                    // Early play once MIN_BUFFER_TO_PLAY% is buffered
+                    if (state.progress >= MIN_BUFFER_TO_PLAY) {
+                        val path = TorrentEngine.getFilePath()
+                        if (!path.isNullOrEmpty()) { readyPath = path; return@collect }
+                    }
+                }
+                is StreamState.Ready -> {
+                    readyPath = state.filePath
+                    Log.d(TAG, "Ready: ${state.filePath}")
+                    return@collect
+                }
+                is StreamState.Error -> {
+                    errorMsg = state.message
+                    Log.e(TAG, "Engine error: ${state.message}")
+                    return@collect
+                }
             }
         }
+
+        if (!readyPath.isNullOrEmpty()) return@withContext readyPath!!
+        throw Exception(errorMsg ?: "Torrent stream failed (buffer: $lastPct%)")
     }
 
-    fun stopStream() {
-        try { TorrentStream.getInstance().stopStream() } catch (_: Exception) {}
-    }
+    fun stopStream()              = TorrentEngine.stop()
+    fun clearCache(ctx: Context)  = TorrentEngine.clearCache(ctx)
 
-    // ── HTTP POST helper ──────────────────────────────────────────
     private fun post(url: String, body: String, token: String): String {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             setRequestProperty("Content-Type",  "application/json")
             setRequestProperty("Authorization", "Bearer $token")
-            doOutput       = true
-            connectTimeout = 15_000
-            readTimeout    = 20_000
+            doOutput = true; connectTimeout = 15_000; readTimeout = 20_000
             outputStream.use { it.write(body.toByteArray()) }
         }
         val code = conn.responseCode
-        val resp = try {
-            conn.inputStream.bufferedReader().use { it.readText() }
-        } catch (_: Exception) {
-            conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
-        }
+        val resp = try { conn.inputStream.bufferedReader().use { it.readText() } }
+                   catch (_: Exception) { conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "" }
         if (code != 200) throw Exception("HTTP $code: ${resp.take(100)}")
         return resp
     }
 
     private suspend fun getToken(): String? = try {
-        FirebaseAuth.getInstance().currentUser
-            ?.getIdToken(false)?.await()?.token
+        FirebaseAuth.getInstance().currentUser?.getIdToken(false)?.await()?.token
     } catch (_: Exception) { null }
 }

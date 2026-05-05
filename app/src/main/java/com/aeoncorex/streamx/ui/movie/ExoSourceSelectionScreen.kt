@@ -19,9 +19,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -36,20 +37,43 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 
 // ═══════════════════════════════════════════════════════════════════
-//  ExoSourceSelectionScreen
-//  ─────────────────────────
-//  Movie Box style:
-//    1. Opens with "Analysing from [source]..." overlay on backdrop
-//    2. Auto-fetches best stream from multiple sources in parallel
-//    3. Language filter: English, Hindi, Tamil, Telugu, etc.
-//    4. One-tap play — no complex server selection UI
-//    5. If first source fails → next source tries automatically
+//  ExoSourceSelectionScreen — Language-Aware Source Selector
+//  ──────────────────────────────────────────────────────────────
+//  UI Flow (Movie Box style):
+//    1. "Analysing from [source]..." overlay on backdrop
+//    2. Auto-fetches streams from backend (extract-stream.js)
+//       OR in-app scraper fallback (MovieSourceScraper)
+//    3. Language selector: English / Hindi / Tamil / Telugu /
+//       Bengali / Korean / Japanese / Dual Audio + any language
+//    4. Best stream auto-highlighted, others listed below
+//    5. On play → Ad interstitial → ExoPlayer
 //
-//  Unlike old MovieLinkSelectionScreen:
-//    ❌ No web server cards
-//    ❌ No torrent section (moved to separate "Play with Torrent" button)
-//    ✅ Just clean auto-analysing + play
+//  Language routing:
+//    • Each language maps to DubLanguage sealed class
+//    • Backend & in-app scraper both use the same language key
+//    • Smart query builder injects correct keywords per language
 // ═══════════════════════════════════════════════════════════════════
+
+// ── Language definitions for UI ───────────────────────────────────
+
+data class DubOption(
+    val key:   String,   // sent to backend / scraper
+    val label: String,   // shown in UI
+    val flag:  String,   // emoji flag
+    val color: Color     // accent color for selected state
+)
+
+private val DUB_OPTIONS = listOf(
+    DubOption("English",    "English",    "🇺🇸", Color(0xFF1565C0)),
+    DubOption("Hindi",      "हिंदी",       "🇮🇳", Color(0xFFFF6F00)),
+    DubOption("Tamil",      "Tamil",      "🇮🇳", Color(0xFF6A1B9A)),
+    DubOption("Telugu",     "Telugu",     "🇮🇳", Color(0xFF00838F)),
+    DubOption("Bengali",    "বাংলা",       "🇧🇩", Color(0xFF2E7D32)),
+    DubOption("Korean",     "한국어",       "🇰🇷", Color(0xFFC62828)),
+    DubOption("Japanese",   "日本語",       "🇯🇵", Color(0xFF283593)),
+    DubOption("Dual Audio", "Dual",       "🎵", Color(0xFF558B2F)),
+)
+
 @Composable
 fun ExoSourceSelectionScreen(
     navController: NavController,
@@ -70,58 +94,62 @@ fun ExoSourceSelectionScreen(
     }
 
     // ── State ──────────────────────────────────────────────────────
-    var isUsingFallback  by remember { mutableStateOf(false) }
-    var analysingSource  by remember { mutableStateOf("") }
+    var selectedDub      by remember { mutableStateOf(DUB_OPTIONS[0]) }    // English default
     var isAnalysing      by remember { mutableStateOf(false) }
+    var analysingSource  by remember { mutableStateOf("") }
+    var isUsingFallback  by remember { mutableStateOf(false) }
     var sources          by remember { mutableStateOf<List<StreamSourceRepository.StreamResult>>(emptyList()) }
     var errorMsg         by remember { mutableStateOf<String?>(null) }
-    var selectedLang     by remember { mutableStateOf("English") }
     var adLoading        by remember { mutableStateOf(false) }
-    var torrentResults   by remember { mutableStateOf<List<TorrentStreamRepository.TorrentResult>>(emptyList()) }
-    var isTorrentLoading by remember { mutableStateOf(false) }
-    var torrentBuffer    by remember { mutableIntStateOf(0) }
-    var isStreamingTorrent by remember { mutableStateOf(false) }
     var backdropUrl      by remember { mutableStateOf("") }
     var movieDetails     by remember { mutableStateOf<FullMovieDetails?>(null) }
+    var torrentResults   by remember { mutableStateOf<List<TorrentStreamRepository.TorrentResult>>(emptyList()) }
+    var isTorrentLoading by remember { mutableStateOf(false) }
 
-    // Source sites shown in "Analysing from [site]" UI — matches backend order
-    val sourceSites = listOf(
-        "vidlink.pro", "embed.su", "vidsrc.xyz",
-        "autoembed.cc", "2embed.stream", "123freemovies.net", "fzmovie.net", "1337xx.to"
-    )
-    val languages = listOf("English", "Hindi", "Tamil", "Telugu", "Bengali")
+    // Sites shown in "Analysing from [site]" — mirrors backend source order
+    val sourceSites = remember(selectedDub) {
+        if (selectedDub.key == "English") listOf(
+            "vidsrc.me", "vidsrc.to", "vidlink.pro", "embed.su",
+            "autoembed.cc", "smashystream.com", "vidsrc.xyz",
+            "2embed.stream", "123moviesfree.net"
+        ) else listOf(
+            "fzmovies.net", "downloads-anymovies.co", "123moviesfree.net",
+            "vegamovies.app", "hindimovies.to", "vidsrc.me [fallback]"
+        )
+    }
 
-    // Load movie details for backdrop
+    // ── Load movie details ─────────────────────────────────────────
     LaunchedEffect(tmdbId) {
         movieDetails = MovieRepository.getFullDetails(tmdbId, movieType)
         backdropUrl  = movieDetails?.basic?.backdropUrl ?: ""
     }
 
-    // Auto-start analysis
-    LaunchedEffect(selectedLang) {
+    // ── Auto-fetch on language change ──────────────────────────────
+    LaunchedEffect(selectedDub) {
         isAnalysing = true
         sources     = emptyList()
         errorMsg    = null
 
+        // Animate through source sites (Movie Box feel)
         for (site in sourceSites) {
             analysingSource = site
-            delay(600)  // visual effect like Movie Box
+            delay(500)
         }
 
-        // Also search 1337x in parallel for dubbed/torrent sources
+        // Parallel: torrent search
         isTorrentLoading = true
-        kotlinx.coroutines.launch {
-            val torrents = TorrentStreamRepository.search(
+        scope.launch {
+            torrentResults = TorrentStreamRepository.search(
                 title    = decodedTitle,
-                type     = if (movieType == "TV" || movieType == "SERIES") MovieType.SERIES else MovieType.MOVIE,
+                type     = movieType,
                 season   = season,
                 episode  = episode,
-                language = selectedLang,
+                language = selectedDub.key,
             )
-            torrentResults   = torrents
             isTorrentLoading = false
         }
 
+        // Main stream search
         val results = StreamSourceRepository.getSources(
             tmdbId   = if (tmdbId > 0) tmdbId else null,
             imdbId   = if (imdbId.isNotEmpty() && imdbId != "null") imdbId else null,
@@ -129,15 +157,17 @@ fun ExoSourceSelectionScreen(
             type     = movieType,
             season   = season,
             episode  = episode,
-            language = selectedLang
+            language = selectedDub.key
         )
 
         isAnalysing     = false
         analysingSource = ""
         isUsingFallback = StreamSourceRepository.lastUsedFallback
 
-        if (results.isEmpty()) errorMsg = "No sources found. Try a different language."
-        else sources = results
+        if (results.isEmpty())
+            errorMsg = "No sources found for ${selectedDub.label}. Try another language."
+        else
+            sources = results
     }
 
     fun playSource(source: StreamSourceRepository.StreamResult) {
@@ -147,7 +177,7 @@ fun ExoSourceSelectionScreen(
             adLoading = false
             val encodedUrl   = URLEncoder.encode(source.url, "UTF-8")
             val encodedTitle = URLEncoder.encode(decodedTitle, "UTF-8")
-            val encLang      = URLEncoder.encode(source.language, "UTF-8")
+            val encLang      = URLEncoder.encode(source.language.ifEmpty { selectedDub.key }, "UTF-8")
             val encImdb      = URLEncoder.encode(imdbId.ifEmpty { "null" }, "UTF-8")
             navController.navigate(
                 "exo_player/$encodedUrl/$encodedTitle/${source.quality}/$encLang/$encImdb/$type/$season/$episode"
@@ -155,18 +185,21 @@ fun ExoSourceSelectionScreen(
         }
     }
 
-    // ── UI ──────────────────────────────────────────────────────────
+    // ── Root UI ────────────────────────────────────────────────────
     Box(Modifier.fillMaxSize().background(Color.Black)) {
 
-        // Backdrop image (Movie Box shows it behind)
+        // Backdrop
         if (backdropUrl.isNotEmpty()) {
             coil.compose.AsyncImage(
-                model = backdropUrl, contentDescription = null,
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                modifier     = Modifier.fillMaxWidth().height(260.dp)
+                model            = backdropUrl,
+                contentDescription = null,
+                contentScale     = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier         = Modifier.fillMaxWidth().height(280.dp)
             )
-            Box(Modifier.fillMaxWidth().height(260.dp)
-                .background(Brush.verticalGradient(listOf(Color.Black.copy(0.5f), Color.Black))))
+            Box(
+                Modifier.fillMaxWidth().height(280.dp)
+                    .background(Brush.verticalGradient(listOf(Color.Black.copy(0.4f), Color.Black)))
+            )
         }
 
         // Ad loading overlay
@@ -180,7 +213,7 @@ fun ExoSourceSelectionScreen(
 
         Column(Modifier.fillMaxSize()) {
 
-            // Top bar (no backdrop behind controls area)
+            // ── Top bar ────────────────────────────────────────────
             Row(
                 Modifier.fillMaxWidth().padding(top = 40.dp, start = 4.dp, end = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -189,46 +222,77 @@ fun ExoSourceSelectionScreen(
                     Icon(Icons.Default.ArrowBack, null, tint = Color.White)
                 }
                 Column(Modifier.weight(1f)) {
-                    Text(decodedTitle, color = Color.White, fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        decodedTitle,
+                        color      = Color.White,
+                        fontSize   = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines   = 1,
+                        overflow   = TextOverflow.Ellipsis
+                    )
                     if (season > 0) {
-                        Text("Season $season  Episode $episode", color = Color.Gray, fontSize = 12.sp)
-                    }
-                }
-            }
-
-            // Movie Box style "Analysing from [source]" overlay text
-            AnimatedVisibility(
-                visible = isAnalysing,
-                enter   = fadeIn(), exit = fadeOut()
-            ) {
-                Box(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
-                        .background(Color.Black.copy(0.7f), RoundedCornerShape(8.dp))
-                        .padding(12.dp)
-                ) {
-                    Column {
-                        if (analysingSource.isNotEmpty()) {
-                            Text("Analysing from [$analysingSource]",
-                                color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        LinearProgressIndicator(
-                            modifier   = Modifier.fillMaxWidth().height(2.dp),
-                            color      = Color.Cyan,
-                            trackColor = Color.White.copy(0.15f)
+                        Text(
+                            "Season $season  •  Episode $episode",
+                            color    = Color.Gray,
+                            fontSize = 12.sp
                         )
                     }
                 }
             }
 
-            // Movie info row (like Movie Box)
+            // ── "Analysing from [source]..." bar ──────────────────
+            AnimatedVisibility(visible = isAnalysing, enter = fadeIn(), exit = fadeOut()) {
+                Box(
+                    Modifier.fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .background(Color(0xFF0D1B2A), RoundedCornerShape(10.dp))
+                        .padding(12.dp)
+                ) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Language flag
+                            Text(selectedDub.flag, fontSize = 14.sp)
+                            if (analysingSource.isNotEmpty()) {
+                                Text(
+                                    "Analysing from [$analysingSource]",
+                                    color      = Color.White,
+                                    fontSize   = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            } else {
+                                Text(
+                                    "Searching ${selectedDub.label} sources…",
+                                    color    = Color.Gray,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        LinearProgressIndicator(
+                            modifier   = Modifier.fillMaxWidth().height(2.dp),
+                            color      = selectedDub.color,
+                            trackColor = Color.White.copy(0.12f)
+                        )
+                    }
+                }
+            }
+
+            // ── Movie info row ─────────────────────────────────────
             movieDetails?.let { m ->
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    Text(m.basic.title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    Text(
+                        m.basic.title,
+                        color      = Color.White,
+                        fontSize   = 18.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
                     Spacer(Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Rounded.Star, null, tint = Color(0xFFFFC107), modifier = Modifier.size(14.dp))
+                    Row(
+                        verticalAlignment    = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Rounded.Star, null, tint = Color(0xFFFFC107), modifier = Modifier.size(13.dp))
                         Text(m.basic.rating, color = Color.LightGray, fontSize = 12.sp)
                         Text("•", color = Color.Gray, fontSize = 12.sp)
                         Text(m.basic.year, color = Color.Gray, fontSize = 12.sp)
@@ -238,49 +302,90 @@ fun ExoSourceSelectionScreen(
                 }
             }
 
-            // Language filter tabs (like Movie Box dub selector)
-            LazyRow(
-                Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(languages) { lang ->
-                    FilterChip(
-                        selected = selectedLang == lang,
-                        onClick  = { selectedLang = lang },
-                        label    = { Text(lang, fontSize = 12.sp) },
-                        colors   = FilterChipDefaults.filterChipColors(
-                            containerColor         = Color(0xFF1A1A2A),
-                            labelColor             = Color.Gray,
-                            selectedContainerColor = Color(0xFF1A3A2A),
-                            selectedLabelColor     = Color.Cyan
-                        )
+            Spacer(Modifier.height(6.dp))
+
+            // ── Language / Dub selector ────────────────────────────
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Row(
+                    verticalAlignment    = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.Language, null,
+                        tint     = Color.Gray,
+                        modifier = Modifier.size(14.dp)
                     )
+                    Text(
+                        "Language / Dub",
+                        color      = Color.Gray,
+                        fontSize   = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(DUB_OPTIONS) { dub ->
+                        DubLanguageChip(
+                            dub      = dub,
+                            selected = selectedDub.key == dub.key,
+                            onClick  = { if (selectedDub.key != dub.key) selectedDub = dub }
+                        )
+                    }
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
-            HorizontalDivider(color = Color.White.copy(0.08f), modifier = Modifier.padding(horizontal = 16.dp))
+            Spacer(Modifier.height(10.dp))
+            HorizontalDivider(
+                color    = Color.White.copy(0.07f),
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
             Spacer(Modifier.height(8.dp))
 
-            // Resources label + optional Device Mode badge
+            // ── Resources label + Device Mode badge ────────────────
             Row(
                 Modifier.padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment    = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Resources",
-                    color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Icon(
+                    Icons.Rounded.OndemandVideo, null,
+                    tint     = Color.White,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    "Resources",
+                    color      = Color.White,
+                    fontSize   = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                if (selectedDub.key != "English") {
+                    Surface(
+                        color  = selectedDub.color.copy(0.18f),
+                        shape  = RoundedCornerShape(6.dp),
+                        border = androidx.compose.foundation.BorderStroke(
+                            0.5.dp, selectedDub.color.copy(0.5f)
+                        )
+                    ) {
+                        Text(
+                            "${selectedDub.flag} ${selectedDub.label} Dubbed",
+                            color      = selectedDub.color,
+                            fontSize   = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier   = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        )
+                    }
+                }
                 if (isUsingFallback) {
                     Surface(
                         color  = Color(0xFF1A2A3A),
                         shape  = RoundedCornerShape(6.dp),
                         border = androidx.compose.foundation.BorderStroke(
-                            0.5.dp, Color.Cyan.copy(alpha = 0.4f)
+                            0.5.dp, Color.Cyan.copy(0.4f)
                         )
                     ) {
                         Row(
                             Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                            verticalAlignment    = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(
@@ -290,9 +395,9 @@ fun ExoSourceSelectionScreen(
                             )
                             Text(
                                 "Device Mode",
-                                color    = Color.Cyan,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                color         = Color.Cyan,
+                                fontSize      = 9.sp,
+                                fontWeight    = FontWeight.SemiBold,
                                 letterSpacing = 0.5.sp
                             )
                         }
@@ -302,99 +407,315 @@ fun ExoSourceSelectionScreen(
 
             Spacer(Modifier.height(8.dp))
 
+            // ── Content area ───────────────────────────────────────
             when {
-                isAnalysing -> {
-                    Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(color = Color.Cyan,
-                                modifier = Modifier.size(32.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.height(8.dp))
-                            Text("Finding best sources…", color = Color.Gray, fontSize = 12.sp)
-                        }
-                    }
-                }
-                errorMsg != null -> {
-                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Rounded.SearchOff, null, tint = Color.Gray, modifier = Modifier.size(36.dp))
-                            Spacer(Modifier.height(8.dp))
-                            Text(errorMsg!!, color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center)
-                            Spacer(Modifier.height(12.dp))
-                            Button(onClick = { selectedLang = selectedLang }) {
-                                Text("Retry")
-                            }
-                        }
-                    }
-                }
-                sources.isNotEmpty() -> {
-                    LazyColumn(
-                        contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        val sorted = sources.sortedWith(
-                            compareByDescending<StreamSourceRepository.StreamResult> {
-                                when (it.quality) { "4K" -> 4; "1080P" -> 3; "720P" -> 2; "480P" -> 1; else -> 0 }
-                            }.thenByDescending { it.type == "HLS" }
-                        )
+                isAnalysing -> AnalysingPlaceholder(selectedDub)
 
-                        item {
-                            val best = sorted.first()
-                            Button(
-                                onClick  = { playSource(best) },
-                                modifier = Modifier.fillMaxWidth().height(50.dp),
-                                colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E2A1E)),
-                                shape    = RoundedCornerShape(8.dp),
-                                border   = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00C9A7).copy(0.4f))
-                            ) {
-                                Text(
-                                    decodedTitle + if (selectedLang != "English") " [$selectedLang]" else "",
-                                    color      = Color(0xFF00C9A7),
-                                    fontSize   = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
+                errorMsg != null -> ErrorState(
+                    msg       = errorMsg!!,
+                    onRetry   = { selectedDub = selectedDub },   // trigger re-fetch
+                    dubOptions = DUB_OPTIONS,
+                    onDubChange = { selectedDub = it }
+                )
 
-                        if (sorted.size > 1) {
-                            item {
-                                Text("More options", color = Color.Gray, fontSize = 11.sp,
-                                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
-                            }
-                            items(sorted.drop(1).take(6)) { source ->
-                                SourceResultCard(source) { playSource(source) }
-                            }
-                        }
-
-                        item { Spacer(Modifier.height(24.dp)) }
-                    }
-                }
+                sources.isNotEmpty() -> SourceResultList(
+                    sources      = sources,
+                    selectedDub  = selectedDub,
+                    decodedTitle = decodedTitle,
+                    onPlay       = { playSource(it) }
+                )
             }
         }
     }
 }
 
+// ════════════════════════════════════════════════════════════════════
+//  DubLanguageChip — language selector pill
+// ════════════════════════════════════════════════════════════════════
+
 @Composable
-private fun SourceResultCard(source: StreamSourceRepository.StreamResult, onClick: () -> Unit) {
+private fun DubLanguageChip(dub: DubOption, selected: Boolean, onClick: () -> Unit) {
+    val bgColor    = if (selected) dub.color.copy(0.22f) else Color(0xFF141420)
+    val borderCol  = if (selected) dub.color.copy(0.7f) else Color.White.copy(0.08f)
+    val textColor  = if (selected) dub.color else Color.Gray
+
     Row(
-        Modifier.fillMaxWidth()
-            .background(Color(0xFF111118), RoundedCornerShape(8.dp))
-            .border(1.dp, Color.White.copy(0.06f), RoundedCornerShape(8.dp))
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(bgColor)
+            .border(1.dp, borderCol, RoundedCornerShape(20.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment    = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Text(dub.flag, fontSize = 13.sp)
+        Text(
+            dub.label,
+            color      = textColor,
+            fontSize   = 12.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+        )
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  AnalysingPlaceholder
+// ════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun AnalysingPlaceholder(dub: DubOption) {
+    Box(
+        Modifier.fillMaxWidth().height(140.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(
+                color       = dub.color,
+                modifier    = Modifier.size(34.dp),
+                strokeWidth = 2.5.dp
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Finding ${dub.label} sources…",
+                color    = Color.Gray,
+                fontSize = 13.sp
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (dub.key == "English") "Searching embed sources"
+                else "Searching dubbed sources",
+                color    = Color(0xFF4A4A5A),
+                fontSize = 11.sp
+            )
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  ErrorState
+// ════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun ErrorState(
+    msg:         String,
+    onRetry:     () -> Unit,
+    dubOptions:  List<DubOption>,
+    onDubChange: (DubOption) -> Unit
+) {
+    Column(
+        Modifier.fillMaxWidth().padding(24.dp),
+        horizontalAlignment   = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            Icons.Rounded.SearchOff, null,
+            tint     = Color.Gray,
+            modifier = Modifier.size(40.dp)
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(msg, color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(16.dp))
+
+        // Quick-switch language buttons
+        Text("Try another language:", color = Color(0xFF4A4A5A), fontSize = 11.sp)
+        Spacer(Modifier.height(8.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(dubOptions.filter { it.key != "English" }.take(5)) { dub ->
+                OutlinedButton(
+                    onClick = { onDubChange(dub) },
+                    colors  = ButtonDefaults.outlinedButtonColors(contentColor = dub.color),
+                    border  = androidx.compose.foundation.BorderStroke(1.dp, dub.color.copy(0.5f))
+                ) {
+                    Text("${dub.flag} ${dub.label}", fontSize = 12.sp)
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Button(
+            onClick = onRetry,
+            colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A2E))
+        ) {
+            Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Retry")
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SourceResultList
+// ════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun SourceResultList(
+    sources:      List<StreamSourceRepository.StreamResult>,
+    selectedDub:  DubOption,
+    decodedTitle: String,
+    onPlay:       (StreamSourceRepository.StreamResult) -> Unit
+) {
+    // Sort: language match → HLS → quality
+    val sorted = remember(sources, selectedDub) {
+        sources.sortedWith(
+            compareByDescending<StreamSourceRepository.StreamResult> {
+                it.language.equals(selectedDub.key, ignoreCase = true)
+            }.thenByDescending {
+                it.type == "HLS"
+            }.thenByDescending {
+                when (it.quality) { "4K" -> 4; "1080P" -> 3; "720P" -> 2; "480P" -> 1; else -> 0 }
+            }
+        )
+    }
+
+    LazyColumn(
+        contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        // ── Best source — prominent play button ──────────────────
+        item {
+            val best = sorted.first()
+            Button(
+                onClick  = { onPlay(best) },
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                colors   = ButtonDefaults.buttonColors(
+                    containerColor = selectedDub.color.copy(0.18f)
+                ),
+                shape  = RoundedCornerShape(10.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp, selectedDub.color.copy(0.45f)
+                )
+            ) {
+                Icon(
+                    Icons.Rounded.PlayCircle, null,
+                    tint     = selectedDub.color,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Column(horizontalAlignment = Alignment.Start) {
+                    Text(
+                        buildString {
+                            append(decodedTitle)
+                            if (selectedDub.key != "English") append(" [${selectedDub.label}]")
+                        },
+                        color      = selectedDub.color,
+                        fontSize   = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines   = 1,
+                        overflow   = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        "${best.quality} • ${best.type} • ${best.source}",
+                        color    = selectedDub.color.copy(0.6f),
+                        fontSize = 10.sp
+                    )
+                }
+            }
+        }
+
+        // ── "More options" header ─────────────────────────────────
+        if (sorted.size > 1) {
+            item {
+                Text(
+                    "More sources",
+                    color    = Color(0xFF4A4A5A),
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
+                )
+            }
+
+            items(sorted.drop(1).take(8)) { source ->
+                SourceResultCard(source = source, accentColor = selectedDub.color) {
+                    onPlay(source)
+                }
+            }
+        }
+
+        item { Spacer(Modifier.height(32.dp)) }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SourceResultCard
+// ════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun SourceResultCard(
+    source:      StreamSourceRepository.StreamResult,
+    accentColor: Color = Color.Cyan,
+    onClick:     () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF0E0E18), RoundedCornerShape(10.dp))
+            .border(1.dp, Color.White.copy(0.05f), RoundedCornerShape(10.dp))
             .clickable { onClick() }
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val typeIcon = if (source.type == "HLS") Icons.Rounded.PlayCircle else Icons.Rounded.VideoFile
-        Icon(typeIcon, null, tint = Color.Cyan, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(source.label.ifEmpty { "${source.quality} • ${source.source}" },
-                color = Color.White, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${source.type} • ${source.language}",
-                color = Color.Gray, fontSize = 11.sp)
+        // Type icon
+        val icon: ImageVector = when {
+            source.type == "HLS"  -> Icons.Rounded.PlayCircle
+            source.type == "DASH" -> Icons.Rounded.Stream
+            else                  -> Icons.Rounded.VideoFile
         }
-        Text(source.quality,
-            color    = Color.Yellow,
-            fontSize = 11.sp,
-            modifier = Modifier.background(Color.Black.copy(0.5f), RoundedCornerShape(4.dp)).padding(4.dp, 2.dp))
+        val iconTint = when (source.type) {
+            "HLS"  -> accentColor
+            "DASH" -> Color(0xFF80DEEA)
+            else   -> Color.Gray
+        }
+        Icon(icon, null, tint = iconTint, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(12.dp))
+
+        // Info
+        Column(Modifier.weight(1f)) {
+            Text(
+                source.label.ifEmpty { "${source.quality} • ${source.source}" },
+                color    = Color.White,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                Text(source.type, color = Color.Gray, fontSize = 10.sp)
+                if (source.language.isNotEmpty() && source.language != "English") {
+                    Text("•", color = Color(0xFF3A3A4A), fontSize = 10.sp)
+                    Text(
+                        source.language,
+                        color    = accentColor.copy(0.75f),
+                        fontSize = 10.sp
+                    )
+                }
+            }
+        }
+
+        // Quality badge
+        Box(
+            Modifier
+                .background(
+                    when (source.quality) {
+                        "4K"    -> Color(0xFF1A237E)
+                        "1080P" -> Color(0xFF0D2E1B)
+                        "720P"  -> Color(0xFF1A2A1A)
+                        else    -> Color(0xFF1A1A1A)
+                    },
+                    RoundedCornerShape(6.dp)
+                )
+                .padding(horizontal = 7.dp, vertical = 3.dp)
+        ) {
+            Text(
+                source.quality,
+                color      = when (source.quality) {
+                    "4K"    -> Color(0xFF82B1FF)
+                    "1080P" -> accentColor
+                    "720P"  -> Color(0xFFA5D6A7)
+                    else    -> Color.Gray
+                },
+                fontSize   = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
 }

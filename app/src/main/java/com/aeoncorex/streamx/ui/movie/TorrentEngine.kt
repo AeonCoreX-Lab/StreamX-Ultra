@@ -88,6 +88,13 @@ object TorrentEngine {
         }
     }
 
+    // Public accessor so TorrentStreamRepository can read the path
+    // during early buffering (before Ready state)
+    fun getFilePath(): String? = try {
+        val path = getFilePathNative()
+        if (path.isNotEmpty()) path else null
+    } catch (_: Exception) { null }
+
     fun stop() {
         engineStopped = true
         try { stopNative() } catch (e: Exception) { Log.e(TAG, "Stop error: ${e.message}") }
