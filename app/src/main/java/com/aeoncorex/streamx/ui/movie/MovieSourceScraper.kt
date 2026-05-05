@@ -424,10 +424,11 @@ object MovieSourceScraper {
 
     private val FZMOVIES_MIRRORS = listOf(
         "https://fzmovies.live",
+        "https://fzmovie.net",
         "https://fzmovies.host",
         "https://fzmovies.xyz",
         "https://fzmovies.de",
-        "https://fzmovies.net",   // may be dead — kept as last resort
+           // may be dead — kept as last resort
     )
 
     private fun extractFzmovies(src: ScrapeSource, dubLang: DubLanguage): List<StreamSource> {

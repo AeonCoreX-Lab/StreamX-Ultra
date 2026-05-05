@@ -184,7 +184,7 @@ fun ExoMoviePlayerScreen(
                     isAdPlaying    = true
                     exoPlayer.pause()
                     // Actually show the video/interstitial ad
-                    AdManager.showTimedAd(activity) {
+                    AdManager.showTimedAd(activity!!) {
                         isAdPlaying    = false
                         showAdPrompt   = false
                         adTimerSeconds = AdManager.AD_INTERVAL_SECONDS
