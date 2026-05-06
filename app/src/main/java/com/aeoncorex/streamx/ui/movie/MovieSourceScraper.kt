@@ -320,6 +320,37 @@ object MovieSourceScraper {
                 "https://123moviesfree.net/?s=$enc",
                 "https://123moviesfree.net/", lang = "English"))
 
+            // ── API-based sources (work without JS execution) ─────
+            // multiembed.mov direct stream redirect
+            if (tmdbId != null || imdbId != null) {
+                val vid = imdbId ?: tmdbId.toString()
+                val tmdbFlag = if (tmdbId != null) 1 else 0
+                s.add(ScrapeSource("multiembed",
+                    if (isSeries)
+                        "https://multiembed.mov/directstream.php?video_id=$vid&tmdb=$tmdbFlag&s=$season&e=$episode"
+                    else
+                        "https://multiembed.mov/directstream.php?video_id=$vid&tmdb=$tmdbFlag",
+                    "https://multiembed.mov/"))
+            }
+
+            // autoembed.cc JSON API
+            if (tmdbId != null) {
+                s.add(ScrapeSource("autoembed",
+                    if (isSeries)
+                        "https://autoembed.cc/api/iframe.php?movie_id=$tmdbId-$season-$episode&tmdb=1"
+                    else
+                        "https://autoembed.cc/api/iframe.php?movie_id=$tmdbId&tmdb=1",
+                    "https://autoembed.cc/"))
+            }
+
+            // moviesapi.club — JSON in script tag
+            if (tmdbId != null) {
+                s.add(ScrapeSource("moviesapi.club",
+                    if (isSeries) "https://moviesapi.club/tv/$tmdbId-$season-$episode"
+                    else          "https://moviesapi.club/movie/$tmdbId",
+                    "https://moviesapi.club/"))
+            }
+
         } else {
             // ── Dubbed / Non-English sources ─────────────────────
             //  Queries built using DubLanguage.buildSearchQueries()
@@ -332,11 +363,9 @@ object MovieSourceScraper {
             val encLang        = URLEncoder.encode(dubLang.label.lowercase(), "UTF-8")
 
     // ── fzmovies (mirror-aware) — best for Hindi/Tamil/Telugu/Bengali ─
-    //  Tries all mirrors in extractFzmovies() — .net is dead as of 2025
-    //  Active mirrors: .live (primary) → .host → .xyz → .de → .net (fallback)
     s.add(ScrapeSource("fzmovies",
-        "https://fzmovies.live/search.php?searchname=$enc+$encLang+dubbed&searchby=moviename&category=${dubLang.fzCategory}&beginsearch=Search",
-        "https://fzmovies.live/", lang = dubLang.label, dubbed = true))
+        "https://fzmovie.net/search.php?searchname=$enc+$encLang+dubbed&searchby=moviename&category=${dubLang.fzCategory}&beginsearch=Search",
+        "https://fzmovie.net/", lang = dubLang.label, dubbed = true))
 
             // 2. downloads-anymovies.co — multi-language dub archive
             s.add(ScrapeSource("downloads-anymovies.co",
@@ -423,19 +452,29 @@ object MovieSourceScraper {
     //    .live (primary) → .host → .xyz → .de → .net (last fallback)
 
     private val FZMOVIES_MIRRORS = listOf(
-        "https://fzmovies.live",
-        "https://fzmovie.net",
-        "https://fzmovies.host",
-        "https://fzmovies.xyz",
-        "https://fzmovies.de",
-           // may be dead — kept as last resort
+        "https://fzmovie.net",   // primary (canonical — no 's')
+        "https://www.fzmovies.net",  // alternate spelling
+        "https://fzmovies.live",     // backup #1
+        "https://fzmovies.host",     // backup #2
+        "https://fzmovies.xyz",      // backup #3
     )
 
     private fun extractFzmovies(src: ScrapeSource, dubLang: DubLanguage): List<StreamSource> {
-        // Rebuild query string from original URL (category already baked in)
-        val queryPart = src.url.substringAfter(".php?").ifEmpty {
-            "searchname=&searchby=moviename&category=${dubLang.fzCategory}&beginsearch=Search"
-        }
+        // Sanitize title: colon, apostrophe etc. break fzmovies search
+        // e.g. "Greenland 2: Migration" → "Greenland 2 Migration"
+        val rawTitle = src.url.substringAfter("searchname=")
+            .substringBefore("&")
+            .let { java.net.URLDecoder.decode(it, "UTF-8") }
+            .ifEmpty { src.url }  // fallback to URL if parsing fails
+
+        val cleanTitle = rawTitle
+            .replace(Regex("[:\-–—'"!?,.]"), " ")
+            .replace(Regex("\s+"), " ")
+            .trim()
+
+        val queryPart = "searchname=${URLEncoder.encode(cleanTitle, "UTF-8")}+" +
+            "${URLEncoder.encode(dubLang.label.lowercase(), "UTF-8")}+" +
+            "dubbed&searchby=moviename&category=${dubLang.fzCategory}&beginsearch=Search"
 
         for (mirror in FZMOVIES_MIRRORS) {
             val searchUrl  = "$mirror/search.php?$queryPart"

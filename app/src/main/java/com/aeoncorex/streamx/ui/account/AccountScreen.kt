@@ -1,6 +1,8 @@
 package com.aeoncorex.streamx.ui.account
 
 import android.widget.Toast
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -29,12 +31,12 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.aeoncorex.streamx.R
+import com.aeoncorex.streamx.data.FirestoreDb
 import com.aeoncorex.streamx.ui.premium.PremiumManager
 import com.aeoncorex.streamx.ui.home.CyberMeshBackground
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
-import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -76,7 +78,7 @@ fun AccountScreen(navController: NavController) {
         val uid = user?.uid
         if (uid == null) { premiumLoading = false; return@DisposableEffect onDispose {} }
 
-        val listener = Firebase.firestore.collection("users").document(uid)
+        val listener = FirestoreDb.instance.collection("users").document(uid)
             .addSnapshotListener { snapshot, _ ->
                 premiumLoading = false
                 isPremium     = snapshot?.getBoolean("isPremium")    ?: false
@@ -191,6 +193,11 @@ fun AccountScreen(navController: NavController) {
                 }
                 InfoCard("Connected Email",  email,        Icons.Default.Email)
                 InfoCard("Auth Provider",    providerName, Icons.Default.VpnKey)
+
+                // ── Copyable Firebase UID (for Gumroad custom field) ──
+                user?.uid?.let { uid ->
+                    CopyableUidCard(uid = uid)
+                }
 
                 Spacer(Modifier.height(28.dp))
 
@@ -340,12 +347,11 @@ private fun PremiumActiveCard(expiryMs: Long?) {
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(expiryText, color = Gold.copy(0.85f), fontSize = 12.sp)
-                Spacer(Modifier.height(6.dp))
-                // Features row
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MiniFeatureChip("AI Vision")
-                    MiniFeatureChip("Voice")
-                    MiniFeatureChip("∞ Requests")
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MiniFeatureChip("No Ads")
+                    MiniFeatureChip("All Sources")
+                    MiniFeatureChip("HD Stream")
                 }
             }
         }
@@ -382,7 +388,7 @@ private fun PremiumUpgradeCard(onUpgrade: () -> Unit) {
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text("Free Plan", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Text("AI features locked", color = Color.Gray, fontSize = 12.sp)
+                    Text("Upgrade for ad-free streaming", color = Color.Gray, fontSize = 12.sp)
                 }
                 // Lock badge
                 Box(
@@ -403,9 +409,9 @@ private fun PremiumUpgradeCard(onUpgrade: () -> Unit) {
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                LockedFeatureItem(Icons.Rounded.AutoAwesome, "AI Vision")
-                LockedFeatureItem(Icons.Rounded.RecordVoiceOver, "Voice")
-                LockedFeatureItem(Icons.Rounded.AllInclusive, "Unlimited")
+                LockedFeatureItem(Icons.Rounded.Block, "Ads")
+                LockedFeatureItem(Icons.Rounded.Speed, "Faster Load")
+                LockedFeatureItem(Icons.Rounded.VideoLibrary, "All Sources")
             }
 
             Spacer(Modifier.height(16.dp))
@@ -419,7 +425,7 @@ private fun PremiumUpgradeCard(onUpgrade: () -> Unit) {
             ) {
                 Icon(Icons.Rounded.WorkspacePremium, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Upgrade to Premium — $4.99/yr", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("Upgrade to Premium", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
             }
         }
     }
@@ -476,6 +482,96 @@ private fun InfoCard(title: String, subtitle: String, icon: ImageVector) {
                 Text(title.uppercase(),  fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
                 Text(subtitle, fontSize = 16.sp, color = Color.White.copy(0.7f), fontWeight = FontWeight.Medium)
             }
+        }
+    }
+}
+
+// ── Copyable Firebase UID card ─────────────────────────────────────
+// Shows the user's Firebase UID with a tap-to-copy button.
+// Needed when entering UID in Gumroad purchase custom field.
+@Composable
+private fun CopyableUidCard(uid: String) {
+    val clipboard = LocalClipboardManager.current
+    val context   = LocalContext.current
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF0A0A1A))
+            .border(1.dp, Color(0xFF00FFFF).copy(0.2f), RoundedCornerShape(16.dp))
+            .padding(16.dp)
+    ) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Fingerprint, null,
+                    tint = Color(0xFF00FFFF),
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "USER ID",
+                    fontSize = 10.sp,
+                    color = Color(0xFF00FFFF),
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.5.sp
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text     = uid,
+                    fontSize = 11.sp,
+                    color    = Color.White.copy(0.8f),
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.width(8.dp))
+                // Copy button
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF00FFFF).copy(0.15f))
+                        .clickable {
+                            clipboard.setText(AnnotatedString(uid))
+                            Toast.makeText(context, "User ID copied!", Toast.LENGTH_SHORT).show()
+                        }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.ContentCopy, null,
+                            tint     = Color(0xFF00FFFF),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "COPY",
+                            fontSize   = 10.sp,
+                            color      = Color(0xFF00FFFF),
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Enter this ID in Gumroad → custom field when purchasing premium",
+                fontSize = 10.sp,
+                color    = Color.Gray,
+                lineHeight = 14.sp
+            )
         }
     }
 }

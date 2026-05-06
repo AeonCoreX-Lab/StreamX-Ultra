@@ -31,7 +31,7 @@ import com.aeoncorex.streamx.ui.premium.PremiumManager
 import com.aeoncorex.streamx.ui.home.CyberMeshBackground
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
-import com.google.firebase.firestore.firestore
+import com.aeoncorex.streamx.data.FirestoreDb
 
 private val Purple      = Color(0xFF7C4DFF)
 private val PurpleLight = Color(0xFFB388FF)
@@ -48,7 +48,7 @@ fun SettingsScreen(navController: NavController) {
 
     DisposableEffect(uid) {
         if (uid == null) return@DisposableEffect onDispose {}
-        val listener = Firebase.firestore.collection("users").document(uid)
+        val listener = FirestoreDb.instance.collection("users").document(uid)
             .addSnapshotListener { snapshot, _ ->
                 isPremium = snapshot?.getBoolean("isPremium") ?: false
             }
@@ -154,7 +154,7 @@ private fun PremiumActiveBanner() {
                     }
                 }
                 Spacer(Modifier.height(3.dp))
-                Text("All AI features unlocked", color = Gold.copy(0.8f), fontSize = 12.sp)
+                Text("Ad-free · All sources · HD streaming", color = Gold.copy(0.8f), fontSize = 12.sp)
             }
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Color.Gray)
         }
@@ -193,9 +193,9 @@ private fun PremiumUpgradeBanner(onTap: () -> Unit) {
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text("Unlock AI Features", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                Text("Unlock StreamX Premium", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(3.dp))
-                Text("Scene analysis • Voice • Unlimited  —  $4.99/yr", color = PurpleLight.copy(0.8f), fontSize = 11.sp)
+                Text("No Ads  •  Faster Sources  •  HD Streaming", color = PurpleLight.copy(0.8f), fontSize = 11.sp)
             }
             // Arrow
             Box(
