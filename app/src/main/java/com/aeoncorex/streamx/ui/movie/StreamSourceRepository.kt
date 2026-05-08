@@ -34,12 +34,21 @@ object StreamSourceRepository {
 
     // ── Public data class ─────────────────────────────────────────
     data class StreamResult(
+        val url:       String,
+        val type:      String,   // "HLS" | "MP4" | "MKV" | "DASH"
+        val quality:   String,
+        val source:    String,
+        val label:     String,
+        val language:  String = "English",
+        val subtitles: List<SubtitleItem> = emptyList(),
+        val headers:   Map<String, String> = emptyMap()
+    )
+
+    data class SubtitleItem(
         val url:      String,
-        val type:     String,   // "HLS" | "MP4" | "DASH"
-        val quality:  String,
-        val source:   String,
-        val label:    String,
-        val language: String = "English"
+        val title:    String,
+        val language: String,   // ISO-639-1 e.g. "en", "hi", "ja"
+        val mimeType: String = "text/vtt"
     )
 
     // ── Main entry point ──────────────────────────────────────────
@@ -62,10 +71,49 @@ object StreamSourceRepository {
             return@withContext serverResults
         }
 
-        // ── Step 2: In-app fallback scraper ───────────────────────
-        Log.w(TAG, "⚠️ Backend unavailable — switching to in-app scraper for \"$title\"")
+        // ── Step 2: New provider engine (no server needed) ───────────
+        Log.w(TAG, "⚡ Using StreamProviderEngine for \"$title\"")
         lastUsedFallback = true
 
+        val engineResults = com.aeoncorex.streamx.streaming.StreamProviderEngine.fetch(
+            com.aeoncorex.streamx.streaming.ProviderRequest(
+                tmdbId   = tmdbId,
+                imdbId   = imdbId,
+                title    = title,
+                isSeries = type == MovieType.SERIES,
+                season   = season,
+                episode  = episode,
+                language = language
+            )
+        )
+
+        Log.d(TAG, "⚡ ProviderEngine: ${engineResults.size} streams for \"$title\"")
+
+        // Convert engine StreamResult → repository StreamResult
+        if (engineResults.isNotEmpty()) {
+            return@withContext engineResults.map { s ->
+                StreamResult(
+                    url       = s.url,
+                    type      = s.type.name,
+                    quality   = s.quality,
+                    source    = s.source,
+                    label     = s.label.ifEmpty { "${s.quality} · ${s.source}" },
+                    language  = s.language,
+                    subtitles = s.subtitles.map { sub ->
+                        SubtitleItem(
+                            url      = sub.url,
+                            title    = sub.title,
+                            language = sub.language,
+                            mimeType = sub.mimeType
+                        )
+                    },
+                    headers   = s.headers
+                )
+            }
+        }
+
+        // ── Step 3: Legacy in-app scraper as last resort ──────────────
+        Log.w(TAG, "⚠️ ProviderEngine empty — legacy scraper for \"$title\"")
         val scraperResults = MovieSourceScraper.getSources(
             tmdbId   = tmdbId,
             imdbId   = imdbId,
@@ -76,7 +124,7 @@ object StreamSourceRepository {
             language = language
         )
 
-        Log.d(TAG, "📱 In-app fallback: ${scraperResults.size} streams for \"$title\"")
+        Log.d(TAG, "📱 Legacy scraper: ${scraperResults.size} streams for \"$title\"")
 
         // Convert MovieSourceScraper.StreamSource → StreamResult
         scraperResults.map { s ->

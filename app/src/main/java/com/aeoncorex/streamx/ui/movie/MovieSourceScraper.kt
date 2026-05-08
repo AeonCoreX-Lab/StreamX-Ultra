@@ -468,8 +468,8 @@ object MovieSourceScraper {
             .ifEmpty { src.url }  // fallback to URL if parsing fails
 
         val cleanTitle = rawTitle
-            .replace(Regex("[:\-–—'"!?,.]"), " ")
-            .replace(Regex("\s+"), " ")
+            .replace(Regex("""[:\-–—'"!?.,]"""), " ")
+            .replace(Regex("""\s+"""), " ")
             .trim()
 
         val queryPart = "searchname=${URLEncoder.encode(cleanTitle, "UTF-8")}+" +

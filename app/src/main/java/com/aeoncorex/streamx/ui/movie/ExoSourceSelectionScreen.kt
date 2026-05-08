@@ -175,12 +175,32 @@ fun ExoSourceSelectionScreen(
         adLoading = true
         AdManager.showInterstitial(activity) {
             adLoading = false
-            val encodedUrl   = URLEncoder.encode(source.url, "UTF-8")
-            val encodedTitle = URLEncoder.encode(decodedTitle, "UTF-8")
+            val encodedUrl   = URLEncoder.encode(source.url,   "UTF-8")
+            val encodedTitle = URLEncoder.encode(decodedTitle,  "UTF-8")
             val encLang      = URLEncoder.encode(source.language.ifEmpty { selectedDub.key }, "UTF-8")
             val encImdb      = URLEncoder.encode(imdbId.ifEmpty { "null" }, "UTF-8")
+
+            // Encode subtitles as JSON string in nav arg
+            val subsJson = org.json.JSONArray().apply {
+                source.subtitles.forEach { sub ->
+                    put(org.json.JSONObject().apply {
+                        put("url",      sub.url)
+                        put("title",    sub.title)
+                        put("language", sub.language)
+                        put("mimeType", sub.mimeType)
+                    })
+                }
+            }.toString()
+            val encSubs = URLEncoder.encode(subsJson, "UTF-8")
+
+            // Encode headers as JSON
+            val headersJson = org.json.JSONObject(source.headers.ifEmpty {
+                mapOf<String, String>()
+            }).toString()
+            val encHeaders = URLEncoder.encode(headersJson, "UTF-8")
+
             navController.navigate(
-                "exo_player/$encodedUrl/$encodedTitle/${source.quality}/$encLang/$encImdb/$type/$season/$episode"
+                "exo_player/$encodedUrl/$encodedTitle/${source.quality}/$encLang/$encImdb/$type/$season/$episode/$encSubs/$encHeaders"
             )
         }
     }

@@ -73,7 +73,9 @@ fun ExoMoviePlayerScreen(
     imdbId:        String? = null,
     movieType:     String = "MOVIE",
     season:        Int    = 0,
-    episode:       Int    = 0
+    episode:       Int    = 0,
+    subtitlesJson: String = "[]",   // JSON array of subtitle tracks from providers
+    headersJson:   String = "{}"    // JSON object of custom request headers
 ) {
     val context    = LocalContext.current
     val activity   = context as? Activity
@@ -119,8 +121,44 @@ fun ExoMoviePlayerScreen(
     var adSkipCountdown    by remember { mutableIntStateOf(0) }
     var isAdPlaying        by remember { mutableStateOf(false) }
 
+    // ── Parse subtitles from JSON ─────────────────────────────────
+    val subtitleConfigs = remember(subtitlesJson) {
+        buildList {
+            try {
+                val arr = org.json.JSONArray(URLDecoder.decode(subtitlesJson, "UTF-8"))
+                for (i in 0 until arr.length()) {
+                    val sub  = arr.getJSONObject(i)
+                    val mime = when (sub.optString("mimeType", "text/vtt")) {
+                        "application/x-subrip" -> MimeTypes.APPLICATION_SUBRIP
+                        "application/ttml+xml" -> MimeTypes.APPLICATION_TTML
+                        else                   -> MimeTypes.TEXT_VTT
+                    }
+                    add(MediaItem.SubtitleConfiguration.Builder(
+                        android.net.Uri.parse(sub.optString("url"))
+                    )
+                        .setLabel(sub.optString("title", "Unknown"))
+                        .setLanguage(sub.optString("language", "en"))
+                        .setMimeType(mime)
+                        .build())
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    // ── Parse custom headers ──────────────────────────────────────
+    val customHeaders = remember(headersJson) {
+        buildMap<String, String> {
+            try {
+                val obj = org.json.JSONObject(URLDecoder.decode(headersJson, "UTF-8"))
+                obj.keys().forEach { k -> put(k, obj.getString(k)) }
+            } catch (_: Exception) {}
+        }
+    }
+
     // ── ExoPlayer ─────────────────────────────────────────────────
     val exoPlayer = remember {
+        // Build DataSource with custom headers if any
+        val dataSourceFactory: com.google.android.exoplayer2.upstream.DefaultDataSource.Factory? = null
         ExoPlayer.Builder(context).build().apply {
             val item = MediaItem.Builder()
                 .setUri(decodedUrl)
@@ -129,9 +167,21 @@ fun ExoMoviePlayerScreen(
                         setMimeType(MimeTypes.APPLICATION_M3U8)
                     else if (decodedUrl.contains(".mpd"))
                         setMimeType(MimeTypes.APPLICATION_MPD)
+                    // Add subtitle tracks from provider (HiAnime, KissKh, FlixHQ etc.)
+                    if (subtitleConfigs.isNotEmpty())
+                        setSubtitleConfigurations(subtitleConfigs)
                 }
                 .build()
             setMediaItem(item)
+            // Set custom headers (e.g. Referer for HiAnime, KissKh)
+            if (customHeaders.isNotEmpty()) {
+                val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                    .setDefaultRequestProperties(customHeaders)
+                val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
+                    androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
+                )
+                setMediaSourceFactory(mediaSourceFactory)
+            }
             prepare()
             playWhenReady = true
         }
