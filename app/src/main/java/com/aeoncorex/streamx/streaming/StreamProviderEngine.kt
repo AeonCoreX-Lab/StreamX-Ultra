@@ -6,6 +6,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeout
 
+import com.aeoncorex.streamx.streaming.providers.A111477Provider
 import com.aeoncorex.streamx.streaming.providers.AnimetsuProvider
 import com.aeoncorex.streamx.streaming.providers.AutoEmbedProvider
 import com.aeoncorex.streamx.streaming.providers.CinemaLuxeProvider
@@ -30,6 +31,7 @@ import com.aeoncorex.streamx.streaming.providers.NetflixMirrorProvider
 import com.aeoncorex.streamx.streaming.providers.OgoMoviesProvider
 import com.aeoncorex.streamx.streaming.providers.PrimeMirrorProvider
 import com.aeoncorex.streamx.streaming.providers.PrimewireProvider
+import com.aeoncorex.streamx.streaming.providers.RingzProvider
 import com.aeoncorex.streamx.streaming.providers.ShowboxProvider
 import com.aeoncorex.streamx.streaming.providers.SkyMoviesHdProvider
 import com.aeoncorex.streamx.streaming.providers.TokyoInsiderProvider
@@ -75,6 +77,8 @@ object StreamProviderEngine {
                     add(async(Dispatchers.IO) { runSafe("Primewire")   { withTimeout(25_000L)    { PrimewireProvider.fetch(req)   } } })
                     add(async(Dispatchers.IO) { runSafe("HdHub4u")     { withTimeout(30_000L)    { HdHub4uProvider.fetch(req)     } } })
                     add(async(Dispatchers.IO) { runSafe("MultiMovies") { withTimeout(30_000L)    { MultiMoviesProvider.fetch(req) } } })
+                    add(async(Dispatchers.IO) { runSafe("111477")      { withTimeout(20_000L)    { A111477Provider.fetch(req)     } } })
+                    add(async(Dispatchers.IO) { runSafe("Ringz")       { withTimeout(20_000L)    { RingzProvider.fetch(req)       } } })
                     // Mirror providers (require IMDB ID)
                     if (!req.imdbId.isNullOrEmpty()) {
                         add(async(Dispatchers.IO) { runSafe("NetflixMirror") { withTimeout(20_000L) { NetflixMirrorProvider.fetch(req) } } })
@@ -97,6 +101,8 @@ object StreamProviderEngine {
                     add(async(Dispatchers.IO) { runSafe("CinemaLuxe")  { withTimeout(25_000L)    { CinemaLuxeProvider.fetch(req)   } } })
                     add(async(Dispatchers.IO) { runSafe("ZeeFliz")     { withTimeout(20_000L)    { ZeeFlizProvider.fetch(req)      } } })
                     add(async(Dispatchers.IO) { runSafe("Dooflix")     { withTimeout(20_000L)    { DooflixProvider.fetch(req)      } } })
+                    add(async(Dispatchers.IO) { runSafe("Ringz")       { withTimeout(20_000L)    { RingzProvider.fetch(req)        } } })
+                    add(async(Dispatchers.IO) { runSafe("MoviesMod")   { withTimeout(25_000L)    { MoviesModProvider.fetch(req)    } } })
                 }
 
                 // ── Tamil / Telugu ───────────────────────────────────────────
@@ -134,6 +140,7 @@ object StreamProviderEngine {
                     add(async(Dispatchers.IO) { runSafe("Animetsu")     { withTimeout(30_000L)    { AnimetsuProvider.fetch(req)     } } })
                     add(async(Dispatchers.IO) { runSafe("TokyoInsider") { withTimeout(25_000L)    { TokyoInsiderProvider.fetch(req) } } })
                     add(async(Dispatchers.IO) { runSafe("AutoEmbed")    { withTimeout(25_000L)    { AutoEmbedProvider.fetch(req)    } } })
+                    add(async(Dispatchers.IO) { runSafe("Ringz-Anime")  { withTimeout(20_000L)    { RingzProvider.fetch(req)        } } })
                 }
 
                 // ── Korean ───────────────────────────────────────────────────

@@ -41,23 +41,21 @@ import java.net.URLEncoder
 //  ──────────────────────────────────────────────────────────────
 //  UI Flow (Movie Box style):
 //    1. "Analysing from [source]..." overlay on backdrop
-//    2. Auto-fetches streams from backend (extract-stream.js)
-//       OR in-app scraper fallback (MovieSourceScraper)
+//    2. Auto-fetches streams via StreamProviderEngine (30+ providers, no server needed)
 //    3. Language selector: English / Hindi / Tamil / Telugu /
 //       Bengali / Korean / Japanese / Dual Audio + any language
 //    4. Best stream auto-highlighted, others listed below
 //    5. On play → Ad interstitial → ExoPlayer
 //
 //  Language routing:
-//    • Each language maps to DubLanguage sealed class
-//    • Backend & in-app scraper both use the same language key
-//    • Smart query builder injects correct keywords per language
+//    • Each language key routes to relevant providers in StreamProviderEngine
+//    • All HTTP calls made directly from device — no backend server needed
 // ═══════════════════════════════════════════════════════════════════
 
 // ── Language definitions for UI ───────────────────────────────────
 
 data class DubOption(
-    val key:   String,   // sent to backend / scraper
+    val key:   String,   // language key for StreamProviderEngine routing
     val label: String,   // shown in UI
     val flag:  String,   // emoji flag
     val color: Color     // accent color for selected state
@@ -97,7 +95,6 @@ fun ExoSourceSelectionScreen(
     var selectedDub      by remember { mutableStateOf(DUB_OPTIONS[0]) }    // English default
     var isAnalysing      by remember { mutableStateOf(false) }
     var analysingSource  by remember { mutableStateOf("") }
-    var isUsingFallback  by remember { mutableStateOf(false) }
     var sources          by remember { mutableStateOf<List<StreamSourceRepository.StreamResult>>(emptyList()) }
     var errorMsg         by remember { mutableStateOf<String?>(null) }
     var adLoading        by remember { mutableStateOf(false) }
@@ -108,14 +105,17 @@ fun ExoSourceSelectionScreen(
 
     // Sites shown in "Analysing from [site]" — mirrors backend source order
     val sourceSites = remember(selectedDub) {
-        if (selectedDub.key == "English") listOf(
-            "vidsrc.me", "vidsrc.to", "vidlink.pro", "embed.su",
-            "autoembed.cc", "smashystream.com", "vidsrc.xyz",
-            "2embed.stream", "123moviesfree.net"
-        ) else listOf(
-            "fzmovies.net", "downloads-anymovies.co", "123moviesfree.net",
-            "vegamovies.app", "hindimovies.to", "vidsrc.me [fallback]"
-        )
+        when (selectedDub.key) {
+            "English"    -> listOf("AutoEmbed", "MovieBox", "Showbox", "FlixHQ", "MoviesAPI", "Primewire")
+            "Hindi"      -> listOf("VegaMovies", "HdHub4u", "Filmyfly", "KatMovies", "TopMovies", "MoviesMod")
+            "Tamil"      -> listOf("Filmyfly", "VegaMovies", "HdHub4u", "Movies4u", "SkyMoviesHD")
+            "Telugu"     -> listOf("Filmyfly", "VegaMovies", "HdHub4u", "MoviezWap")
+            "Bengali"    -> listOf("VegaMovies", "HdHub4u", "OgoMovies", "KmMovies", "Joya9tv")
+            "Korean"     -> listOf("KissKh", "FlixHQ")
+            "Japanese"   -> listOf("HiAnime", "Animetsu", "TokyoInsider")
+            "Dual Audio" -> listOf("HdHub4u", "VegaMovies", "KatMovies")
+            else         -> listOf("AutoEmbed", "MovieBox", "FlixHQ")
+        }
     }
 
     // ── Load movie details ─────────────────────────────────────────
@@ -162,8 +162,6 @@ fun ExoSourceSelectionScreen(
 
         isAnalysing     = false
         analysingSource = ""
-        isUsingFallback = StreamSourceRepository.lastUsedFallback
-
         if (results.isEmpty())
             errorMsg = "No sources found for ${selectedDub.label}. Try another language."
         else
@@ -395,32 +393,31 @@ fun ExoSourceSelectionScreen(
                         )
                     }
                 }
-                if (isUsingFallback) {
-                    Surface(
-                        color  = Color(0xFF1A2A3A),
-                        shape  = RoundedCornerShape(6.dp),
-                        border = androidx.compose.foundation.BorderStroke(
-                            0.5.dp, Color.Cyan.copy(0.4f)
-                        )
+                // Provider Mode chip — always shown (30+ providers, no server)
+                Surface(
+                    color  = Color(0xFF0A1F2F),
+                    shape  = RoundedCornerShape(6.dp),
+                    border = androidx.compose.foundation.BorderStroke(
+                        0.5.dp, Color(0xFF00FFFF).copy(0.4f)
+                    )
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Row(
-                            Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                            verticalAlignment    = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                Icons.Rounded.PhoneAndroid, null,
-                                tint     = Color.Cyan,
-                                modifier = Modifier.size(10.dp)
-                            )
-                            Text(
-                                "Device Mode",
-                                color         = Color.Cyan,
-                                fontSize      = 9.sp,
-                                fontWeight    = FontWeight.SemiBold,
-                                letterSpacing = 0.5.sp
-                            )
-                        }
+                        Icon(
+                            Icons.Rounded.Language, null,
+                            tint     = Color(0xFF00FFFF),
+                            modifier = Modifier.size(10.dp)
+                        )
+                        Text(
+                            "30+ Providers",
+                            color         = Color(0xFF00FFFF),
+                            fontSize      = 9.sp,
+                            fontWeight    = FontWeight.SemiBold,
+                            letterSpacing = 0.5.sp
+                        )
                     }
                 }
             }
