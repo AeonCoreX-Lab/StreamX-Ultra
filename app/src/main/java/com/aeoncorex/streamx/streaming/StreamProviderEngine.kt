@@ -8,24 +8,37 @@ import kotlinx.coroutines.withTimeout
 
 import com.aeoncorex.streamx.streaming.providers.AnimetsuProvider
 import com.aeoncorex.streamx.streaming.providers.AutoEmbedProvider
+import com.aeoncorex.streamx.streaming.providers.CinemaLuxeProvider
+import com.aeoncorex.streamx.streaming.providers.CinevoodProvider
+import com.aeoncorex.streamx.streaming.providers.DooflixProvider
 import com.aeoncorex.streamx.streaming.providers.FilmyflyProvider
 import com.aeoncorex.streamx.streaming.providers.FlixHQProvider
 import com.aeoncorex.streamx.streaming.providers.FourKHdHubProvider
 import com.aeoncorex.streamx.streaming.providers.HdHub4uProvider
 import com.aeoncorex.streamx.streaming.providers.HiAnimeProvider
+import com.aeoncorex.streamx.streaming.providers.Joya9tvProvider
 import com.aeoncorex.streamx.streaming.providers.KatMoviesProvider
 import com.aeoncorex.streamx.streaming.providers.KissKhProvider
+import com.aeoncorex.streamx.streaming.providers.KmMoviesProvider
 import com.aeoncorex.streamx.streaming.providers.LuxMoviesProvider
 import com.aeoncorex.streamx.streaming.providers.MovieBoxProvider
 import com.aeoncorex.streamx.streaming.providers.Movies4uProvider
+import com.aeoncorex.streamx.streaming.providers.MoviesApiProvider
+import com.aeoncorex.streamx.streaming.providers.MoviezwapProvider
 import com.aeoncorex.streamx.streaming.providers.MultiMoviesProvider
+import com.aeoncorex.streamx.streaming.providers.NetflixMirrorProvider
+import com.aeoncorex.streamx.streaming.providers.OgoMoviesProvider
+import com.aeoncorex.streamx.streaming.providers.PrimeMirrorProvider
+import com.aeoncorex.streamx.streaming.providers.PrimewireProvider
 import com.aeoncorex.streamx.streaming.providers.ShowboxProvider
 import com.aeoncorex.streamx.streaming.providers.SkyMoviesHdProvider
+import com.aeoncorex.streamx.streaming.providers.TokyoInsiderProvider
 import com.aeoncorex.streamx.streaming.providers.TopMoviesProvider
 import com.aeoncorex.streamx.streaming.providers.UhdMoviesProvider
 import com.aeoncorex.streamx.streaming.providers.VadaPavProvider
 import com.aeoncorex.streamx.streaming.providers.VegaMoviesProvider
 import com.aeoncorex.streamx.streaming.providers.World4uProvider
+import com.aeoncorex.streamx.streaming.providers.ZeeFlizProvider
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  StreamProviderEngine.kt
@@ -54,25 +67,36 @@ object StreamProviderEngine {
 
                 // ── English / Default ────────────────────────────────────────
                 "english" -> {
-                    add(async(Dispatchers.IO) { runSafe("AutoEmbed")  { withTimeout(TIMEOUT_MS) { AutoEmbedProvider.fetch(req)  } } })
-                    add(async(Dispatchers.IO) { runSafe("MovieBox")   { withTimeout(25_000L)    { MovieBoxProvider.fetch(req)   } } })
-                    add(async(Dispatchers.IO) { runSafe("Showbox")    { withTimeout(25_000L)    { ShowboxProvider.fetch(req)    } } })
-                    add(async(Dispatchers.IO) { runSafe("FlixHQ")     { withTimeout(30_000L)    { FlixHQProvider.fetch(req)     } } })
-                    add(async(Dispatchers.IO) { runSafe("HdHub4u")    { withTimeout(30_000L)    { HdHub4uProvider.fetch(req)    } } })
-                    add(async(Dispatchers.IO) { runSafe("MultiMovies"){ withTimeout(30_000L)    { MultiMoviesProvider.fetch(req)} } })
+                    add(async(Dispatchers.IO) { runSafe("AutoEmbed")   { withTimeout(TIMEOUT_MS) { AutoEmbedProvider.fetch(req)   } } })
+                    add(async(Dispatchers.IO) { runSafe("MovieBox")    { withTimeout(25_000L)    { MovieBoxProvider.fetch(req)    } } })
+                    add(async(Dispatchers.IO) { runSafe("Showbox")     { withTimeout(25_000L)    { ShowboxProvider.fetch(req)     } } })
+                    add(async(Dispatchers.IO) { runSafe("FlixHQ")      { withTimeout(30_000L)    { FlixHQProvider.fetch(req)      } } })
+                    add(async(Dispatchers.IO) { runSafe("MoviesAPI")   { withTimeout(25_000L)    { MoviesApiProvider.fetch(req)   } } })
+                    add(async(Dispatchers.IO) { runSafe("Primewire")   { withTimeout(25_000L)    { PrimewireProvider.fetch(req)   } } })
+                    add(async(Dispatchers.IO) { runSafe("HdHub4u")     { withTimeout(30_000L)    { HdHub4uProvider.fetch(req)     } } })
+                    add(async(Dispatchers.IO) { runSafe("MultiMovies") { withTimeout(30_000L)    { MultiMoviesProvider.fetch(req) } } })
+                    // Mirror providers (require IMDB ID)
+                    if (!req.imdbId.isNullOrEmpty()) {
+                        add(async(Dispatchers.IO) { runSafe("NetflixMirror") { withTimeout(20_000L) { NetflixMirrorProvider.fetch(req) } } })
+                        add(async(Dispatchers.IO) { runSafe("PrimeMirror")   { withTimeout(20_000L) { PrimeMirrorProvider.fetch(req)   } } })
+                    }
                 }
 
                 // ── Hindi ────────────────────────────────────────────────────
                 "hindi" -> {
-                    add(async(Dispatchers.IO) { runSafe("VegaMovies") { withTimeout(TIMEOUT_MS) { VegaMoviesProvider.fetch(req)  } } })
-                    add(async(Dispatchers.IO) { runSafe("HdHub4u")    { withTimeout(30_000L)    { HdHub4uProvider.fetch(req)     } } })
-                    add(async(Dispatchers.IO) { runSafe("Filmyfly")   { withTimeout(30_000L)    { FilmyflyProvider.fetch(req)    } } })
-                    add(async(Dispatchers.IO) { runSafe("KatMovies")  { withTimeout(30_000L)    { KatMoviesProvider.fetch(req)   } } })
-                    add(async(Dispatchers.IO) { runSafe("TopMovies")  { withTimeout(25_000L)    { TopMoviesProvider.fetch(req)   } } })
-                    add(async(Dispatchers.IO) { runSafe("LuxMovies")  { withTimeout(25_000L)    { LuxMoviesProvider.fetch(req)   } } })
-                    add(async(Dispatchers.IO) { runSafe("Movies4u")   { withTimeout(25_000L)    { Movies4uProvider.fetch(req)    } } })
-                    add(async(Dispatchers.IO) { runSafe("SkyMoviesHD"){ withTimeout(25_000L)    { SkyMoviesHdProvider.fetch(req) } } })
-                    add(async(Dispatchers.IO) { runSafe("World4u")    { withTimeout(25_000L)    { World4uProvider.fetch(req)     } } })
+                    add(async(Dispatchers.IO) { runSafe("VegaMovies")  { withTimeout(TIMEOUT_MS) { VegaMoviesProvider.fetch(req)   } } })
+                    add(async(Dispatchers.IO) { runSafe("HdHub4u")     { withTimeout(30_000L)    { HdHub4uProvider.fetch(req)      } } })
+                    add(async(Dispatchers.IO) { runSafe("Filmyfly")    { withTimeout(30_000L)    { FilmyflyProvider.fetch(req)     } } })
+                    add(async(Dispatchers.IO) { runSafe("KatMovies")   { withTimeout(30_000L)    { KatMoviesProvider.fetch(req)    } } })
+                    add(async(Dispatchers.IO) { runSafe("TopMovies")   { withTimeout(25_000L)    { TopMoviesProvider.fetch(req)    } } })
+                    add(async(Dispatchers.IO) { runSafe("LuxMovies")   { withTimeout(25_000L)    { LuxMoviesProvider.fetch(req)    } } })
+                    add(async(Dispatchers.IO) { runSafe("Movies4u")    { withTimeout(25_000L)    { Movies4uProvider.fetch(req)     } } })
+                    add(async(Dispatchers.IO) { runSafe("SkyMoviesHD") { withTimeout(25_000L)    { SkyMoviesHdProvider.fetch(req)  } } })
+                    add(async(Dispatchers.IO) { runSafe("World4u")     { withTimeout(25_000L)    { World4uProvider.fetch(req)      } } })
+                    add(async(Dispatchers.IO) { runSafe("CinevoodHin") { withTimeout(25_000L)    { CinevoodProvider.fetch(req)     } } })
+                    add(async(Dispatchers.IO) { runSafe("CinemaLuxe")  { withTimeout(25_000L)    { CinemaLuxeProvider.fetch(req)   } } })
+                    add(async(Dispatchers.IO) { runSafe("ZeeFliz")     { withTimeout(20_000L)    { ZeeFlizProvider.fetch(req)      } } })
+                    add(async(Dispatchers.IO) { runSafe("Dooflix")     { withTimeout(20_000L)    { DooflixProvider.fetch(req)      } } })
                 }
 
                 // ── Tamil / Telugu ───────────────────────────────────────────
@@ -91,6 +115,9 @@ object StreamProviderEngine {
                     add(async(Dispatchers.IO) { runSafe("VegaMovies") { withTimeout(TIMEOUT_MS) { VegaMoviesProvider.fetch(dubbed) } } })
                     add(async(Dispatchers.IO) { runSafe("HdHub4u")    { withTimeout(30_000L)    { HdHub4uProvider.fetch(dubbed)    } } })
                     add(async(Dispatchers.IO) { runSafe("TopMovies")  { withTimeout(25_000L)    { TopMoviesProvider.fetch(dubbed)  } } })
+                    add(async(Dispatchers.IO) { runSafe("OgoMovies")  { withTimeout(25_000L)    { OgoMoviesProvider.fetch(req)     } } })
+                    add(async(Dispatchers.IO) { runSafe("KmMovies")   { withTimeout(25_000L)    { KmMoviesProvider.fetch(req)      } } })
+                    add(async(Dispatchers.IO) { runSafe("Joya9tv")    { withTimeout(20_000L)    { Joya9tvProvider.fetch(req)       } } })
                 }
 
                 // ── 4K ───────────────────────────────────────────────────────
@@ -103,9 +130,10 @@ object StreamProviderEngine {
 
                 // ── Japanese (Anime) ─────────────────────────────────────────
                 "japanese" -> {
-                    add(async(Dispatchers.IO) { runSafe("HiAnime")    { withTimeout(TIMEOUT_MS) { HiAnimeProvider.fetch(req)    } } })
-                    add(async(Dispatchers.IO) { runSafe("Animetsu")   { withTimeout(30_000L)    { AnimetsuProvider.fetch(req)   } } })
-                    add(async(Dispatchers.IO) { runSafe("AutoEmbed")  { withTimeout(25_000L)    { AutoEmbedProvider.fetch(req)  } } })
+                    add(async(Dispatchers.IO) { runSafe("HiAnime")      { withTimeout(TIMEOUT_MS) { HiAnimeProvider.fetch(req)      } } })
+                    add(async(Dispatchers.IO) { runSafe("Animetsu")     { withTimeout(30_000L)    { AnimetsuProvider.fetch(req)     } } })
+                    add(async(Dispatchers.IO) { runSafe("TokyoInsider") { withTimeout(25_000L)    { TokyoInsiderProvider.fetch(req) } } })
+                    add(async(Dispatchers.IO) { runSafe("AutoEmbed")    { withTimeout(25_000L)    { AutoEmbedProvider.fetch(req)    } } })
                 }
 
                 // ── Korean ───────────────────────────────────────────────────

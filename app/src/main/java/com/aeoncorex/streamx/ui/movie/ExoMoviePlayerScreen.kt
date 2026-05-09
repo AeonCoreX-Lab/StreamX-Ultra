@@ -157,9 +157,21 @@ fun ExoMoviePlayerScreen(
 
     // ── ExoPlayer ─────────────────────────────────────────────────
     val exoPlayer = remember {
-        // Build DataSource with custom headers if any
-        val dataSourceFactory: com.google.android.exoplayer2.upstream.DefaultDataSource.Factory? = null
-        ExoPlayer.Builder(context).build().apply {
+        // Build ExoPlayer — if custom headers present, use custom DataSource factory
+        // setMediaSourceFactory must be set on Builder, not after build()
+        val builder = if (customHeaders.isNotEmpty()) {
+            val httpFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                .setDefaultRequestProperties(customHeaders)
+            val dsFactory   = androidx.media3.datasource.DefaultDataSource.Factory(context, httpFactory)
+            ExoPlayer.Builder(context)
+                .setMediaSourceFactory(
+                    androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dsFactory)
+                )
+        } else {
+            ExoPlayer.Builder(context)
+        }
+
+        builder.build().apply {
             val item = MediaItem.Builder()
                 .setUri(decodedUrl)
                 .apply {
@@ -167,21 +179,11 @@ fun ExoMoviePlayerScreen(
                         setMimeType(MimeTypes.APPLICATION_M3U8)
                     else if (decodedUrl.contains(".mpd"))
                         setMimeType(MimeTypes.APPLICATION_MPD)
-                    // Add subtitle tracks from provider (HiAnime, KissKh, FlixHQ etc.)
                     if (subtitleConfigs.isNotEmpty())
                         setSubtitleConfigurations(subtitleConfigs)
                 }
                 .build()
             setMediaItem(item)
-            // Set custom headers (e.g. Referer for HiAnime, KissKh)
-            if (customHeaders.isNotEmpty()) {
-                val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
-                    .setDefaultRequestProperties(customHeaders)
-                val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
-                    androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
-                )
-                setMediaSourceFactory(mediaSourceFactory)
-            }
             prepare()
             playWhenReady = true
         }
