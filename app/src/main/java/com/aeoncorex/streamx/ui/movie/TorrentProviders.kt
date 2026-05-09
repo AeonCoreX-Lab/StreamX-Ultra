@@ -3,6 +3,8 @@ package com.aeoncorex.streamx.ui.movie
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.jsoup.Jsoup
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -10,6 +12,7 @@ import retrofit2.converter.scalars.ScalarsConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
 import retrofit2.http.Url
+import java.util.concurrent.TimeUnit
 
 // ═══════════════════════════════════════════════════════════════════
 //  TorrentProviders — Language-Aware Torrent Search
@@ -17,7 +20,7 @@ import retrofit2.http.Url
 //  Sources:
 //    EZTV    → TV series by IMDB ID (eztv.re mirrors + eztvtorrent.co)
 //    NYAA    → Anime torrents (RSS)
-//    1337x   → All types via backend (language-aware query)
+//    1337x   → All types — direct in-app scraping (no backend)
 //    BitSearch→ Backup search engine
 //
 //  DubQueryBuilder:
@@ -51,17 +54,6 @@ interface TorrentApi {
 
 // ════════════════════════════════════════════════════════════════════
 //  DubQueryBuilder — Language-Aware Torrent Query Generator
-//  ──────────────────────────────────────────────────────────────
-//  Usage:
-//    val queries = DubQueryBuilder.buildQueries(
-//        title    = "Spider-Man No Way Home",
-//        dubLang  = MovieSourceScraper.DubLanguage.Tamil,
-//        isSeries = false
-//    )
-//    // → ["Spider-Man No Way Home Tamil Dubbed 1080p",
-//    //    "Spider-Man No Way Home Tamil Dub 1080p",
-//    //    "Spider-Man No Way Home Tamil Dubbed 720p",
-//    //    "Spider-Man No Way Home Tamil Dubbed"]
 // ════════════════════════════════════════════════════════════════════
 
 object DubQueryBuilder {
@@ -73,7 +65,7 @@ object DubQueryBuilder {
      */
     fun buildQueries(
         title:    String,
-        dubLang:  MovieSourceScraper.DubLanguage,
+        dubLang:  DubLanguage,
         isSeries: Boolean = false,
         season:   Int     = 0,
         episode:  Int     = 0
@@ -92,10 +84,12 @@ object DubQueryBuilder {
             val queries = mutableListOf<String>()
             for (kw in dubLang.searchKeywords) {
                 for (qual in dubLang.torrentTerms) {
-                    queries.add("$base $kw".trim())   // e.g. "Movie Tamil Dubbed 1080p"
+                    val q = if (qual.isEmpty()) "$base $kw".trim()
+                            else "$base $kw $qual".trim()
+                    queries.add(q)
                 }
             }
-            // Also add base + first keyword as plain fallback
+            // Plain fallback: base + first keyword only
             queries.add("$base ${dubLang.searchKeywords.first()}".trim())
             queries.distinct()
         }
@@ -115,9 +109,15 @@ object DubQueryBuilder {
 
 object TorrentProviders {
 
-    // ── EZTV mirrors — eztvtorrent.co added alongside existing ones
+    // ── HTTP client (shared, with timeout) ───────────────────────
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .build()
+
+    // ── EZTV mirrors ─────────────────────────────────────────────
     private val EZTV_MIRRORS = listOf(
-        "https://eztvtorrent.co/api/get-torrents",   // NEW — primary fast mirror
+        "https://eztvtorrent.co/api/get-torrents",
         "https://eztv.re/api/get-torrents",
         "https://eztvx.to/api/get-torrents",
         "https://eztv1.xyz/api/get-torrents"
@@ -141,8 +141,16 @@ object TorrentProviders {
         .build()
         .create(TorrentApi::class.java)
 
-    // ── EZTV: Fetch TV series by IMDB ID ─────────────────────────
-    //  Tries all mirrors in order (eztvtorrent.co first, fastest mirror wins)
+    // ── 1337x mirrors ────────────────────────────────────────────
+    private val L337X_MIRRORS = listOf(
+        "https://1337x.to",
+        "https://1337x.st",
+        "https://x1337x.eu"
+    )
+
+    // ═══════════════════════════════════════════════════════════════
+    //  EZTV: Fetch TV series by IMDB ID
+    // ═══════════════════════════════════════════════════════════════
 
     suspend fun fetchSeries(imdbId: String, season: Int, episode: Int): List<StreamLink> {
         val cleanId = imdbId.replace("tt", "")
@@ -177,23 +185,22 @@ object TorrentProviders {
         return emptyList()
     }
 
-    // ── EZTV: Fetch dubbed series using title search ──────────────
-    //  For dubbed content (Hindi/Tamil etc.) EZTV uses title search not IMDB API.
-    //  Queries eztvtorrent.co search endpoint.
+    // ═══════════════════════════════════════════════════════════════
+    //  EZTV: Fetch dubbed series using title search (eztvtorrent.co)
+    // ═══════════════════════════════════════════════════════════════
 
     suspend fun fetchSeriesDubbed(
-        title:    String,
-        season:   Int,
-        episode:  Int,
-        dubLang:  MovieSourceScraper.DubLanguage
+        title:   String,
+        season:  Int,
+        episode: Int,
+        dubLang: DubLanguage
     ): List<StreamLink> = withContext(Dispatchers.IO) {
         val queries = DubQueryBuilder.buildQueries(title, dubLang, true, season, episode)
-        // eztvtorrent.co supports title search: /search/{query}
         for (query in queries.take(3)) {
             try {
                 val enc  = java.net.URLEncoder.encode(query, "UTF-8")
-                val html = okhttp3.OkHttpClient().newCall(
-                    okhttp3.Request.Builder()
+                val html = httpClient.newCall(
+                    Request.Builder()
                         .url("https://eztvtorrent.co/search/$enc")
                         .header("User-Agent", "Mozilla/5.0")
                         .build()
@@ -226,7 +233,92 @@ object TorrentProviders {
         emptyList()
     }
 
-    // ── NYAA: Anime torrents ──────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+    //  1337x — Direct in-app scraping (কোনো backend লাগবে না)
+    //
+    //  Step 1: Search page → title list + seeds/peers/size
+    //  Step 2: Detail page → magnet link extract
+    //  Top 5 results নেওয়া হয় (detail fetch এ time লাগে)
+    // ═══════════════════════════════════════════════════════════════
+
+    suspend fun fetch1337x(query: String): List<StreamLink> = withContext(Dispatchers.IO) {
+        for (mirror in L337X_MIRRORS) {
+            try {
+                val enc        = java.net.URLEncoder.encode(query, "UTF-8")
+                val searchUrl  = "$mirror/search/$enc/1/"
+                val searchHtml = httpClient.newCall(
+                    Request.Builder()
+                        .url(searchUrl)
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                        .header("Accept-Language", "en-US,en;q=0.9")
+                        .build()
+                ).execute().body?.string() ?: continue
+
+                val doc  = Jsoup.parse(searchHtml)
+                val rows = doc.select("table.table-list tbody tr").take(5)
+                if (rows.isEmpty()) continue
+
+                val results = mutableListOf<StreamLink>()
+
+                for (row in rows) {
+                    try {
+                        // Title & detail URL
+                        val nameLinks  = row.select("td.name a")
+                        val titleEl    = if (nameLinks.size >= 2) nameLinks[1] else nameLinks.firstOrNull() ?: continue
+                        val detailPath = titleEl.attr("href")
+                        val titleText  = titleEl.text()
+                        if (detailPath.isBlank()) continue
+
+                        val seeds  = row.select("td.seeds").text().toIntOrNull()  ?: 0
+                        val peers  = row.select("td.leeches").text().toIntOrNull() ?: 0
+                        // Size column: remove extra text (uploaded date etc.)
+                        val size   = row.select("td.size").first()?.ownText()?.trim() ?: "Unknown"
+
+                        // Skip dead torrents
+                        if (seeds <= 0) continue
+
+                        // Fetch detail page for magnet
+                        val detailUrl  = "$mirror$detailPath"
+                        val detailHtml = httpClient.newCall(
+                            Request.Builder()
+                                .url(detailUrl)
+                                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                                .build()
+                        ).execute().body?.string() ?: continue
+
+                        val detailDoc = Jsoup.parse(detailHtml)
+                        val magnet    = detailDoc.select("a[href^=magnet:]").first()?.attr("href") ?: continue
+
+                        results.add(
+                            StreamLink(
+                                title   = titleText,
+                                magnet  = magnet,
+                                quality = detectQuality(titleText),
+                                seeds   = seeds,
+                                peers   = peers,
+                                size    = size,
+                                source  = "1337x"
+                            )
+                        )
+                    } catch (e: Exception) {
+                        Log.w("TorrentProviders", "1337x row parse failed: ${e.message}")
+                    }
+                }
+
+                if (results.isNotEmpty()) {
+                    Log.d("TorrentProviders", "1337x found ${results.size} results for: $query")
+                    return@withContext results.sortedByDescending { it.seeds }
+                }
+            } catch (e: Exception) {
+                Log.w("TorrentProviders", "1337x mirror failed: $mirror — ${e.message}")
+            }
+        }
+        emptyList()
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  NYAA: Anime torrents
+    // ═══════════════════════════════════════════════════════════════
 
     suspend fun fetchAnime(queryName: String, episode: Int): List<StreamLink> {
         return withContext(Dispatchers.IO) {
@@ -259,7 +351,9 @@ object TorrentProviders {
         }
     }
 
-    // ── BitSearch: Backup for anything ───────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+    //  BitSearch: Backup for anything
+    // ═══════════════════════════════════════════════════════════════
 
     suspend fun fetchBitSearch(query: String): List<StreamLink> {
         return withContext(Dispatchers.IO) {
@@ -295,40 +389,45 @@ object TorrentProviders {
         }
     }
 
-    // ── Language-aware dubbed torrent search ─────────────────────
-    //  Main entry for dubbed torrent requests.
-    //  Tries multiple sources in priority order, stops at first success.
-    //
+    // ═══════════════════════════════════════════════════════════════
+    //  Language-aware dubbed torrent search
     //  Priority:
     //    1. eztvtorrent.co title search (for series)
-    //    2. BitSearch with dubbed query
-    //    3. NYAA (for anime/dual-audio)
+    //    2. 1337x dubbed query
+    //    3. BitSearch with dubbed query
+    //    4. NYAA (for anime/dual-audio)
+    // ═══════════════════════════════════════════════════════════════
 
     suspend fun fetchDubbed(
-        title:    String,
-        type:     MovieType,
-        season:   Int,
-        episode:  Int,
-        dubLang:  MovieSourceScraper.DubLanguage
+        title:   String,
+        type:    MovieType,
+        season:  Int,
+        episode: Int,
+        dubLang: DubLanguage
     ): List<StreamLink> = withContext(Dispatchers.IO) {
         val isSeries = type == MovieType.SERIES
         val queries  = DubQueryBuilder.buildQueries(title, dubLang, isSeries, season, episode)
 
-        // 1. Try eztvtorrent.co for series
+        // 1. EZTV for series
         if (isSeries) {
             val eztv = fetchSeriesDubbed(title, season, episode, dubLang)
             if (eztv.isNotEmpty()) return@withContext eztv
         }
 
-        // 2. BitSearch — best for all types including movies
+        // 2. 1337x — best for both movies and series
+        for (query in queries.take(2)) {
+            val l337 = fetch1337x(query)
+            if (l337.isNotEmpty()) return@withContext l337.sortedByDescending { it.seeds }
+        }
+
+        // 3. BitSearch fallback
         for (query in queries.take(2)) {
             val bits = fetchBitSearch(query)
             if (bits.isNotEmpty()) return@withContext bits.sortedByDescending { it.seeds }
         }
 
-        // 3. NYAA fallback for anime
-        if (dubLang is MovieSourceScraper.DubLanguage.Japanese ||
-            dubLang is MovieSourceScraper.DubLanguage.DualAudio) {
+        // 4. NYAA fallback for anime
+        if (dubLang is DubLanguage.Japanese || dubLang is DubLanguage.DualAudio) {
             val nyaa = fetchAnime(title, episode)
             if (nyaa.isNotEmpty()) return@withContext nyaa
         }

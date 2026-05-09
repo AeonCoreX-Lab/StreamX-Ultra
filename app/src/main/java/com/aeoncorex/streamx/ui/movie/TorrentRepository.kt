@@ -14,12 +14,12 @@ data class YtsResponse(val data: YtsData?)
 data class YtsData(val movies: List<YtsMovie>?)
 data class YtsMovie(val id: Int, val title: String, val torrents: List<YtsTorrent>?)
 data class YtsTorrent(
-    val url: String,
-    val hash: String,
+    val url:     String,
+    val hash:    String,
     val quality: String,
-    val seeds: Int,
-    val peers: Int,
-    val size: String
+    val seeds:   Int,
+    val peers:   Int,
+    val size:    String
 )
 
 interface YtsApi {
@@ -44,9 +44,8 @@ object TorrentRepository {
         .build()
         .create(YtsApi::class.java)
 
-    // FIX: Prioritize HTTP/HTTPS trackers (more reliable on many networks)
+    // HTTP trackers prioritized (UDP often blocked)
     private val TRACKERS = listOf(
-        // HTTP trackers
         "http://tracker.bt4g.com:2095/announce",
         "http://tracker.files.fm:6969/announce",
         "http://tracker.gbitt.info:80/announce",
@@ -55,7 +54,6 @@ object TorrentRepository {
         "http://tracker.zerobytes.xyz:1337/announce",
         "https://tracker.bt4g.com:443/announce",
         "https://tracker.nanoha.org:443/announce",
-        // UDP trackers (backup)
         "udp://tracker.opentrackr.org:1337/announce",
         "udp://open.demonii.com:1337/announce",
         "udp://tracker.openbittorrent.com:80",
@@ -75,37 +73,68 @@ object TorrentRepository {
     )
 
     suspend fun getStreamLinks(
-        type: MovieType,
-        title: String,
-        imdbId: String?,
-        season: Int = 0,
-        episode: Int = 0,
-        isAnime: Boolean = false
+        type:      MovieType,
+        title:     String,
+        imdbId:    String?,
+        season:    Int     = 0,
+        episode:   Int     = 0,
+        isAnime:   Boolean = false
     ): List<StreamLink> = withContext(Dispatchers.IO) {
         val allLinks = mutableListOf<StreamLink>()
-        
+
         coroutineScope {
             val jobs = mutableListOf<Deferred<List<StreamLink>>>()
 
+            // ── NYAA for anime ────────────────────────────────────
             if (isAnime) {
-                jobs.add(async { try { TorrentProviders.fetchAnime(title, episode) } catch (e: Exception) { emptyList() } })
+                jobs.add(async {
+                    try { TorrentProviders.fetchAnime(title, episode) }
+                    catch (e: Exception) { emptyList() }
+                })
             }
 
+            // ── EZTV for TV series ────────────────────────────────
             if (type == MovieType.SERIES && imdbId != null) {
-                jobs.add(async { try { TorrentProviders.fetchSeries(imdbId, season, episode) } catch (e: Exception) { emptyList() } })
+                jobs.add(async {
+                    try { TorrentProviders.fetchSeries(imdbId, season, episode) }
+                    catch (e: Exception) { emptyList() }
+                })
             }
 
+            // ── YTS for movies ────────────────────────────────────
             if (type == MovieType.MOVIE) {
                 jobs.add(async { fetchYtsWithMirrors(imdbId, title) })
             }
 
+            // ── 1337x — in-app direct scraping ───────────────────
+            //  Movie:  searches by title
+            //  Series: searches by "Title S01E01"
             jobs.add(async {
                 try {
-                    val searchTitle = if(type == MovieType.SERIES) "$title S${String.format("%02d", season)}E${String.format("%02d", episode)}" else title
+                    val searchTitle = when {
+                        type == MovieType.SERIES ->
+                            "$title S${String.format("%02d", season)}E${String.format("%02d", episode)}"
+                        else -> title
+                    }
+                    TorrentProviders.fetch1337x(searchTitle)
+                } catch (e: Exception) {
+                    Log.e("1337x", "Error: ${e.message}")
+                    emptyList()
+                }
+            })
+
+            // ── BitSearch — general fallback ──────────────────────
+            jobs.add(async {
+                try {
+                    val searchTitle = when {
+                        type == MovieType.SERIES ->
+                            "$title S${String.format("%02d", season)}E${String.format("%02d", episode)}"
+                        else -> title
+                    }
                     TorrentProviders.fetchBitSearch(searchTitle)
-                } catch (e: Exception) { 
+                } catch (e: Exception) {
                     Log.e("BitSearch", "Error: ${e.message}")
-                    emptyList() 
+                    emptyList()
                 }
             })
 
@@ -130,7 +159,7 @@ object TorrentRepository {
         for (url in YTS_MIRRORS) {
             try {
                 val links = fetchYtsInternal(url, imdbId, title)
-                if (links.isNotEmpty()) return links 
+                if (links.isNotEmpty()) return links
             } catch (e: Exception) {
                 continue
             }
@@ -148,27 +177,27 @@ object TorrentRepository {
 
         if (movies.isNullOrEmpty()) {
             val cleanTitle = title.replace(Regex("[^a-zA-Z0-9 ]"), "")
-            val response = api.listMovies(url, cleanTitle)
-            movies = response.data?.movies
+            val response   = api.listMovies(url, cleanTitle)
+            movies         = response.data?.movies
         }
 
         return movies?.flatMap { movie ->
             movie.torrents?.map { torrent ->
                 StreamLink(
-                    title = movie.title,
-                    magnet = constructMagnet(torrent.hash, movie.title),
+                    title   = movie.title,
+                    magnet  = constructMagnet(torrent.hash, movie.title),
                     quality = torrent.quality,
-                    seeds = torrent.seeds,
-                    peers = torrent.peers,
-                    size = torrent.size,
-                    source = "YTS"
+                    seeds   = torrent.seeds,
+                    peers   = torrent.peers,
+                    size    = torrent.size,
+                    source  = "YTS"
                 )
             } ?: emptyList()
         } ?: emptyList()
     }
 
     private fun constructMagnet(hash: String, title: String): String {
-        val encodedTitle = URLEncoder.encode(title, "UTF-8")
+        val encodedTitle  = URLEncoder.encode(title, "UTF-8")
         val trackerString = TRACKERS.joinToString("") { "&tr=${URLEncoder.encode(it, "UTF-8")}" }
         return "magnet:?xt=urn:btih:$hash&dn=$encodedTitle$trackerString"
     }

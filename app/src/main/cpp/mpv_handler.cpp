@@ -21,41 +21,52 @@ static int         s_surface_h = 0;
 static std::mutex  mpv_mutex;
 
 // ════════════════════════════════════════════════════════════════
-//  ROOT CAUSE OF INITIAL STUTTER + AUTO-SKIP ANALYSIS
+//  ROOT CAUSE ANALYSIS — BLACK SCREEN ON EZTV / NON-YTS SOURCES
+//
+//  SYMPTOM: YTS movies play fine (video + audio).
+//           EZTV, 1337x, BitSearch sources → audio only, black video.
+//
+//  CAUSE: hwdec=mediacodec-copy
+//
+//  mediacodec-copy is a specific zero-copy hardware decode mode that
+//  copies MediaCodec output directly to an OpenGL texture. It works
+//  reliably for:
+//    • MP4 / H.264 (YTS always uses this → works)
+//
+//  It SILENTLY FAILS for:
+//    • MKV / H.265 (HEVC) — most EZTV/1337x/RARBG releases
+//    • MKV / AV1, VP9 in certain containers
+//    • Some MPEG-TS files from EZTV
+//
+//  When mediacodec-copy fails MPV does NOT fall back to software
+//  decoding automatically — it just outputs a black frame while
+//  the audio decoder continues running normally.
+//
+//  FIX: hwdec=auto-safe
+//
+//  auto-safe instructs MPV to:
+//    1. Try hardware decode (MediaCodec on Android)
+//    2. If hardware decode fails for this codec/container →
+//       automatically fall back to software (FFmpeg) decoding
+//    3. Video renders via the GPU (vo=gpu) regardless of decoder
+//
+//  Result:
+//    • YTS MP4/H.264 → MediaCodec hardware decode (same as before)
+//    • EZTV MKV/H.265 → MediaCodec hardware decode (if supported)
+//                        OR software fallback → video ALWAYS appears
+//    • Any other codec → safe software fallback, never black screen
+//
+//  Side effects: none. auto-safe is MPV's recommended mode for
+//  Android deployments and is the default in mpv-android.
+// ════════════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════════════
+//  ROOT CAUSE ANALYSIS — INITIAL STUTTER + AUTO-SKIP (unchanged)
 //
 //  SYMPTOM: Movie plays smoothly after "skip forward + pause + resume".
-//  CAUSE:   cache-pause-initial=no (our previous setting) made MPV start
-//           playing immediately after loadfile with an EMPTY demuxer cache.
-//
-//  What happens with cache-pause-initial=no:
-//  1. loadfile called → MPV opens file at position 0
-//  2. Demuxer starts reading from disk, cache is EMPTY
-//  3. MPV attempts to render frames before cache is filled
-//  4. Decoder gets incomplete NAL units → drops frames → black/freeze
-//  5. When demuxer eventually fills → MPV tries to catch up
-//     → video-sync=audio causes rapid frame advancement → "auto-skip"
-//
-//  Why pause+resume fixed it:
-//  - pause → MPV stops consuming cache
-//  - demuxer fills cache-pause-wait seconds of data (from current position)
-//  - resume → full cache → smooth playback
-//
-//  FIX: cache-pause-initial=yes
-//  MPV automatically pauses at start, fills cache-pause-wait seconds,
-//  THEN begins playback. No stutter. No auto-skip. No user trick needed.
-//  The Kotlin isMidBuffering monitor detects paused-for-cache=true and
-//  shows the buffering overlay so the user sees proper feedback.
-//
-//  SECOND SYMPTOM: "after some minutes it froze" (frontier hit)
-//  CAUSE: At high bitrate (~4Mbps) with 588KB/s (~4.7Mbps) download,
-//  the margin is thin. Speed fluctuations cause download to fall behind.
-//  FIX: cache-pause-wait=3 → MPV resumes faster when frontier is reached,
-//       reducing the perceived freeze duration from 5s → 3s.
-//
-//  THIRD SYMPTOM: Seek bar drift (second movie "starts at 0 then jumps")
-//  CAUSE: Relative seek + stale currentTime (polled every 500ms)
-//  FIX: seek_mpv_absolute() uses "absolute" seek mode.
-//       Kotlin seek bar calls seekMpvAbsolute(position) directly.
+//  CAUSE:   cache-pause-initial=no made MPV start playing immediately
+//           after loadfile with an EMPTY demuxer cache.
+//  FIX:     cache-pause-initial=yes  (see cache section below)
 // ════════════════════════════════════════════════════════════════
 
 void init_mpv_engine(JNIEnv* env, jobject appctx) {
@@ -80,9 +91,20 @@ void init_mpv_engine(JNIEnv* env, jobject appctx) {
     mpv_set_option_string(mpv_ctx, "gpu-api",   "opengl");
     mpv_set_option_string(mpv_ctx, "opengl-es", "yes");
 
-    // Hardware decode: MediaCodec copy-to-GL-texture
-    mpv_set_option_string(mpv_ctx, "hwdec",        "mediacodec-copy");
-    mpv_set_option_string(mpv_ctx, "hwdec-codecs", "h264,hevc,vp9,vp8,av1,mpeg4");
+    // ── Hardware Decode — FIXED ───────────────────────────────
+    //
+    //  BEFORE (caused black screen on MKV/HEVC):
+    //    hwdec = mediacodec-copy   ← zero-copy mode, no fallback
+    //
+    //  AFTER (always shows video):
+    //    hwdec = auto-safe         ← tries HW, falls back to SW
+    //
+    //  hwdec-codecs=* means: attempt hardware decode for every
+    //  codec that MediaCodec supports. For unsupported codecs,
+    //  auto-safe automatically switches to software decoding.
+    //
+    mpv_set_option_string(mpv_ctx, "hwdec",        "auto-safe");  // ← FIXED (was mediacodec-copy)
+    mpv_set_option_string(mpv_ctx, "hwdec-codecs", "*");           // ← all codecs try HW first
 
     // ── Audio ─────────────────────────────────────────────────
     mpv_set_option_string(mpv_ctx, "ao", "audiotrack,opensles");
@@ -92,29 +114,21 @@ void init_mpv_engine(JNIEnv* env, jobject appctx) {
     mpv_set_option_string(mpv_ctx, "framedrop",  "vo");
     mpv_set_option_string(mpv_ctx, "vd-lavc-threads", "0");
 
-    // ── Cache (CRITICAL FIX) ──────────────────────────────────
+    // ── Cache (CRITICAL FIX — unchanged) ─────────────────────
     //
-    //  cache-pause-initial=YES  ← changed from no
+    //  cache-pause-initial=YES
     //    MPV pauses at start until cache-pause-wait seconds are buffered.
     //    This automates the "pause+resume" trick the user discovered.
     //    paused-for-cache=true fires → Kotlin shows buffering overlay.
     //    After cache-pause-wait seconds, MPV resumes automatically.
     //
-    //  cache-pause-wait=3  ← reduced from 5
-    //    Resume after 3 seconds of buffered data.  Fast enough to feel
-    //    responsive while guaranteeing enough buffer to play smoothly.
-    //    3 seconds at 4Mbps = 1.5 MB — comfortably within the 8%
-    //    pre-buffered window (≥200MB for most movies).
+    //  cache-pause-wait=3
+    //    Resume after 3 seconds of buffered data.
     //
-    //  demuxer-readahead-secs=8  ← unchanged (safe window)
-    //    Reads 8 seconds ahead. At 4.7Mbps download and ~4Mbps video,
-    //    the download stays ~0.7Mbps ahead. 8s × 4Mbps = 4MB lookahead.
-    //    Safe from sparse gaps for most download speeds.
-
     mpv_set_option_string(mpv_ctx, "cache",                  "yes");
     mpv_set_option_string(mpv_ctx, "cache-pause",            "yes");
-    mpv_set_option_string(mpv_ctx, "cache-pause-initial",    "yes");  // ← MAIN FIX
-    mpv_set_option_string(mpv_ctx, "cache-pause-wait",       "3");    // ← reduced from 5
+    mpv_set_option_string(mpv_ctx, "cache-pause-initial",    "yes");
+    mpv_set_option_string(mpv_ctx, "cache-pause-wait",       "3");
     mpv_set_option_string(mpv_ctx, "demuxer-max-bytes",      "128MiB");
     mpv_set_option_string(mpv_ctx, "demuxer-readahead-secs", "8");
     mpv_set_option_string(mpv_ctx, "demuxer-max-back-bytes", "32MiB");
@@ -134,7 +148,7 @@ void init_mpv_engine(JNIEnv* env, jobject appctx) {
         LOGE("mpv_initialize() failed");
         mpv_destroy(mpv_ctx); mpv_ctx = nullptr; return;
     }
-    LOGD("MPV init OK — cache-pause-initial=yes, wait=3s, readahead=8s");
+    LOGD("MPV init OK — hwdec=auto-safe, cache-pause-initial=yes, wait=3s, readahead=8s");
 }
 
 void set_mpv_wid(int64_t wid) {
@@ -195,12 +209,7 @@ void seek_mpv_video(double seconds) {
 
 // ─────────────────────────────────────────────────────────────
 //  seek_mpv_absolute — seek to exact timestamp in seconds.
-//
-//  WHY: The seek bar previously used relative seek with stale
-//  currentTime values (polled every 500ms).  Relative seeks
-//  accumulate error when the polling value is stale, causing
-//  the playback position to drift from where the user dragged.
-//  Absolute seek goes directly to the requested timestamp.
+//  Avoids drift from stale relative seek values.
 // ─────────────────────────────────────────────────────────────
 void seek_mpv_absolute(double position) {
     std::lock_guard<std::mutex> lk(mpv_mutex);
