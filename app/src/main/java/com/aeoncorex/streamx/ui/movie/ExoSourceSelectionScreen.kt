@@ -31,6 +31,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.aeoncorex.streamx.ads.AdManager
+import com.aeoncorex.streamx.streaming.ProviderRequest
+import com.aeoncorex.streamx.streaming.StreamProviderEngine
+import com.aeoncorex.streamx.streaming.StreamResult
+import com.aeoncorex.streamx.streaming.StreamType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.URLDecoder
@@ -95,13 +99,12 @@ fun ExoSourceSelectionScreen(
     var selectedDub      by remember { mutableStateOf(DUB_OPTIONS[0]) }    // English default
     var isAnalysing      by remember { mutableStateOf(false) }
     var analysingSource  by remember { mutableStateOf("") }
-    var sources          by remember { mutableStateOf<List<StreamSourceRepository.StreamResult>>(emptyList()) }
+    var sources          by remember { mutableStateOf<List<StreamResult>>(emptyList()) }
     var errorMsg         by remember { mutableStateOf<String?>(null) }
     var adLoading        by remember { mutableStateOf(false) }
     var backdropUrl      by remember { mutableStateOf("") }
     var movieDetails     by remember { mutableStateOf<FullMovieDetails?>(null) }
-    var torrentResults   by remember { mutableStateOf<List<TorrentStreamRepository.TorrentResult>>(emptyList()) }
-    var isTorrentLoading by remember { mutableStateOf(false) }
+
 
     // Sites shown in "Analysing from [site]" — mirrors backend source order
     val sourceSites = remember(selectedDub) {
@@ -136,28 +139,17 @@ fun ExoSourceSelectionScreen(
             delay(500)
         }
 
-        // Parallel: torrent search
-        isTorrentLoading = true
-        scope.launch {
-            torrentResults = TorrentStreamRepository.search(
+        // Main stream search via StreamProviderEngine (30+ providers, no server)
+        val results = StreamProviderEngine.fetch(
+            ProviderRequest(
+                tmdbId   = if (tmdbId > 0) tmdbId else null,
+                imdbId   = imdbId.takeIf { it.isNotEmpty() && it != "null" },
                 title    = decodedTitle,
-                type     = movieType,
+                isSeries = movieType == MovieType.SERIES,
                 season   = season,
                 episode  = episode,
-                language = selectedDub.key,
+                language = selectedDub.key
             )
-            isTorrentLoading = false
-        }
-
-        // Main stream search
-        val results = StreamSourceRepository.getSources(
-            tmdbId   = if (tmdbId > 0) tmdbId else null,
-            imdbId   = if (imdbId.isNotEmpty() && imdbId != "null") imdbId else null,
-            title    = decodedTitle,
-            type     = movieType,
-            season   = season,
-            episode  = episode,
-            language = selectedDub.key
         )
 
         isAnalysing     = false
@@ -168,7 +160,7 @@ fun ExoSourceSelectionScreen(
             sources = results
     }
 
-    fun playSource(source: StreamSourceRepository.StreamResult) {
+    fun playSource(source: StreamResult) {
         if (activity == null) return
         adLoading = true
         AdManager.showInterstitial(activity) {
@@ -178,7 +170,7 @@ fun ExoSourceSelectionScreen(
             val encLang      = URLEncoder.encode(source.language.ifEmpty { selectedDub.key }, "UTF-8")
             val encImdb      = URLEncoder.encode(imdbId.ifEmpty { "null" }, "UTF-8")
 
-            // Encode subtitles as JSON string in nav arg
+            // Encode subtitles as JSON
             val subsJson = org.json.JSONArray().apply {
                 source.subtitles.forEach { sub ->
                     put(org.json.JSONObject().apply {
@@ -189,13 +181,11 @@ fun ExoSourceSelectionScreen(
                     })
                 }
             }.toString()
-            val encSubs = URLEncoder.encode(subsJson, "UTF-8")
+            val encSubs    = URLEncoder.encode(subsJson, "UTF-8")
 
-            // Encode headers as JSON
-            val headersJson = org.json.JSONObject(source.headers.ifEmpty {
-                mapOf<String, String>()
-            }).toString()
-            val encHeaders = URLEncoder.encode(headersJson, "UTF-8")
+            // Encode custom headers as JSON
+            val headersJson = org.json.JSONObject(source.headers).toString()
+            val encHeaders  = URLEncoder.encode(headersJson, "UTF-8")
 
             navController.navigate(
                 "exo_player/$encodedUrl/$encodedTitle/${source.quality}/$encLang/$encImdb/$type/$season/$episode/$encSubs/$encHeaders"
@@ -565,18 +555,18 @@ private fun ErrorState(
 
 @Composable
 private fun SourceResultList(
-    sources:      List<StreamSourceRepository.StreamResult>,
+    sources:      List<StreamResult>,
     selectedDub:  DubOption,
     decodedTitle: String,
-    onPlay:       (StreamSourceRepository.StreamResult) -> Unit
+    onPlay:       (StreamResult) -> Unit
 ) {
     // Sort: language match → HLS → quality
     val sorted = remember(sources, selectedDub) {
         sources.sortedWith(
-            compareByDescending<StreamSourceRepository.StreamResult> {
+            compareByDescending<StreamResult> {
                 it.language.equals(selectedDub.key, ignoreCase = true)
             }.thenByDescending {
-                it.type == "HLS"
+                it.type == StreamType.HLS
             }.thenByDescending {
                 when (it.quality) { "4K" -> 4; "1080P" -> 3; "720P" -> 2; "480P" -> 1; else -> 0 }
             }
@@ -656,7 +646,7 @@ private fun SourceResultList(
 
 @Composable
 private fun SourceResultCard(
-    source:      StreamSourceRepository.StreamResult,
+    source:      StreamResult,
     accentColor: Color = Color.Cyan,
     onClick:     () -> Unit
 ) {
@@ -670,15 +660,15 @@ private fun SourceResultCard(
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Type icon
-        val icon: ImageVector = when {
-            source.type == "HLS"  -> Icons.Rounded.PlayCircle
-            source.type == "DASH" -> Icons.Rounded.Stream
-            else                  -> Icons.Rounded.VideoFile
+        val icon: ImageVector = when (source.type) {
+            StreamType.HLS  -> Icons.Rounded.PlayCircle
+            StreamType.DASH -> Icons.Rounded.Stream
+            else            -> Icons.Rounded.VideoFile
         }
         val iconTint = when (source.type) {
-            "HLS"  -> accentColor
-            "DASH" -> Color(0xFF80DEEA)
-            else   -> Color.Gray
+            StreamType.HLS  -> accentColor
+            StreamType.DASH -> Color(0xFF80DEEA)
+            else            -> Color.Gray
         }
         Icon(icon, null, tint = iconTint, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(12.dp))
@@ -696,7 +686,7 @@ private fun SourceResultCard(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment     = Alignment.CenterVertically
             ) {
-                Text(source.type, color = Color.Gray, fontSize = 10.sp)
+                Text(source.type.name, color = Color.Gray, fontSize = 10.sp)
                 if (source.language.isNotEmpty() && source.language != "English") {
                     Text("•", color = Color(0xFF3A3A4A), fontSize = 10.sp)
                     Text(

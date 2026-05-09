@@ -99,27 +99,31 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
 
         // ── NEW: Instant ExoPlayer (Movie Box style) ──────────────
         composable(
-            route     = "exo_player/{encodedUrl}/{title}/{quality}/{language}/{imdbId}/{type}/{season}/{episode}",
+            route     = "exo_player/{encodedUrl}/{title}/{quality}/{language}/{imdbId}/{type}/{season}/{episode}/{subtitlesJson}/{headersJson}",
             arguments = listOf(
-                navArgument("encodedUrl") { type = NavType.StringType },
-                navArgument("title")      { type = NavType.StringType },
-                navArgument("quality")    { type = NavType.StringType },
-                navArgument("language")   { type = NavType.StringType },
-                navArgument("imdbId")     { type = NavType.StringType },
-                navArgument("type")       { type = NavType.StringType },
-                navArgument("season")     { type = NavType.IntType },
-                navArgument("episode")    { type = NavType.IntType }
+                navArgument("encodedUrl")    { type = NavType.StringType },
+                navArgument("title")         { type = NavType.StringType },
+                navArgument("quality")       { type = NavType.StringType },
+                navArgument("language")      { type = NavType.StringType },
+                navArgument("imdbId")        { type = NavType.StringType },
+                navArgument("type")          { type = NavType.StringType },
+                navArgument("season")        { type = NavType.IntType },
+                navArgument("episode")       { type = NavType.IntType },
+                navArgument("subtitlesJson") { type = NavType.StringType; defaultValue = "%5B%5D" },
+                navArgument("headersJson")   { type = NavType.StringType; defaultValue = "%7B%7D" }
             )
         ) { backStack ->
             ExoMoviePlayerScreen(
-                navController = navController,
-                streamUrl     = backStack.arguments?.getString("encodedUrl") ?: "",
-                title         = backStack.arguments?.getString("title")      ?: "",
-                quality       = backStack.arguments?.getString("quality")    ?: "Auto",
-                language      = backStack.arguments?.getString("language")   ?: "English",
-                imdbId        = backStack.arguments?.getString("imdbId"),
-                movieType     = backStack.arguments?.getString("type")       ?: "MOVIE",
-                season        = backStack.arguments?.getInt("season")        ?: 0,
+                navController  = navController,
+                streamUrl      = backStack.arguments?.getString("encodedUrl")    ?: "",
+                title          = backStack.arguments?.getString("title")         ?: "",
+                quality        = backStack.arguments?.getString("quality")       ?: "Auto",
+                language       = backStack.arguments?.getString("language")      ?: "English",
+                imdbId         = backStack.arguments?.getString("imdbId"),
+                movieType      = backStack.arguments?.getString("type")          ?: "MOVIE",
+                season         = backStack.arguments?.getInt("season")           ?: 0,
+                subtitlesJson  = backStack.arguments?.getString("subtitlesJson") ?: "[]",
+                headersJson    = backStack.arguments?.getString("headersJson")   ?: "{}",
                 episode       = backStack.arguments?.getInt("episode")       ?: 0
             )
         }

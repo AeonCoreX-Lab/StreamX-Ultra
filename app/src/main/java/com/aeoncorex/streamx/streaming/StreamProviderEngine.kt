@@ -15,6 +15,7 @@ import com.aeoncorex.streamx.streaming.providers.DooflixProvider
 import com.aeoncorex.streamx.streaming.providers.FilmyflyProvider
 import com.aeoncorex.streamx.streaming.providers.FlixHQProvider
 import com.aeoncorex.streamx.streaming.providers.FourKHdHubProvider
+import com.aeoncorex.streamx.streaming.providers.GuardaHDProvider
 import com.aeoncorex.streamx.streaming.providers.HdHub4uProvider
 import com.aeoncorex.streamx.streaming.providers.HiAnimeProvider
 import com.aeoncorex.streamx.streaming.providers.Joya9tvProvider
@@ -25,13 +26,16 @@ import com.aeoncorex.streamx.streaming.providers.LuxMoviesProvider
 import com.aeoncorex.streamx.streaming.providers.MovieBoxProvider
 import com.aeoncorex.streamx.streaming.providers.Movies4uProvider
 import com.aeoncorex.streamx.streaming.providers.MoviesApiProvider
+import com.aeoncorex.streamx.streaming.providers.MoviesModProvider
 import com.aeoncorex.streamx.streaming.providers.MoviezwapProvider
 import com.aeoncorex.streamx.streaming.providers.MultiMoviesProvider
 import com.aeoncorex.streamx.streaming.providers.NetflixMirrorProvider
 import com.aeoncorex.streamx.streaming.providers.OgoMoviesProvider
 import com.aeoncorex.streamx.streaming.providers.PrimeMirrorProvider
 import com.aeoncorex.streamx.streaming.providers.PrimewireProvider
+import com.aeoncorex.streamx.streaming.providers.ProtonMoviesProvider
 import com.aeoncorex.streamx.streaming.providers.RingzProvider
+import com.aeoncorex.streamx.streaming.providers.RidoMoviesProvider
 import com.aeoncorex.streamx.streaming.providers.ShowboxProvider
 import com.aeoncorex.streamx.streaming.providers.SkyMoviesHdProvider
 import com.aeoncorex.streamx.streaming.providers.TokyoInsiderProvider
