@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -28,6 +29,25 @@ import com.aeoncorex.streamx.ads.AdManager
 import java.net.URLDecoder
 import java.net.URLEncoder
 
+// ── Language chips shown in the filter row ────────────────────────
+private data class LangChip(
+    val lang:  DubLanguage,
+    val flag:  String,
+    val label: String
+)
+
+private val LANG_CHIPS = listOf(
+    LangChip(DubLanguage.English,   "🇺🇸", "English"),
+    LangChip(DubLanguage.Hindi,     "🇮🇳", "Hindi"),
+    LangChip(DubLanguage.Tamil,     "🇮🇳", "Tamil"),
+    LangChip(DubLanguage.Telugu,    "🇮🇳", "Telugu"),
+    LangChip(DubLanguage.Bengali,   "🇧🇩", "Bengali"),
+    LangChip(DubLanguage.Kannada,   "🇮🇳", "Kannada"),
+    LangChip(DubLanguage.Malayalam, "🇮🇳", "Malayalam"),
+    LangChip(DubLanguage.Japanese,  "🇯🇵", "Japanese"),
+    LangChip(DubLanguage.DualAudio, "🌐",  "Dual Audio"),
+)
+
 // ── TORRENT ONLY — web servers সরানো হয়েছে ──────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,13 +62,15 @@ fun MovieLinkSelectionScreen(
         try { URLDecoder.decode(title, "UTF-8") } catch (_: Exception) { title }
     }
 
+    var selectedLang by remember { mutableStateOf<DubLanguage>(DubLanguage.English) }
     var torrentLinks by remember { mutableStateOf<List<StreamLink>>(emptyList()) }
     var isLoading    by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var adLoading    by remember { mutableStateOf(false) }
 
-    LaunchedEffect(decodedTitle, season, episode) {
-        isLoading = true; errorMessage = null
+    // Re-fetch whenever title/episode/language changes
+    LaunchedEffect(decodedTitle, season, episode, selectedLang) {
+        isLoading = true; errorMessage = null; torrentLinks = emptyList()
         try {
             val movieType = if (type.equals("MOVIE", true)) MovieType.MOVIE else MovieType.SERIES
             val isAnime   = listOf("Naruto","One Piece","Demon Slayer","Jujutsu","Attack on Titan","Dragon Ball")
@@ -56,7 +78,8 @@ fun MovieLinkSelectionScreen(
             val validImdb = if (imdbId != "null" && imdbId.isNotEmpty()) imdbId else null
             torrentLinks  = TorrentRepository.getStreamLinks(
                 type = movieType, title = decodedTitle, imdbId = validImdb,
-                season = season, episode = episode, isAnime = isAnime
+                season = season, episode = episode, isAnime = isAnime,
+                dubLang = selectedLang
             )
         } catch (e: Exception) {
             errorMessage = "Search failed: ${e.localizedMessage}"
@@ -101,54 +124,110 @@ fun MovieLinkSelectionScreen(
                 Modifier.fillMaxSize().padding(padding)
                     .background(Brush.verticalGradient(listOf(Color(0xFF0A0A14), Color.Black)))
             ) {
-                when {
-                    isLoading -> Column(
-                        Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                Column(Modifier.fillMaxSize()) {
+
+                    // ── Language Filter Row ──────────────────────────
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        CircularProgressIndicator(color = Color.Cyan, modifier = Modifier.size(36.dp), strokeWidth = 3.dp)
-                        Spacer(Modifier.height(12.dp))
-                        Text("Scanning P2P Networks…", color = Color.Gray, fontSize = 13.sp)
-                        Text("YTS · RARBG · EZTV · 1337x", color = Color.Gray.copy(0.5f), fontSize = 11.sp)
-                    }
-                    errorMessage != null -> Column(
-                        Modifier.align(Alignment.Center).padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(Icons.Rounded.SearchOff, null, tint = Color.Gray, modifier = Modifier.size(44.dp))
-                        Spacer(Modifier.height(12.dp))
-                        Text(errorMessage!!, color = Color.Gray, textAlign = TextAlign.Center, fontSize = 13.sp)
-                    }
-                    torrentLinks.isEmpty() -> Column(
-                        Modifier.align(Alignment.Center).padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(Icons.Rounded.CloudOff, null, tint = Color.Gray, modifier = Modifier.size(44.dp))
-                        Spacer(Modifier.height(12.dp))
-                        Text("No torrents found", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                        Text("Try instant stream instead", color = Color.Gray, fontSize = 13.sp)
-                        Spacer(Modifier.height(16.dp))
-                        Button(
-                            onClick = { navController.popBackStack() },
-                            colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E2A1E))
-                        ) { Text("← Use Instant Play", color = Color.Cyan) }
-                    }
-                    else -> LazyColumn(
-                        contentPadding     = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        item {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
-                                Icon(Icons.Rounded.DownloadForOffline, null, tint = Color.Cyan, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("${torrentLinks.size} torrent sources found",
-                                    color = Color.Cyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        items(LANG_CHIPS) { chip ->
+                            val isSelected = selectedLang::class == chip.lang::class
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        if (isSelected) Color(0xFF003333) else Color(0xFF0F0F1A),
+                                        RoundedCornerShape(20.dp)
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (isSelected) Color.Cyan else Color.White.copy(0.1f),
+                                        RoundedCornerShape(20.dp)
+                                    )
+                                    .clickable { selectedLang = chip.lang }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Text(chip.flag, fontSize = 14.sp)
+                                    Text(
+                                        chip.label,
+                                        color = if (isSelected) Color.Cyan else Color.White.copy(0.75f),
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
                             }
                         }
-                        items(torrentLinks) { link ->
-                            TorrentCard(link) { playTorrent(link.magnet) }
+                    }
+
+                    // ── Results area ────────────────────────────────
+                    Box(Modifier.fillMaxSize()) {
+                        when {
+                            isLoading -> Column(
+                                Modifier.align(Alignment.Center),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                CircularProgressIndicator(color = Color.Cyan, modifier = Modifier.size(36.dp), strokeWidth = 3.dp)
+                                Spacer(Modifier.height(12.dp))
+                                val loadMsg = if (selectedLang == DubLanguage.English)
+                                    "Scanning P2P Networks…"
+                                else
+                                    "Searching ${LANG_CHIPS.find { it.lang::class == selectedLang::class }?.label ?: ""} dubs…"
+                                Text(loadMsg, color = Color.Gray, fontSize = 13.sp)
+                                Text("YTS · RARBG · EZTV · 1337x", color = Color.Gray.copy(0.5f), fontSize = 11.sp)
+                            }
+                            errorMessage != null -> Column(
+                                Modifier.align(Alignment.Center).padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(Icons.Rounded.SearchOff, null, tint = Color.Gray, modifier = Modifier.size(44.dp))
+                                Spacer(Modifier.height(12.dp))
+                                Text(errorMessage!!, color = Color.Gray, textAlign = TextAlign.Center, fontSize = 13.sp)
+                            }
+                            torrentLinks.isEmpty() -> Column(
+                                Modifier.align(Alignment.Center).padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(Icons.Rounded.CloudOff, null, tint = Color.Gray, modifier = Modifier.size(44.dp))
+                                Spacer(Modifier.height(12.dp))
+                                val langLabel = LANG_CHIPS.find { it.lang::class == selectedLang::class }?.label ?: "selected language"
+                                Text("No $langLabel torrents found", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    if (selectedLang == DubLanguage.English) "Try instant stream instead"
+                                    else "Try a different language or instant stream",
+                                    color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center
+                                )
+                                Spacer(Modifier.height(16.dp))
+                                Button(
+                                    onClick = { navController.popBackStack() },
+                                    colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E2A1E))
+                                ) { Text("← Use Instant Play", color = Color.Cyan) }
+                            }
+                            else -> LazyColumn(
+                                contentPadding = PaddingValues(horizontal = 16.dp, bottom = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                item {
+                                    val langLabel = LANG_CHIPS.find { it.lang::class == selectedLang::class }
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
+                                        Icon(Icons.Rounded.DownloadForOffline, null, tint = Color.Cyan, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            "${torrentLinks.size} ${langLabel?.flag ?: ""} ${langLabel?.label ?: ""} sources found",
+                                            color = Color.Cyan, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                items(torrentLinks) { link ->
+                                    TorrentCard(link) { playTorrent(link.magnet) }
+                                }
+                                item { Spacer(Modifier.height(20.dp)) }
+                            }
                         }
-                        item { Spacer(Modifier.height(20.dp)) }
                     }
                 }
             }

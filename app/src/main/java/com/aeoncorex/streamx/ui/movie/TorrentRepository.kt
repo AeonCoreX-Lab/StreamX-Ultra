@@ -31,6 +31,15 @@ interface YtsApi {
     ): YtsResponse
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  TorrentRepository — Aggregates all torrent sources
+//  ──────────────────────────────────────────────────────────────────
+//  [dubLang] DubLanguage.English ছাড়া অন্য কিছু হলে:
+//    → TorrentProviders.fetchDubbed() call হয় যা Hindi/Tamil/etc.
+//      specific queries দিয়ে 1337x + TPB + TorrentGalaxy search করে।
+//    → YTS থেকেও আলাদা dubbed query চেষ্টা করা হয়।
+// ═══════════════════════════════════════════════════════════════════
+
 object TorrentRepository {
     private val YTS_MIRRORS = listOf(
         "https://yts.mx/api/v2/list_movies.json",
@@ -44,7 +53,7 @@ object TorrentRepository {
         .build()
         .create(YtsApi::class.java)
 
-    // HTTP trackers prioritized (UDP often blocked)
+    // HTTP trackers prioritized (UDP often blocked on mobile)
     private val TRACKERS = listOf(
         "http://tracker.bt4g.com:2095/announce",
         "http://tracker.files.fm:6969/announce",
@@ -72,71 +81,157 @@ object TorrentRepository {
         "udp://tracker.zerobytes.xyz:1337/announce"
     )
 
+    // ── Main entry point ─────────────────────────────────────────
+
     suspend fun getStreamLinks(
         type:      MovieType,
         title:     String,
         imdbId:    String?,
-        season:    Int     = 0,
-        episode:   Int     = 0,
-        isAnime:   Boolean = false
+        season:    Int          = 0,
+        episode:   Int          = 0,
+        isAnime:   Boolean      = false,
+        dubLang:   DubLanguage  = DubLanguage.English   // ← NEW: dub language
     ): List<StreamLink> = withContext(Dispatchers.IO) {
         val allLinks = mutableListOf<StreamLink>()
 
+        // ──────────────────────────────────────────────────────────
+        //  ARCHITECTURE FIX — v2 parallel provider dispatch
+        //
+        //  OLD (buggy):
+        //    • fetchDubbed() ran TGX+1337x+TPB+KAT+BitSearch SEQUENTIALLY
+        //      inside a single async job → TGX timeout = 20s wasted before
+        //      1337x was even tried. Dubbed search could take 60–90s.
+        //    • Repository ALSO added separate TGX+TPB async jobs → same
+        //      dubbed query hit TGX twice and TPB twice per search.
+        //
+        //  NEW (fixed):
+        //    • Every provider gets its own async job → ALL run in parallel.
+        //    • Each job is wrapped in withTimeoutOrNull() → one slow provider
+        //      cannot block the rest. Results collected after all complete.
+        //    • fetchDubbed() removed from Repository — providers called directly.
+        //    • English path unchanged (YTS / EZTV / 1337x / BitSearch).
+        // ──────────────────────────────────────────────────────────
         coroutineScope {
             val jobs = mutableListOf<Deferred<List<StreamLink>>>()
 
-            // ── NYAA for anime ────────────────────────────────────
-            if (isAnime) {
+            if (!dubLang.isNativeLang) {
+                // ── Dubbed: build query variants ──────────────────
+                val isSeries = type == MovieType.SERIES
+                val queries  = DubQueryBuilder.buildQueries(title, dubLang, isSeries, season, episode)
+                val q1 = queries.getOrElse(0) { title }
+                val q2 = queries.getOrElse(1) { q1 }
+
+                // TorrentCSV — DHT JSON API, best for dubbed coverage
+                // Run two query variants in parallel (keyword combos)
                 jobs.add(async {
-                    try { TorrentProviders.fetchAnime(title, episode) }
+                    withTimeoutOrNull(12_000) { TorrentProviders.fetchTorrentCSV(q1) } ?: emptyList()
+                })
+                jobs.add(async {
+                    if (q2 != q1)
+                        withTimeoutOrNull(12_000) { TorrentProviders.fetchTorrentCSV(q2) } ?: emptyList()
+                    else emptyList()
+                })
+
+                // SolidTorrents — REST JSON API, good for Dual Audio & dubbed movies
+                jobs.add(async {
+                    withTimeoutOrNull(12_000) { TorrentProviders.fetchSolidTorrents(q1) } ?: emptyList()
+                })
+
+                // TorrentGalaxy — best for Hindi/South Indian dubs
+                // Two query variants in parallel (different keyword combos)
+                jobs.add(async {
+                    withTimeoutOrNull(15_000) { TorrentProviders.fetchTorrentGalaxy(q1) } ?: emptyList()
+                })
+                jobs.add(async {
+                    if (q2 != q1)
+                        withTimeoutOrNull(15_000) { TorrentProviders.fetchTorrentGalaxy(q2) } ?: emptyList()
+                    else emptyList()
+                })
+
+                // TPB via apibay JSON — fast, great for Dual Audio
+                jobs.add(async {
+                    withTimeoutOrNull(12_000) { TorrentProviders.fetchTPB(q1) } ?: emptyList()
+                })
+                jobs.add(async {
+                    if (q2 != q1)
+                        withTimeoutOrNull(12_000) { TorrentProviders.fetchTPB(q2) } ?: emptyList()
+                    else emptyList()
+                })
+
+                // 1337x — each result needs a detail page fetch; allow more time
+                jobs.add(async {
+                    withTimeoutOrNull(25_000) { TorrentProviders.fetch1337x(q1) } ?: emptyList()
+                })
+
+                // KAT — good for South Asian dubs
+                jobs.add(async {
+                    withTimeoutOrNull(15_000) { TorrentProviders.fetchKAT(q1) } ?: emptyList()
+                })
+
+                // BitSearch — general fallback
+                jobs.add(async {
+                    withTimeoutOrNull(12_000) { TorrentProviders.fetchBitSearch(q1) } ?: emptyList()
+                })
+
+                // EZTV title search for dubbed series
+                if (isSeries) {
+                    jobs.add(async {
+                        withTimeoutOrNull(15_000) {
+                            TorrentProviders.fetchSeriesDubbed(title, season, episode, dubLang)
+                        } ?: emptyList()
+                    })
+                }
+
+                // NYAA + AnimeTosho for Japanese / Dual Audio
+                if (dubLang is DubLanguage.Japanese || dubLang is DubLanguage.DualAudio) {
+                    jobs.add(async {
+                        withTimeoutOrNull(12_000) { TorrentProviders.fetchAnime(title, episode) } ?: emptyList()
+                    })
+                    jobs.add(async {
+                        withTimeoutOrNull(12_000) { TorrentProviders.fetchAnimeTosho(title, episode) } ?: emptyList()
+                    })
+                }
+
+            } else {
+                // ── English (original language) path — unchanged ──
+
+                if (isAnime) {
+                    jobs.add(async {
+                        try { TorrentProviders.fetchAnime(title, episode) }
+                        catch (e: Exception) { emptyList() }
+                    })
+                    jobs.add(async {
+                        try { TorrentProviders.fetchAnimeTosho(title, episode) }
+                        catch (e: Exception) { emptyList() }
+                    })
+                }
+
+                if (type == MovieType.SERIES && imdbId != null) {
+                    jobs.add(async {
+                        try { TorrentProviders.fetchSeries(imdbId, season, episode) }
+                        catch (e: Exception) { emptyList() }
+                    })
+                }
+
+                if (type == MovieType.MOVIE) {
+                    jobs.add(async { fetchYtsWithMirrors(imdbId, title) })
+                }
+
+                val englishQuery = when {
+                    type == MovieType.SERIES ->
+                        "$title S${String.format("%02d", season)}E${String.format("%02d", episode)}"
+                    else -> title
+                }
+
+                jobs.add(async {
+                    try { TorrentProviders.fetch1337x(englishQuery) }
+                    catch (e: Exception) { emptyList() }
+                })
+                jobs.add(async {
+                    try { TorrentProviders.fetchBitSearch(englishQuery) }
                     catch (e: Exception) { emptyList() }
                 })
             }
-
-            // ── EZTV for TV series ────────────────────────────────
-            if (type == MovieType.SERIES && imdbId != null) {
-                jobs.add(async {
-                    try { TorrentProviders.fetchSeries(imdbId, season, episode) }
-                    catch (e: Exception) { emptyList() }
-                })
-            }
-
-            // ── YTS for movies ────────────────────────────────────
-            if (type == MovieType.MOVIE) {
-                jobs.add(async { fetchYtsWithMirrors(imdbId, title) })
-            }
-
-            // ── 1337x — in-app direct scraping ───────────────────
-            //  Movie:  searches by title
-            //  Series: searches by "Title S01E01"
-            jobs.add(async {
-                try {
-                    val searchTitle = when {
-                        type == MovieType.SERIES ->
-                            "$title S${String.format("%02d", season)}E${String.format("%02d", episode)}"
-                        else -> title
-                    }
-                    TorrentProviders.fetch1337x(searchTitle)
-                } catch (e: Exception) {
-                    Log.e("1337x", "Error: ${e.message}")
-                    emptyList()
-                }
-            })
-
-            // ── BitSearch — general fallback ──────────────────────
-            jobs.add(async {
-                try {
-                    val searchTitle = when {
-                        type == MovieType.SERIES ->
-                            "$title S${String.format("%02d", season)}E${String.format("%02d", episode)}"
-                        else -> title
-                    }
-                    TorrentProviders.fetchBitSearch(searchTitle)
-                } catch (e: Exception) {
-                    Log.e("BitSearch", "Error: ${e.message}")
-                    emptyList()
-                }
-            })
 
             jobs.awaitAll().forEach { allLinks.addAll(it) }
         }

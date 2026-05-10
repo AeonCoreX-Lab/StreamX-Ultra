@@ -56,42 +56,56 @@ object SubtitleRepository {
         val downloads:  Int = 0
     )
 
-    // ── Search subtitles (Strem.io OpenSubtitles proxy — no key) ──
+    // ── Search subtitles ─────────────────────────────────────────
+    //  Uses opensubtitles-v3.strem.io which is free, no API key needed.
+    //  When user selects Hindi dub → langCode="hi" → shows Hindi subtitles
+    //  When user selects English   → langCode="en" → shows English subtitles
     suspend fun search(
-        imdbId:  String?,
-        title:   String,
-        type:    MovieType,
-        season:  Int = 0,
-        episode: Int = 0,
+        imdbId:   String?,
+        title:    String,
+        type:     MovieType,
+        season:   Int = 0,
+        episode:  Int = 0,
         langCode: String = "en"
     ): List<SubtitleResult> = withContext(Dispatchers.IO) {
 
         try {
-            // Build Stremio subtitle API URL (works like OpenSubtitles but no rate limit)
-            val id = imdbId ?: ""
+            val id = (imdbId ?: "").trim()
+
+            // Build URL — prefer IMDB ID, fallback to title search
             val url = when {
-                type == MovieType.SERIES && id.isNotEmpty() ->
+                type == MovieType.SERIES && id.startsWith("tt") ->
                     "$API_URL/$id:$season:$episode.json"
-                type == MovieType.MOVIE && id.isNotEmpty() ->
+                type == MovieType.MOVIE && id.startsWith("tt") ->
                     "$API_URL/$id.json"
                 else -> {
-                    // Search by title
-                    val encoded = java.net.URLEncoder.encode(title, "UTF-8")
+                    val encoded = java.net.URLEncoder.encode(title.trim(), "UTF-8")
                     "$API_URL/search=$encoded.json"
                 }
             }
 
-            Log.d(TAG, "Subtitle search: $url")
+            Log.d(TAG, "Subtitle search ($langCode): $url")
+
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 10_000
-                readTimeout    = 15_000
+                connectTimeout = 12_000
+                readTimeout    = 18_000
                 setRequestProperty("User-Agent", "StreamX-Ultra/2.0")
+                setRequestProperty("Accept", "application/json")
+                instanceFollowRedirects = true
             }
 
-            if (conn.responseCode != 200) return@withContext emptyList()
+            val responseCode = runCatching { conn.responseCode }.getOrElse { -1 }
+            if (responseCode != 200) {
+                Log.w(TAG, "Subtitle API returned $responseCode for: $url")
+                return@withContext emptyList()
+            }
 
-            val json     = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+            val rawJson   = runCatching {
+                conn.inputStream.bufferedReader().use { it.readText() }
+            }.getOrElse { return@withContext emptyList() }
+
+            val json      = runCatching { JSONObject(rawJson) }.getOrElse { return@withContext emptyList() }
             val subtitles = json.optJSONArray("subtitles") ?: return@withContext emptyList()
 
             val results = mutableListOf<SubtitleResult>()
@@ -103,7 +117,13 @@ object SubtitleRepository {
 
                 if (subUrl.isEmpty()) continue
                 // Filter by language if specified
-                if (langCode != "all" && !lang.startsWith(langCode, ignoreCase = true)) continue
+                // Filter by language: "all" shows everything, else match lang prefix
+                // This ensures Hindi dub selection shows Hindi subtitles etc.
+                if (langCode != "all") {
+                    val matches = lang.startsWith(langCode.take(2), ignoreCase = true) ||
+                                  langCode.startsWith(lang.take(2), ignoreCase = true)
+                    if (!matches) continue
+                }
 
                 results.add(SubtitleResult(
                     id       = sub.optString("id", i.toString()),

@@ -153,29 +153,33 @@ void TorrentSystem::updateLoop() {
             }
 
             // ────────────────────────────────────────────────────────────
-            //  Ready gate: dual condition before handing file to MPV.
+            //  Ready gate: dual condition before handing file to HTTP/MPV.
             //
-            //  MIN_PROGRESS: 5% → 8%
+            //  MIN_PROGRESS: 8% → 3%
             //
-            //  WHY INCREASED:
-            //  At 5% of a 4GB 1080p file = 200MB.
-            //  At 4Mbps bitrate, 200MB = 400 seconds of content.
-            //  At 588 KB/s (4.7Mbps) download vs 4Mbps playback, margin is
-            //  only 0.7Mbps → very thin buffer against speed fluctuations.
-            //  If download drops briefly below 4Mbps (peers slow), MPV
-            //  hits the frontier → paused-for-cache → "froze after minutes".
+            //  WHY REDUCED:
+            //  We no longer give MPV a direct file path. Instead, Ktor serves
+            //  the file over http://127.0.0.1:8088/stream with Range support.
+            //  MPV does Range requests → seeks without waiting for more data.
             //
-            //  At 8% = 320MB / 640 seconds at 4Mbps.
-            //  This gives ~2× more safety margin before the first frontier hit.
-            //  The extra 3% (120MB) takes about 200 extra seconds to download
-            //  at 588KB/s — a worthwhile trade for smooth playback.
+            //  With HTTP streaming, MPV only needs:
+            //    (a) The video container header (first 30 pieces) to parse
+            //        codec/duration/track info — enforced by headerOk below.
+            //    (b) Enough data that the first few seconds don't stutter.
+            //        At 1080p (~4Mbps), 3% of a 2GB file = 61MB = ~122s of
+            //        content. That's more than enough for smooth startup.
             //
-            //  NOTE: cache-pause-initial=yes in MPV also helps recover from
-            //  frontier hits by automatically pausing+buffering when they occur.
+            //  At 8% (old value): 160MB wait → ~260s of extra startup time
+            //  at a typical 600KB/s. Not necessary when MPV range-requests.
+            //
+            //  Cache safety is now handled by:
+            //    • demuxer-max-bytes=128MiB (MPV readahead buffer)
+            //    • cache-pause-initial=yes (MPV rebuffers on frontier hit)
+            //    • sequential_download (libtorrent downloads linearly)
             // ────────────────────────────────────────────────────────────
 
             static const int HEADER_PIECES = 30;
-            static const int MIN_PROGRESS  = 8;   // ← changed from 5
+            static const int MIN_PROGRESS  = 3;   // ← reduced from 8 (HTTP Range streaming)
 
             if (!finalFilePath.empty() && firstPieceIdx >= 0) {
                 bool progressOk = (currentStatus.progress >= MIN_PROGRESS);

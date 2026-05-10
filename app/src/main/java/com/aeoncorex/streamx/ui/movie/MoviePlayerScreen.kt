@@ -28,7 +28,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -240,38 +240,58 @@ fun autoSubtitle(title: String, context: Context, onStatus: (String) -> Unit) {
     }
 }
 
+// ──────────────────────────────────────────────────────────────────
+//  fetchSubtitle — FIXED
+//
+//  OLD API (broken since 2024):
+//    rest.opensubtitles.org/search/query-{title}/sublanguageid-{lang}
+//    → HTTP 410 Gone. OpenSubtitles shut down REST v1 in late 2023.
+//    → All subtitle requests silently failed with "Server error: 401"
+//      or "Error: …Connection refused".
+//
+//  NEW API: Stremio OpenSubtitles proxy (no API key, no rate limit)
+//    opensubtitles-v3.strem.io/subtitles/{imdbId}.json  (by IMDB ID)
+//    opensubtitles-v3.strem.io/subtitles/search={title}.json (by title)
+//    SubtitleRepository.search() handles both modes and returns ranked
+//    results with direct .srt download URLs.
+//
+//  Language code mapping: MoviePlayerScreen uses ISO 639-2/B 3-letter
+//  codes (eng, hin, ben…). SubtitleRepository / Stremio use 2-letter
+//  ISO 639-1 codes (en, hi, bn…). ISO639_3TO2 handles the mapping.
+// ──────────────────────────────────────────────────────────────────
+
+private val ISO639_3TO2 = mapOf(
+    "eng" to "en", "ben" to "bn", "hin" to "hi", "ara" to "ar",
+    "spa" to "es", "fre" to "fr", "ger" to "de", "por" to "pt",
+    "rus" to "ru", "tur" to "tr", "chi" to "zh", "jpn" to "ja",
+    "kor" to "ko"
+)
+
 private fun fetchSubtitle(title: String, langCode: String, context: Context, onComplete: (String) -> Unit) {
     CoroutineScope(Dispatchers.IO).launch {
         try {
-            val query = title.trim().replace(" ", "%20")
-            val conn  = (URL("https://rest.opensubtitles.org/search/query-$query/sublanguageid-$langCode").openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                setRequestProperty("User-Agent", "TemporaryUserAgent")
-                setRequestProperty("X-User-Agent", "TemporaryUserAgent")
-                connectTimeout = 10_000; readTimeout = 10_000
-            }
-            if (conn.responseCode == 200) {
-                val arr = JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
-                var bestUrl = ""; var bestCount = -1
-                for (i in 0 until arr.length()) {
-                    val obj  = arr.getJSONObject(i)
-                    val lang = obj.optString("SubLanguageID", "")
-                    val fmt  = obj.optString("SubFormat", "")
-                    val dl   = obj.optInt("SubDownloadsCnt", 0)
-                    val link = obj.optString("SubDownloadLink", "")
-                    if (lang == langCode && fmt.equals("srt", ignoreCase = true) && dl > bestCount && link.isNotEmpty()) {
-                        bestCount = dl; bestUrl = link
+            val lang2   = ISO639_3TO2[langCode] ?: langCode.take(2)
+            val results = SubtitleRepository.search(
+                imdbId   = null,
+                title    = title,
+                type     = MovieType.MOVIE,
+                langCode = lang2
+            )
+            withContext(Dispatchers.Main) {
+                val best = results.firstOrNull()
+                if (best != null) {
+                    // Direct .srt URL — MPV downloads and renders it
+                    try { StreamXCore.addExternalSubtitle(best.url) } catch (e: Exception) {
+                        Log.e("SubtitleFetch", "sub-add failed: ${e.message}")
                     }
+                    onComplete("✓ Subtitle loaded!")
+                } else {
+                    onComplete("No subtitle found for this language")
                 }
-                if (bestUrl.isEmpty() && arr.length() > 0) bestUrl = arr.getJSONObject(0).optString("SubDownloadLink", "")
-                withContext(Dispatchers.Main) {
-                    if (bestUrl.isNotEmpty()) {
-                        try { StreamXCore.addExternalSubtitle(bestUrl) } catch (e: Exception) {}
-                        onComplete("✓ Subtitle loaded!")
-                    } else onComplete("No subtitle found for this language")
-                }
-            } else withContext(Dispatchers.Main) { onComplete("Server error: ${conn.responseCode}") }
-        } catch (e: Exception) { withContext(Dispatchers.Main) { onComplete("Error: ${e.message?.take(50)}") } }
+            }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) { onComplete("Error: ${e.message?.take(50)}") }
+        }
     }
 }
 
@@ -404,7 +424,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             }
                         }
                         is StreamState.Buffering -> { isPreBuffering = true; torrentProgress = state.progress; statusMsg = "Buffering ${state.progress}%"; downloadSpeed = "${state.speed} KB/s"; seeds = state.seeds; metadataTimeout = 0 }
-                        is StreamState.Ready  -> { videoPath = state.filePath; isPreBuffering = false; statusMsg = ""; completed = true }
+                        is StreamState.Ready  -> { videoPath = state.streamUrl; isPreBuffering = false; statusMsg = ""; completed = true }
                         is StreamState.Error  -> { statusMsg = "Error: ${state.message}"; isPreBuffering = false; completed = true }
                     }
                 }
@@ -579,7 +599,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         }
                     }
                 }
-                IconButton(onClick = { navController.popBackStack() }, modifier = Modifier.align(Alignment.TopStart).padding(16.dp)) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }
+                IconButton(onClick = { navController.popBackStack() }, modifier = Modifier.align(Alignment.TopStart).padding(16.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
             }
         }
 
@@ -635,7 +655,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 
                     // Top bar
                     Row(Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopStart), horizontalArrangement = Arrangement.SpaceBetween) {
-                        IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
+                        IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White) }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (decodedUrl.startsWith("magnet")) {
                                 Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 12.dp)) {
@@ -728,7 +748,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         // Header
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 16.dp)) {
                             if (activeSettingPage != "Main") {
-                                IconButton(onClick = { activeSettingPage = "Main" }, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }
+                                IconButton(onClick = { activeSettingPage = "Main" }, modifier = Modifier.size(24.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
                                 Spacer(Modifier.width(12.dp))
                             }
                             Text(when (activeSettingPage) {

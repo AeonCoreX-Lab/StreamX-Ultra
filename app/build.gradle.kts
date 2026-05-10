@@ -79,7 +79,16 @@ android {
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
 
     packaging {
-        resources { excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "META-INF/DEPENDENCIES", "META-INF/INDEX.LIST") }
+        resources { excludes += setOf(
+            "/META-INF/{AL2.0,LGPL2.1}",
+            "META-INF/DEPENDENCIES",
+            "META-INF/INDEX.LIST",
+            // Ktor bundles SLF4J — exclude duplicate service files
+            "META-INF/services/org.slf4j.spi.SLF4JServiceProvider",
+            "META-INF/io.ktor.client.HttpClientEngineContainer",
+            "META-INF/io.ktor.server.cio.CIOApplicationEngine",
+            "win32-x86/**", "win32-x86-64/**"   // strip Ktor native windows libs
+        ) }
         jniLibs {
             pickFirsts += setOf("**/libc++_shared.so", "**/libmpv.so", "**/libavcodec.so",
                 "**/libavdevice.so", "**/libavfilter.so", "**/libavformat.so",
@@ -225,6 +234,11 @@ dependencies {
     implementation("com.startapp:inapp-sdk:5.2.6")
 
     // ── Torrent Streaming ──────────────────────────────────────────────
-    // Native TorrentEngine (C++ libtorrent via JNI) handles magnet → stream
-    // No external library needed — see TorrentEngine.kt + streamx-native .so
+    // Native TorrentEngine (C++ libtorrent via JNI) handles magnet → stream.
+    //
+    // Ktor CIO — local HTTP server for Range-based MPV streaming.
+    //   Replaces NanoHTTPD (abandoned 2019, no Kotlin coroutine support).
+    //   CIO engine: pure Kotlin, no Netty/servlet overhead — ideal for Android.
+    //   ktor-server-cio pulls ktor-server-core transitively.
+    implementation("io.ktor:ktor-server-cio:2.3.12")
 }

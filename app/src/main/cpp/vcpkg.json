@@ -1,7 +1,7 @@
 {
   "name": "streamx-native",
   "version-string": "1.0.0",
-  "builtin-baseline": "c27eeddba73f608f10605d80bc0144c1166f8fb7",
+  "builtin-baseline": "99a97de2cb371449d4fb9dc970f2ac562d689ec2",
   "dependencies": [
     "libtorrent",
     "boost-system",

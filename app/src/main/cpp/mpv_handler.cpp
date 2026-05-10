@@ -69,6 +69,28 @@ static std::mutex  mpv_mutex;
 //  FIX:     cache-pause-initial=yes  (see cache section below)
 // ════════════════════════════════════════════════════════════════
 
+// ════════════════════════════════════════════════════════════════
+//  SUBTITLE ROOT CAUSE — "sub-add" URL not loading in player
+//
+//  The Kotlin layer (MoviePlayerScreen.fetchSubtitle) was calling
+//  the obsolete OpenSubtitles REST v1 API (rest.opensubtitles.org)
+//  which was shut down in 2024. All calls returned HTTP 401/410.
+//
+//  FIX (in Kotlin): Replace with Stremio OpenSubtitles proxy
+//  (opensubtitles-v3.strem.io). See MoviePlayerScreen.kt.
+//
+//  MPV-side changes:
+//  • sub-ass-override: force → yes
+//    "force" overrides ALL ASS positioning and styling, which breaks
+//    embedded subtitles with deliberate placement (signs, furigana,
+//    CC-style positioned captions). "yes" overrides only when MPV's
+//    user style settings explicitly conflict — safer default.
+//  • network-timeout=30 added for http://127.0.0.1:8088/stream.
+//    Without it, MPV uses a 30s OS-level default that can be shorter
+//    on some Android versions. Explicit value ensures consistent
+//    behaviour when Ktor server is starting up.
+// ════════════════════════════════════════════════════════════════
+
 void init_mpv_engine(JNIEnv* env, jobject appctx) {
     std::lock_guard<std::mutex> lk(mpv_mutex);
     setlocale(LC_NUMERIC, "C");
@@ -134,9 +156,37 @@ void init_mpv_engine(JNIEnv* env, jobject appctx) {
     mpv_set_option_string(mpv_ctx, "demuxer-max-back-bytes", "32MiB");
     mpv_set_option_string(mpv_ctx, "stream-buffer-size",     "4MiB");
 
+    // ── Network (local Ktor HTTP stream) ──────────────────────
+    //
+    //  network-timeout=30
+    //    Explicit timeout for http:// sources (our Ktor server).
+    //    Without this, MPV may use a shorter OS-level socket timeout
+    //    on some Android versions, causing premature stream failure
+    //    when Ktor is still initialising or the torrent frontier is hit.
+    //
+    //  network-timeout-delay=3
+    //    Wait 3s before retrying on network stall. Gives the torrent
+    //    engine time to download the next piece before MPV aborts.
+    //
+    mpv_set_option_string(mpv_ctx, "network-timeout",       "30");
+    mpv_set_option_string(mpv_ctx, "network-timeout-delay", "3");
+
     // ── Subtitles ─────────────────────────────────────────────
+    //
+    //  sub-auto=fuzzy
+    //    For local file paths, MPV scans the same directory for .srt/.ass
+    //    files and auto-loads them. For http:// sources (our Ktor stream),
+    //    this is a no-op — subtitle loading is done explicitly from Kotlin
+    //    via StreamXCore.addExternalSubtitle(url).
+    //
+    //  sub-ass-override=yes  (was "force")
+    //    "force" overrides ALL ASS positioning/styling — breaks MKV
+    //    embedded subtitles with deliberate placement (signs, furigana).
+    //    "yes" only overrides when MPV's user preferences explicitly
+    //    conflict. Embedded subtitles now render with their original style.
+    //
     mpv_set_option_string(mpv_ctx, "sub-auto",         "fuzzy");
-    mpv_set_option_string(mpv_ctx, "sub-ass-override", "force");
+    mpv_set_option_string(mpv_ctx, "sub-ass-override", "yes");   // ← was "force"
     mpv_set_option_string(mpv_ctx, "sub-font-size",    "45");
 
     // ── Playback ──────────────────────────────────────────────
@@ -148,7 +198,7 @@ void init_mpv_engine(JNIEnv* env, jobject appctx) {
         LOGE("mpv_initialize() failed");
         mpv_destroy(mpv_ctx); mpv_ctx = nullptr; return;
     }
-    LOGD("MPV init OK — hwdec=auto-safe, cache-pause-initial=yes, wait=3s, readahead=8s");
+    LOGD("MPV init OK — hwdec=auto-safe, cache-pause-initial=yes, wait=3s, readahead=8s, network-timeout=30s");
 }
 
 void set_mpv_wid(int64_t wid) {
