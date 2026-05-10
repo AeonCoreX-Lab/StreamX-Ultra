@@ -1,19 +1,6 @@
 package com.aeoncorex.streamx.ui.movie
 
-// ─── StreamLink — unified torrent/stream result ─────────────────
-data class StreamLink(
-    val title:   String,
-    val magnet:  String,
-    val quality: String,
-    val seeds:   Int,
-    val peers:   Int,
-    val size:    String,
-    val source:  String
-)
-
-// ─── Content type ────────────────────────────────────────────────
-enum class MovieType { MOVIE, SERIES }
-
+// ─── StreamLink & MovieType live in MovieModels.kt (same package) ─
 // ─── TorrentResult (legacy compat) ───────────────────────────────
 data class TorrentResult(
     val title:  String,

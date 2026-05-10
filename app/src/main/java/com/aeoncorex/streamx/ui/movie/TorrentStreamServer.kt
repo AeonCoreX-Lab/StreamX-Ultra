@@ -5,6 +5,8 @@ import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.cio.*
 import io.ktor.server.engine.*
+import io.ktor.server.http.content.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import java.io.File
@@ -118,10 +120,7 @@ class TorrentStreamServer private constructor(
                         else                                           -> "text/plain"
                     }
                     call.response.header(HttpHeaders.CacheControl, "no-cache")
-                    call.respondFile(
-                        file        = subFile,
-                        contentType = ContentType.parse(mime)
-                    )
+                    call.respond(LocalFileContent(subFile, ContentType.parse(mime)))
                 }
             }
         }.start(wait = false)
@@ -206,7 +205,7 @@ private suspend fun serveRangeFile(call: ApplicationCall, file: File) {
         // ── Full file request (initial HEAD or plain GET) ────
         call.response.header(HttpHeaders.AcceptRanges, "bytes")
         call.response.header(HttpHeaders.CacheControl, "no-cache")
-        call.respondFile(file = file, contentType = contentType)
+        call.respond(LocalFileContent(file, contentType))
     }
 }
 
