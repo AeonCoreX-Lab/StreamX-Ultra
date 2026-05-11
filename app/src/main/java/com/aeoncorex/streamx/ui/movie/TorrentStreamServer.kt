@@ -89,7 +89,11 @@ class TorrentStreamServer private constructor(
     // writes this while Ktor CIO (network thread) reads it.
     @Volatile var currentFile: File = videoFile
 
-    private var engine: ApplicationEngine? = null
+    // ─── FIX: Ktor 3.x ───────────────────────────────────────────────
+    // `embeddedServer(...).start(wait = false)` returns EmbeddedServer<*, *>
+    // NOT ApplicationEngine anymore. Use star-projection for engine type.
+    // ─────────────────────────────────────────────────────────────────
+    private var engine: EmbeddedServer<*, *>? = null
 
     private fun startInternal() {
         engine = embeddedServer(CIO, port = port, host = "127.0.0.1") {
