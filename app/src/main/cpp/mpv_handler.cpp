@@ -20,76 +20,73 @@ static int         s_surface_w = 0;
 static int         s_surface_h = 0;
 static std::mutex  mpv_mutex;
 
-// ════════════════════════════════════════════════════════════════
-//  ROOT CAUSE ANALYSIS — BLACK SCREEN ON EZTV / NON-YTS SOURCES
+// ════════════════════════════════════════════════════════════════════
+//  BLACK SCREEN POSTMORTEM — COMPLETE ROOT CAUSE ANALYSIS
+//  ─────────────────────────────────────────────────────────────────
 //
-//  SYMPTOM: YTS movies play fine (video + audio).
-//           EZTV, 1337x, BitSearch sources → audio only, black video.
+//  SYMPTOM A (Original):
+//    YTS movies → video + audio ✓
+//    EZTV / 1337x movies → audio only, black screen ✗
 //
-//  CAUSE: hwdec=mediacodec-copy
+//  SYMPTOM B (After changing hwdec to auto-safe):
+//    YTS movies → audio only, black screen ✗  ← regression
+//    EZTV / 1337x movies → still black screen ✗
 //
-//  mediacodec-copy is a specific zero-copy hardware decode mode that
-//  copies MediaCodec output directly to an OpenGL texture. It works
-//  reliably for:
-//    • MP4 / H.264 (YTS always uses this → works)
+//  ── ROOT CAUSE OF SYMPTOM B (auto-safe broke YTS) ───────────────
 //
-//  It SILENTLY FAILS for:
-//    • MKV / H.265 (HEVC) — most EZTV/1337x/RARBG releases
-//    • MKV / AV1, VP9 in certain containers
-//    • Some MPEG-TS files from EZTV
+//  Stack: vo=gpu + gpu-api=opengl + opengl-es=yes
 //
-//  When mediacodec-copy fails MPV does NOT fall back to software
-//  decoding automatically — it just outputs a black frame while
-//  the audio decoder continues running normally.
+//  On Android, exactly ONE hardware decoder mode is compatible with
+//  vo=gpu: "mediacodec-copy".
 //
-//  FIX: hwdec=auto-safe
+//  "copy" = MediaCodec decodes frame → copies pixel data from
+//  the codec output buffer back to CPU memory → MPV uploads it
+//  to an OpenGL ES texture via glTexImage2D.
 //
-//  auto-safe instructs MPV to:
-//    1. Try hardware decode (MediaCodec on Android)
-//    2. If hardware decode fails for this codec/container →
-//       automatically fall back to software (FFmpeg) decoding
-//    3. Video renders via the GPU (vo=gpu) regardless of decoder
+//  Plain "mediacodec" (non-copy) decodes into a MediaCodec Surface
+//  (a separate EGL Surface owned by the codec). vo=gpu has no path
+//  to read from that Surface → every frame is black.
 //
-//  Result:
-//    • YTS MP4/H.264 → MediaCodec hardware decode (same as before)
-//    • EZTV MKV/H.265 → MediaCodec hardware decode (if supported)
-//                        OR software fallback → video ALWAYS appears
-//    • Any other codec → safe software fallback, never black screen
+//  "auto-safe" is supposed to pick only VO-compatible HW decoders.
+//  In the libmpv build used by this project, auto-safe resolves to
+//  plain "mediacodec" (non-copy) instead of "mediacodec-copy".
+//  This makes every codec — including H.264 — produce black frames,
+//  breaking YTS which previously worked with mediacodec-copy.
 //
-//  Side effects: none. auto-safe is MPV's recommended mode for
-//  Android deployments and is the default in mpv-android.
-// ════════════════════════════════════════════════════════════════
-
-// ════════════════════════════════════════════════════════════════
-//  ROOT CAUSE ANALYSIS — INITIAL STUTTER + AUTO-SKIP (unchanged)
+//  FIX: Specify "mediacodec-copy" explicitly. Never rely on
+//  auto-safe in a custom Android libmpv build.
 //
-//  SYMPTOM: Movie plays smoothly after "skip forward + pause + resume".
-//  CAUSE:   cache-pause-initial=no made MPV start playing immediately
-//           after loadfile with an EMPTY demuxer cache.
-//  FIX:     cache-pause-initial=yes  (see cache section below)
-// ════════════════════════════════════════════════════════════════
-
-// ════════════════════════════════════════════════════════════════
-//  SUBTITLE ROOT CAUSE — "sub-add" URL not loading in player
+//  ── ROOT CAUSE OF SYMPTOM A (EZTV black with mediacodec-copy) ───
 //
-//  The Kotlin layer (MoviePlayerScreen.fetchSubtitle) was calling
-//  the obsolete OpenSubtitles REST v1 API (rest.opensubtitles.org)
-//  which was shut down in 2024. All calls returned HTTP 401/410.
+//  EZTV and 1337x frequently use x265 (HEVC) with "Main 10" profile
+//  (10-bit colour depth).
 //
-//  FIX (in Kotlin): Replace with Stremio OpenSubtitles proxy
-//  (opensubtitles-v3.strem.io). See MoviePlayerScreen.kt.
+//  When mediacodec-copy decodes 10-bit HEVC, Android's MediaCodec
+//  outputs frames in P010 format (semi-planar 10-bit YUV). MPV must
+//  upload P010 via GL_R16 / GL_RG16 textures in OpenGL ES.
 //
-//  MPV-side changes:
-//  • sub-ass-override: force → yes
-//    "force" overrides ALL ASS positioning and styling, which breaks
-//    embedded subtitles with deliberate placement (signs, furigana,
-//    CC-style positioned captions). "yes" overrides only when MPV's
-//    user style settings explicitly conflict — safer default.
-//  • network-timeout=30 added for http://127.0.0.1:8088/stream.
-//    Without it, MPV uses a 30s OS-level default that can be shorter
-//    on some Android versions. Explicit value ensures consistent
-//    behaviour when Ktor server is starting up.
-// ════════════════════════════════════════════════════════════════
+//  On many Android GPUs (Mali G76, Adreno 612, etc.), GL_R16 texture
+//  uploads appear to succeed (no GL error) but the GLSL shader reads
+//  zero values → pure black output. Audio is unaffected because the
+//  audio decoder runs independently of the GL pipeline.
+//
+//  This is device-specific and cannot be fixed in MPV config alone
+//  without changing the libmpv GL shader code.
+//
+//  FIX: Remove "hevc" from hwdec-codecs.
+//  When HEVC is not hardware decoded, FFmpeg software decode outputs
+//  standard YUV420p (8-bit). Every GLES 2.0+ device handles YUV420p
+//  correctly → video always appears.
+//
+//  Codec mapping after fix:
+//    Codec    Typical source   Decode    Result
+//    ──────   ──────────────   ──────    ──────────────────
+//    H.264    YTS              HW copy   video + audio ✓
+//    H.264    EZTV             HW copy   video + audio ✓
+//    HEVC     EZTV / 1337x     SW        video + audio ✓ (was black)
+//    VP9      any              HW copy   video + audio ✓
+//    AV1      any              HW copy   video + audio ✓
+// ════════════════════════════════════════════════════════════════════
 
 void init_mpv_engine(JNIEnv* env, jobject appctx) {
     std::lock_guard<std::mutex> lk(mpv_mutex);
@@ -108,44 +105,47 @@ void init_mpv_engine(JNIEnv* env, jobject appctx) {
     mpv_ctx = mpv_create();
     if (!mpv_ctx) { LOGE("mpv_create() failed"); return; }
 
-    // ── Video Output ──────────────────────────────────────────
+    // ── Video Output ──────────────────────────────────────────────
     mpv_set_option_string(mpv_ctx, "vo",        "gpu");
     mpv_set_option_string(mpv_ctx, "gpu-api",   "opengl");
     mpv_set_option_string(mpv_ctx, "opengl-es", "yes");
 
-    // ── Hardware Decode — FIXED ───────────────────────────────
+    // ── Hardware Decode ───────────────────────────────────────────
     //
-    //  BEFORE (caused black screen on MKV/HEVC):
-    //    hwdec = mediacodec-copy   ← zero-copy mode, no fallback
+    //  hwdec = mediacodec-copy  (NOT "auto-safe" — see postmortem above)
     //
-    //  AFTER (always shows video):
-    //    hwdec = auto-safe         ← tries HW, falls back to SW
+    //  hwdec-codecs excludes "hevc":
+    //    HEVC Main10 via mediacodec-copy outputs P010 (10-bit YUV).
+    //    GLES GL_R16 texture handling is broken on many Android GPUs.
+    //    Excluding hevc forces FFmpeg SW decode → YUV420p 8-bit →
+    //    universally compatible with every GLES 2.0+ device.
     //
-    //  hwdec-codecs=* means: attempt hardware decode for every
-    //  codec that MediaCodec supports. For unsupported codecs,
-    //  auto-safe automatically switches to software decoding.
-    //
-    mpv_set_option_string(mpv_ctx, "hwdec",        "auto-safe");  // ← FIXED (was mediacodec-copy)
-    mpv_set_option_string(mpv_ctx, "hwdec-codecs", "*");           // ← all codecs try HW first
+    mpv_set_option_string(mpv_ctx, "hwdec",        "mediacodec-copy");
+    mpv_set_option_string(mpv_ctx, "hwdec-codecs", "h264,vp9,av1,vp8");
 
-    // ── Audio ─────────────────────────────────────────────────
+    // ── Audio ─────────────────────────────────────────────────────
     mpv_set_option_string(mpv_ctx, "ao", "audiotrack,opensles");
 
-    // ── Video Sync & Frame Drop ───────────────────────────────
-    mpv_set_option_string(mpv_ctx, "video-sync", "audio");
-    mpv_set_option_string(mpv_ctx, "framedrop",  "vo");
+    // ── Video Sync & Frame Drop ───────────────────────────────────
+    mpv_set_option_string(mpv_ctx, "video-sync",     "audio");
+    mpv_set_option_string(mpv_ctx, "framedrop",       "vo");
     mpv_set_option_string(mpv_ctx, "vd-lavc-threads", "0");
 
-    // ── Cache (CRITICAL FIX — unchanged) ─────────────────────
+    // ── Software fallback for unexpected HW decode failures ───────
     //
-    //  cache-pause-initial=YES
-    //    MPV pauses at start until cache-pause-wait seconds are buffered.
-    //    This automates the "pause+resume" trick the user discovered.
-    //    paused-for-cache=true fires → Kotlin shows buffering overlay.
-    //    After cache-pause-wait seconds, MPV resumes automatically.
+    //  After 1 consecutive HW decode failure, MPV switches to SW for
+    //  that codec. Default is 3. Setting 1 means any codec outside
+    //  our whitelist that somehow gets hardware-attempted will
+    //  immediately fall back to software — no prolonged black frames.
     //
-    //  cache-pause-wait=3
-    //    Resume after 3 seconds of buffered data.
+    mpv_set_option_string(mpv_ctx, "vd-lavc-software-fallback", "1");
+
+    // ── Cache ─────────────────────────────────────────────────────
+    //
+    //  cache-pause-initial=yes + cache-pause-wait=3:
+    //    MPV pauses at start until 3 seconds of data are buffered.
+    //    Kotlin sees paused-for-cache=true → shows buffering overlay.
+    //    After 3s MPV resumes automatically — no manual trick needed.
     //
     mpv_set_option_string(mpv_ctx, "cache",                  "yes");
     mpv_set_option_string(mpv_ctx, "cache-pause",            "yes");
@@ -156,40 +156,16 @@ void init_mpv_engine(JNIEnv* env, jobject appctx) {
     mpv_set_option_string(mpv_ctx, "demuxer-max-back-bytes", "32MiB");
     mpv_set_option_string(mpv_ctx, "stream-buffer-size",     "4MiB");
 
-    // ── Network (local Ktor HTTP stream) ──────────────────────
-    //
-    //  network-timeout=30
-    //    Explicit timeout for http:// sources (our Ktor server).
-    //    Without this, MPV may use a shorter OS-level socket timeout
-    //    on some Android versions, causing premature stream failure
-    //    when Ktor is still initialising or the torrent frontier is hit.
-    //
-    //  network-timeout-delay=3
-    //    Wait 3s before retrying on network stall. Gives the torrent
-    //    engine time to download the next piece before MPV aborts.
-    //
+    // ── Network ───────────────────────────────────────────────────
     mpv_set_option_string(mpv_ctx, "network-timeout",       "30");
     mpv_set_option_string(mpv_ctx, "network-timeout-delay", "3");
 
-    // ── Subtitles ─────────────────────────────────────────────
-    //
-    //  sub-auto=fuzzy
-    //    For local file paths, MPV scans the same directory for .srt/.ass
-    //    files and auto-loads them. For http:// sources (our Ktor stream),
-    //    this is a no-op — subtitle loading is done explicitly from Kotlin
-    //    via StreamXCore.addExternalSubtitle(url).
-    //
-    //  sub-ass-override=yes  (was "force")
-    //    "force" overrides ALL ASS positioning/styling — breaks MKV
-    //    embedded subtitles with deliberate placement (signs, furigana).
-    //    "yes" only overrides when MPV's user preferences explicitly
-    //    conflict. Embedded subtitles now render with their original style.
-    //
+    // ── Subtitles ─────────────────────────────────────────────────
     mpv_set_option_string(mpv_ctx, "sub-auto",         "fuzzy");
-    mpv_set_option_string(mpv_ctx, "sub-ass-override", "yes");   // ← was "force"
+    mpv_set_option_string(mpv_ctx, "sub-ass-override", "yes");
     mpv_set_option_string(mpv_ctx, "sub-font-size",    "45");
 
-    // ── Playback ──────────────────────────────────────────────
+    // ── Playback ──────────────────────────────────────────────────
     mpv_set_option_string(mpv_ctx, "keep-open",      "yes");
     mpv_set_option_string(mpv_ctx, "idle",           "yes");
     mpv_set_option_string(mpv_ctx, "force-seekable", "yes");
@@ -198,7 +174,7 @@ void init_mpv_engine(JNIEnv* env, jobject appctx) {
         LOGE("mpv_initialize() failed");
         mpv_destroy(mpv_ctx); mpv_ctx = nullptr; return;
     }
-    LOGD("MPV init OK — hwdec=auto-safe, cache-pause-initial=yes, wait=3s, readahead=8s, network-timeout=30s");
+    LOGD("MPV OK — hwdec=mediacodec-copy codecs=h264,vp9,av1,vp8 hevc=SW fallback=1");
 }
 
 void set_mpv_wid(int64_t wid) {
@@ -257,10 +233,6 @@ void seek_mpv_video(double seconds) {
     mpv_command(mpv_ctx, cmd);
 }
 
-// ─────────────────────────────────────────────────────────────
-//  seek_mpv_absolute — seek to exact timestamp in seconds.
-//  Avoids drift from stale relative seek values.
-// ─────────────────────────────────────────────────────────────
 void seek_mpv_absolute(double position) {
     std::lock_guard<std::mutex> lk(mpv_mutex);
     if (!mpv_ctx) return;
@@ -331,26 +303,32 @@ std::string get_track_list_mpv(const char* type) {
     std::ostringstream out;
     bool first = true;
     for (int64_t i = 0; i < count; ++i) {
-        char* ttype = mpv_get_property_string(mpv_ctx, ("track-list/" + std::to_string(i) + "/type").c_str());
+        char* ttype = mpv_get_property_string(mpv_ctx,
+            ("track-list/" + std::to_string(i) + "/type").c_str());
         if (!ttype) continue;
         bool match = (std::string(ttype) == std::string(type));
         mpv_free(ttype);
         if (!match) continue;
 
         int64_t id = 0;
-        mpv_get_property(mpv_ctx, ("track-list/" + std::to_string(i) + "/id").c_str(), MPV_FORMAT_INT64, &id);
+        mpv_get_property(mpv_ctx,
+            ("track-list/" + std::to_string(i) + "/id").c_str(),
+            MPV_FORMAT_INT64, &id);
 
-        char* title = mpv_get_property_string(mpv_ctx, ("track-list/" + std::to_string(i) + "/title").c_str());
+        char* title = mpv_get_property_string(mpv_ctx,
+            ("track-list/" + std::to_string(i) + "/title").c_str());
         std::string title_str = title ? title : "";
         if (title) mpv_free(title);
 
         if (title_str.empty()) {
-            char* lang = mpv_get_property_string(mpv_ctx, ("track-list/" + std::to_string(i) + "/lang").c_str());
+            char* lang = mpv_get_property_string(mpv_ctx,
+                ("track-list/" + std::to_string(i) + "/lang").c_str());
             if (lang) { title_str = lang; mpv_free(lang); }
         }
         if (title_str.empty()) title_str = "Track " + std::to_string(id);
 
-        char* sel = mpv_get_property_string(mpv_ctx, ("track-list/" + std::to_string(i) + "/selected").c_str());
+        char* sel = mpv_get_property_string(mpv_ctx,
+            ("track-list/" + std::to_string(i) + "/selected").c_str());
         bool selected = (sel && std::string(sel) == "yes");
         if (sel) mpv_free(sel);
 

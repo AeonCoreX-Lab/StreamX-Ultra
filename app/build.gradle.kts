@@ -171,9 +171,16 @@ tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configu
 // exclude only the legacy protobuf-lite artifact to avoid duplicate-class errors.
 configurations.configureEach {
     resolutionStrategy {
+        // Force single protobuf version everywhere
         force("com.google.protobuf:protobuf-javalite:4.34.1")
     }
+    // Exclude both conflicting protobuf artifacts:
+    // 1. Old protobuf-lite (replaced by protobuf-javalite)
     exclude(group = "com.google.protobuf", module = "protobuf-lite")
+    // 2. protolite-well-known-types bundles protobuf classes internally in AAR —
+    //    this causes "Duplicate class com.google.protobuf.DescriptorProtos" errors.
+    //    Firebase BOM 34+ pulls protobuf-javalite directly so this is safe to remove.
+    exclude(group = "com.google.firebase", module = "protolite-well-known-types")
 }
 
 dependencies {

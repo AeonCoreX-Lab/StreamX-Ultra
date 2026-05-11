@@ -3,8 +3,9 @@ package com.aeoncorex.streamx.streaming
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONObject
-import java.net.URL
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ModflixConfig.kt
@@ -48,22 +49,71 @@ object ModflixConfig {
         "nfMirror"     to "https://net22.cc",
         "primewire"    to "https://primewire.si",
         "embedsu"      to "https://moviemaze.cc",
+        // Extra providers
+        "guardahd"     to "https://mostraguarda.stream",
+        "protonMovies" to "https://www.protonmovies.net",
+        "Moviesmod"    to "https://moviesmod.day",
+        "1cinevood"    to "https://www.1cinevood.net",
+        "cinemaLuxe"   to "https://cinemaluxe.net",
+        "Joya9tv"      to "https://joya9tv.com",
+        "zeefliz"      to "https://zeefliz.vip",
+        "dooflix"      to "https://dooflix.stream",
+        "ogomovies"    to "https://www.ogomovies.io",
+        "kmMovies"     to "https://kmmovies.org",
+        "moviezwap"    to "https://moviezwap.org",
+        "katfix"       to "https://katmoviesfix.net",
+        "moviesapi"    to "https://moviesapi.club",
+        "UhdMovies"    to "https://uhdmovies.pink",
+        "Ringz"        to "https://privatereporz.pages.dev",
+        "w4u"          to "https://world4ufree.tw",
     )
 
     suspend fun get(key: String): String = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        if (cache == null || now - cacheTime > CACHE_MS) {
-            try {
-                val json = URL(CONFIG_URL).readText()
-                cache = JSONObject(json)
-                cacheTime = now
-                Log.d(TAG, "Config refreshed from GitHub")
-            } catch (e: Exception) {
-                Log.w(TAG, "GitHub fetch failed, using fallback: ${e.message}")
-            }
+        if (cache == null || now - cacheTime > CACHE_MS) refreshCache()
+        // modflix.json structure: { "key": { "url": "https://..." } }
+        // or flat: { "key": "https://..." }
+        val cached = cache
+        if (cached != null) {
+            val obj = cached.optJSONObject(key)
+            if (obj != null) return@withContext obj.optString("url", "")
+                .ifEmpty { FALLBACK[key] ?: fallbackError(key) }
+            val flat = cached.optString(key, "")
+            if (flat.isNotEmpty()) return@withContext flat
         }
-        cache?.optJSONObject(key)?.optString("url")
-            ?: FALLBACK[key]
-            ?: throw IllegalArgumentException("No URL for provider key: $key")
+        FALLBACK[key] ?: fallbackError(key)
+    }
+
+    private fun fallbackError(key: String): String {
+        Log.e(TAG, "No URL found for provider key: $key — add it to FALLBACK map")
+        throw IllegalArgumentException("No URL for provider key: $key")
+    }
+
+    private fun refreshCache() {
+        try {
+            // Use OkHttp for reliable network call with proper timeouts
+            val req = okhttp3.Request.Builder()
+                .url(CONFIG_URL)
+                .header("User-Agent", "StreamX-Ultra/2.0")
+                .header("Cache-Control", "no-cache")
+                .build()
+            val client = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: return
+                    cache = JSONObject(body)
+                    cacheTime = System.currentTimeMillis()
+                    Log.d(TAG, "ModflixConfig refreshed: ${cache!!.length()} providers")
+                } else {
+                    Log.w(TAG, "GitHub returned ${resp.code}, using fallback")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "ModflixConfig fetch failed (using fallback): ${e.message}")
+            // Don't crash — FALLBACK map covers all providers
+        }
     }
 }

@@ -140,18 +140,26 @@ fun ExoSourceSelectionScreen(
         }
 
         // Main stream search via StreamProviderEngine (30+ providers, no server)
-        val results = StreamProviderEngine.fetch(
-            ProviderRequest(
-                tmdbId   = if (tmdbId > 0) tmdbId else null,
-                imdbId   = imdbId.takeIf { it.isNotEmpty() && it != "null" },
-                title    = decodedTitle,
-                isSeries = movieType == MovieType.SERIES,
-                season   = season,
-                episode  = episode,
-                language = selectedDub.key
+        android.util.Log.d("ExoSource", "Fetching: title=$decodedTitle lang=${selectedDub.key} tmdb=$tmdbId imdb=$imdbId")
+        val results = try {
+            StreamProviderEngine.fetch(
+                ProviderRequest(
+                    tmdbId   = if (tmdbId > 0) tmdbId else null,
+                    imdbId   = imdbId.takeIf { it.isNotEmpty() && it != "null" },
+                    title    = decodedTitle,
+                    year     = null,
+                    isSeries = movieType == MovieType.SERIES,
+                    season   = season,
+                    episode  = episode,
+                    language = selectedDub.key
+                )
             )
-        )
+        } catch (e: Exception) {
+            android.util.Log.e("ExoSource", "Engine error: ${e.message}", e)
+            emptyList()
+        }
 
+        android.util.Log.d("ExoSource", "Engine returned ${results.size} results")
         isAnalysing     = false
         analysingSource = ""
         if (results.isEmpty())
