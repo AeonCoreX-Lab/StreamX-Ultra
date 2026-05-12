@@ -23,12 +23,22 @@ object VegaMoviesProvider {
 
     private const val TAG = "VegaMoviesProvider"
 
+    // vega posts.js headers — exact copy required for Cloudflare bypass
     private val HEADERS = mapOf(
-        "Cookie"     to "xla=s4t",
-        "User-Agent" to HttpClient.DESKTOP_UA,
-        "Accept"     to "text/html,application/xhtml+xml,*/*;q=0.8",
-        "DNT"        to "1",
-        "Referer"    to "https://google.com",
+        "Accept"               to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Cache-Control"        to "no-store",
+        "Accept-Language"      to "en-US,en;q=0.9",
+        "DNT"                  to "1",
+        "sec-ch-ua"            to """"Not_A Brand";v="8", "Chromium";v="120", "Microsoft Edge";v="120"""",
+        "sec-ch-ua-mobile"     to "?0",
+        "sec-ch-ua-platform"   to """"Windows"""",
+        "Sec-Fetch-Dest"       to "document",
+        "Sec-Fetch-Mode"       to "navigate",
+        "Sec-Fetch-Site"       to "none",
+        "Sec-Fetch-User"       to "?1",
+        "Cookie"               to "xla=s4t; _ga=GA1.1.1081149560.1756378968",
+        "Upgrade-Insecure-Requests" to "1",
+        "User-Agent"           to HttpClient.DESKTOP_UA,
     )
 
     suspend fun fetch(req: ProviderRequest): List<StreamResult> = withContext(Dispatchers.IO) {
@@ -93,10 +103,12 @@ object VegaMoviesProvider {
         val html   = HttpClient.getHtml(url, HEADERS) ?: return null
         val doc    = Jsoup.parse(html, base)
         val titleL = req.title.lowercase()
-        val items  = doc.select(".blog-items article a, .post-list article a, #archive-container a")
+        // vega: .blog-items,.post-list,#archive-container,.movies-grid > children > find a
+        val items  = doc.select(".blog-items article a, .post-list article a, #archive-container a, .movies-grid article a, .entry-list-item a")
         for (el in items) {
             val text = (el.attr("title") + " " + el.text()).lowercase()
-            if (text.contains(titleL.take(6)))
+            val textClean = text.replace("download", "").trim()
+            if (textClean.contains(titleL.take(4)))
                 return el.attr("href").takeIf { it.startsWith("http") }
         }
         return items.firstOrNull()?.attr("href")?.takeIf { it.startsWith("http") }

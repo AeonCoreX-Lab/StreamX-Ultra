@@ -32,10 +32,18 @@ object HttpClient {
 
     val BASE_HEADERS = mapOf(
         "User-Agent"               to DESKTOP_UA,
-        "Accept"                   to "text/html,application/xhtml+xml,*/*;q=0.8",
+        "Accept"                   to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language"          to "en-US,en;q=0.9",
+        "Cache-Control"            to "no-store",
         "DNT"                      to "1",
         "Upgrade-Insecure-Requests" to "1",
+        "sec-ch-ua"                to """"Not_A Brand";v="8", "Chromium";v="120", "Microsoft Edge";v="120"""",
+        "sec-ch-ua-mobile"         to "?0",
+        "sec-ch-ua-platform"       to """"Windows"""",
+        "Sec-Fetch-Dest"           to "document",
+        "Sec-Fetch-Mode"           to "navigate",
+        "Sec-Fetch-Site"           to "none",
+        "Sec-Fetch-User"           to "?1",
     )
 
     // ── GET HTML ─────────────────────────────────────────────────────────────
@@ -64,7 +72,7 @@ object HttpClient {
             val req = Request.Builder().url(url)
                 .headers(Headers.Builder().apply {
                     add("User-Agent", DESKTOP_UA)
-                    add("Accept", "application/json, */*")
+                    add("Accept", "application/json")
                     headers.forEach { (k, v) -> add(k, v) }
                 }.build())
                 .build()

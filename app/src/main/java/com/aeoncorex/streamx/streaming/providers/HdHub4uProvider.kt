@@ -21,10 +21,18 @@ object HdHub4uProvider {
 
     private const val TAG = "HdHub4uProvider"
 
+    // Match vega's exact hdbHeaders
     private val HEADERS = mapOf(
-        "Cookie"     to "xla=s4t",
-        "Referer"    to "https://google.com",
-        "User-Agent" to HttpClient.DESKTOP_UA,
+        "Cookie"             to "xla=s4t",
+        "Referer"            to "https://google.com",
+        "User-Agent"         to HttpClient.DESKTOP_UA,
+        "sec-ch-ua"          to """"Not_A Brand";v="8", "Chromium";v="120", "Microsoft Edge";v="120"""",
+        "sec-ch-ua-mobile"   to "?0",
+        "sec-ch-ua-platform" to """"Windows"""",
+        "Sec-Fetch-Dest"     to "document",
+        "Sec-Fetch-Mode"     to "navigate",
+        "Sec-Fetch-Site"     to "none",
+        "Cache-Control"      to "no-store",
     )
 
     suspend fun fetch(req: ProviderRequest): List<StreamResult> = withContext(Dispatchers.IO) {
@@ -78,18 +86,33 @@ object HdHub4uProvider {
 
     private fun findBestPost(html: String, req: ProviderRequest, base: String): String? {
         val doc    = Jsoup.parse(html, base)
-        val titleL = req.title.lowercase().replace(Regex("""[^a-z0-9\s]"""), "")
-        val items  = doc.select(".recent-movies article a, .recent-movies a")
+        // vega uses: element.find('figure').find('img').attr('alt') for title
+        // and element.find('a').attr('href') for link
+        val titleL = req.title.lowercase()
+            .replace("download", "")
+            .replace(Regex("""[^a-z0-9\s]"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+
+        // Try .recent-movies children (vega's selector)
+        val container = doc.selectFirst(".recent-movies") ?: doc.body()
+        val items     = container.children()
 
         for (el in items) {
-            val text = (el.attr("title") + " " + el.selectFirst("img")?.attr("alt"))
-                .lowercase().replace("download", "").trim()
-            if (text.contains(titleL.take(8))) {
-                return el.attr("href").takeIf { it.startsWith("http") } ?: continue
+            // vega: figure > img[alt]
+            val altTitle = el.selectFirst("figure img")?.attr("alt") ?: ""
+            val aTitle   = el.selectFirst("a")?.attr("title") ?: ""
+            val combined = "$altTitle $aTitle".lowercase()
+                .replace("download", "").trim()
+
+            if (combined.isNotEmpty() && combined.contains(titleL.take(4))) {
+                val href = el.selectFirst("a")?.attr("href") ?: continue
+                return if (href.startsWith("http")) href else "$base$href"
             }
         }
-        // Fallback: first result
-        return doc.selectFirst(".recent-movies article a, .recent-movies a")?.attr("href")
+
+        // Fallback: any article link
+        return doc.selectFirst(".recent-movies article a[href], .entry-title a[href]")?.attr("href")
     }
 
     private fun findMovieLinks(doc: org.jsoup.nodes.Document): List<String> {

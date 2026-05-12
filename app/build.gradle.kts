@@ -166,27 +166,22 @@ val cargoBuildTask = tasks.register<CargoBuildTask>("cargoBuild") {
 tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configureEach { dependsOn(cargoBuildTask) }
 
 // ── Protobuf conflict resolution ──────────────────────────────────────────────────
-// protolite-well-known-types must NOT be excluded — Firestore needs com.google.type.LatLng
-// at runtime (NoClassDefFoundError otherwise). Force protobuf-javalite everywhere and
-// exclude only the legacy protobuf-lite artifact to avoid duplicate-class errors.
+// protolite-well-known-types:18.0.1 তার AAR-এর ভেতরে protobuf classes bundle করে রাখে।
+// তাই standalone protobuf-javalite jar থাকলেই duplicate class error হয় (version যাই হোক)।
+// Fix: standalone protobuf-javalite বাদ দাও, protolite-well-known-types রাখো।
+// তাহলে:
+//   ✅ Firestore-এর com.google.type.LatLng পাওয়া যাবে (no more runtime crash)
+//   ✅ Duplicate class error থাকবে না (কোনো conflicting jar নেই)
 configurations.configureEach {
-    resolutionStrategy {
-        // Force single protobuf version everywhere
-        force("com.google.protobuf:protobuf-javalite:4.34.1")
-    }
-    // Exclude both conflicting protobuf artifacts:
-    // 1. Old protobuf-lite (replaced by protobuf-javalite)
     exclude(group = "com.google.protobuf", module = "protobuf-lite")
-    // 2. protolite-well-known-types bundles protobuf classes internally in AAR —
-    //    this causes "Duplicate class com.google.protobuf.DescriptorProtos" errors.
-    //    Firebase BOM 34+ pulls protobuf-javalite directly so this is safe to remove.
-    exclude(group = "com.google.firebase", module = "protolite-well-known-types")
+    exclude(group = "com.google.protobuf", module = "protobuf-javalite") // AAR-এর bundled copy-ই runtime serve করবে
+    // protolite-well-known-types exclude করা নেই — Firestore এর LatLng এটা ছাড়া চলে না
 }
 
 dependencies {
     implementation(project(":premium-core"))
     // Version Variables
-    val media3Version = "1.10.0"
+    val media3Version = "1.10.1"
     val lifecycleVersion = "2.8.0"
 
     // Core & Compose

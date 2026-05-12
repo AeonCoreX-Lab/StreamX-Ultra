@@ -20,11 +20,24 @@ object HubCloudExtractor {
 
     private const val TAG = "HubCloudExtractor"
 
+    // Exact headers vega uses — cf_clearance is Cloudflare bypass
+    // sec-ch-ua headers are required by Cloudflare Bot Management
     private val HUBCLOUD_HEADERS = mapOf(
-        "Cookie"      to "ext_name=ojplmecpdpgccookcobabopnaifgidhf; xla=s4t",
-        "User-Agent"  to HttpClient.DESKTOP_UA,
-        "Accept"      to "text/html,application/xhtml+xml,*/*;q=0.8",
-        "Referer"     to "https://google.com",
+        "Cookie"               to "ext_name=ojplmecpdpgccookcobabopnaifgidhf; xla=s4t",
+        "User-Agent"           to HttpClient.DESKTOP_UA,
+        "Accept"               to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language"      to "en-US,en;q=0.9",
+        "Referer"              to "https://google.com",
+        "sec-ch-ua"            to """"Not_A Brand";v="8", "Chromium";v="120", "Microsoft Edge";v="120"""",
+        "sec-ch-ua-mobile"     to "?0",
+        "sec-ch-ua-platform"   to """"Windows"""",
+        "Sec-Fetch-Dest"       to "document",
+        "Sec-Fetch-Mode"       to "navigate",
+        "Sec-Fetch-Site"       to "none",
+        "Sec-Fetch-User"       to "?1",
+        "Upgrade-Insecure-Requests" to "1",
+        "Cache-Control"        to "no-store",
+        "DNT"                  to "1",
     )
 
     fun extract(hubLink: String, sourceName: String = "HubCloud"): List<StreamResult> {
@@ -149,15 +162,38 @@ object HubCloudExtractor {
             href.contains(".dev") && !href.contains("/?id=") -> href
 
             href.contains("hubcloud") || href.contains("/?id=") -> {
-                // HEAD request, follow to final URL
+                // Mirror vega's exact pattern:
+                // fetch(link, {method:"HEAD", redirect:"manual"}) → check 3xx Location header
                 try {
-                    var link1 = HttpClient.getFinalUrl(href, referer)
+                    val req1 = okhttp3.Request.Builder().url(href)
+                        .head()
+                        .header("User-Agent", HttpClient.DESKTOP_UA)
+                        .header("Referer", referer)
+                        .build()
+                    var link1 = href
+                    HttpClient.noRedirect.newCall(req1).execute().use { r1 ->
+                        link1 = if (r1.code in 300..399)
+                            r1.header("Location") ?: href
+                        else if (r1.request.url.toString() != href)
+                            r1.request.url.toString()
+                        else href
+                    }
+                    // If googleusercontent, extract ?link= param
                     if (link1.contains("googleusercontent")) {
                         link1 = link1.split("?link=").getOrNull(1) ?: link1
                     } else {
-                        var link2 = HttpClient.getFinalUrl(link1, referer)
-                        link2 = link2.split("?link=").getOrNull(1) ?: link2
-                        link1 = link2
+                        // Second redirect hop
+                        val req2 = okhttp3.Request.Builder().url(link1)
+                            .head()
+                            .header("User-Agent", HttpClient.DESKTOP_UA)
+                            .header("Referer", href)
+                            .build()
+                        HttpClient.noRedirect.newCall(req2).execute().use { r2 ->
+                            val loc2 = if (r2.code in 300..399)
+                                r2.header("Location") ?: link1
+                            else link1
+                            link1 = loc2.split("?link=").getOrNull(1) ?: loc2
+                        }
                     }
                     link1
                 } catch (e: Exception) { href }

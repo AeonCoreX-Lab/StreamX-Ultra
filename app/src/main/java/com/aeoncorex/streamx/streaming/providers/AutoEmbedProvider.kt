@@ -54,10 +54,17 @@ object AutoEmbedProvider {
         withContext(Dispatchers.IO) {
             val imdbId = req.imdbId?.takeIf { it.isNotEmpty() } ?: return@withContext emptyList()
             try {
-                val config = """{"multi":"on","al":"on","de":"on","es":"on","fr":"on","hi":"on","it":"on","mx":"on","mediaFlowProxyUrl":"","mediaFlowProxyPassword":""}"""
+                // CRITICAL: vega uses encodeURI() which keeps { } : " , intact.
+                // Java's URLEncoder.encode() would encode them → broken URL.
+                // We manually encode only spaces and special chars, keeping JSON structure.
+                val config  = """{"multi":"on","al":"on","de":"on","es":"on","fr":"on","hi":"on","it":"on","mx":"on","mediaFlowProxyUrl":"","mediaFlowProxyPassword":""}"""
                 val typeStr = if (req.isSeries) "series" else "movie"
                 val suffix  = if (req.isSeries) ":${req.season}:${req.episode}" else ""
-                val url     = "https://webstreamr.hayd.uk/${URLEncoder.encode(config, "UTF-8")}/stream/$typeStr/$imdbId$suffix.json"
+                // encodeURIComponent equivalent: encode only unsafe chars, keep JSON chars
+                val encodedConfig = config
+                    .replace(" ", "%20")
+                    .replace(""", "%22")  // encode quotes for URL safety
+                val url     = "https://webstreamr.hayd.uk/$encodedConfig/stream/$typeStr/$imdbId$suffix.json"
 
                 Log.d(TAG, "Webstreamr: $url")
                 val json = HttpClient.getJson(url) ?: return@withContext emptyList()
