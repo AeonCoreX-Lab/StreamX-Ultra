@@ -242,5 +242,5 @@ dependencies {
     //   Replaces NanoHTTPD (abandoned 2019, no Kotlin coroutine support).
     //   CIO engine: pure Kotlin, no Netty/servlet overhead — ideal for Android.
     //   ktor-server-cio pulls ktor-server-core transitively.
-    implementation("io.ktor:ktor-server-cio:3.4.3")
+    implementation("io.ktor:ktor-server-cio:3.5.0")
 }
