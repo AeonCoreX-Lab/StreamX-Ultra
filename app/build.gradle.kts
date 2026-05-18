@@ -182,10 +182,10 @@ dependencies {
     implementation(project(":premium-core"))
     // Version Variables
     val media3Version = "1.10.1"
-    val lifecycleVersion = "2.8.0"
+    val lifecycleVersion = "2.10.0"
 
     // Core & Compose
-    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.core:core-ktx:1.18.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:$lifecycleVersion")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation(platform("androidx.compose:compose-bom:2026.03.01"))
