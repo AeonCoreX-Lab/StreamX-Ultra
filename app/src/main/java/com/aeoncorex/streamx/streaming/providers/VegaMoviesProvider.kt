@@ -117,11 +117,21 @@ object VegaMoviesProvider {
     private fun extractMovie(doc: org.jsoup.nodes.Document, postUrl: String): List<StreamResult> {
         val results = mutableListOf<StreamResult>()
 
-        // HubCloud/HubDrive links
-        val hubLinks = doc.select("a[href*=hubcloud], a[href*=hubdrive], a[href*=/drive/]")
-            .map { it.attr("href") }.distinct().take(3)
+        // TS: match(/<a\s+href="([^"]*cloud\.[^"]*)"/i)
+        // Catches vcloud., hubcloud., hubdrive., any URL with cloud. in it
+        val cloudPattern = Regex("""<a\s+href="([^"]*cloud\.[^"]*)"\s""", RegexOption.IGNORE_CASE)
+        val cloudLinks = cloudPattern.findAll(postHtml)
+            .map { it.groupValues[1] }
+            .filter { it.startsWith("http") }
+            .distinct().take(3).toList()
 
-        hubLinks.forEach { link ->
+        // Fallback: Jsoup for hubcloud/hubdrive explicit
+        val jsoupLinks = doc.select("a[href*=hubcloud], a[href*=hubdrive], a[href*=vcloud]")
+            .map { it.attr("href") }
+            .filter { it.startsWith("http") }
+            .distinct().take(3)
+
+        (cloudLinks + jsoupLinks).distinct().take(3).forEach { link ->
             results += HubCloudExtractor.extract(link, "VegaMovies")
         }
 

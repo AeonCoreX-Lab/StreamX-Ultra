@@ -56,4 +56,18 @@ object KatMoviesProvider {
         } catch (e: Exception) { Log.w(TAG, e.message ?: "error"); emptyList() }
     }
     private fun cleanTitle(t: String) = t.replace(Regex("""[:"'!?.,]"""), " ").replace(Regex("""\s+"""), " ").trim()
+
+
+    private fun extractKmhd(link: String): List<StreamResult> {
+        return try {
+            val html = HttpClient.getHtml(link, mapOf("Cookie" to "unlocked=true")) ?: return emptyList()
+            val res  = Regex("""hubdrive_res:\s*"([^"]+)"""").find(html)?.groupValues?.get(1) ?: return emptyList()
+            val lnk  = Regex("""hubdrive_res\s*:\s*\{[^}]*?link\s*:\s*"([^"]+)"""").find(html)?.groupValues?.get(1)
+                ?: return emptyList()
+            HubCloudExtractor.extract(lnk + res, "KatMovies")
+        } catch (e: Exception) {
+            Log.w(TAG, "kmhd error: ${e.message}")
+            emptyList()
+        }
+    }
 }

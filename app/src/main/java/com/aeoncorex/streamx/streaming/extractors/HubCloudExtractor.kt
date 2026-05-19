@@ -23,7 +23,7 @@ object HubCloudExtractor {
     // Exact headers vega uses — cf_clearance is Cloudflare bypass
     // sec-ch-ua headers are required by Cloudflare Bot Management
     private val HUBCLOUD_HEADERS = mapOf(
-        "Cookie"               to "ext_name=ojplmecpdpgccookcobabopnaifgidhf; xla=s4t",
+        "Cookie" to "ext_name=ojplmecpdpgccookcobabopnaifgidhf; xla=s4t; cf_clearance=woQrFGXtLfmEMBEiGUsVHrUBMT8s3cmguIzmMjmvpkg-1770053679-1.2.1.1-xBrQdciOJsweUF6F2T_OtH6jmyanN_TduQ0yslc_XqjU6RcHSxI7.YOKv6ry7oYo64868HYoULnVyww536H2eVI3R2e4wKzsky6abjPdfQPxqpUaXjxfJ02o6jl3_Vkwr4uiaU7Wy596Vdst3y78HXvVmKdIohhtPvp.vZ9_L7wvWdce0GRixjh_6JiqWmWMws46hwEt3hboaS1e1e4EoWCvj5b0M_jVwvSxBOAW5emFzvT3QrnRh4nyYmKDERnY",
         "User-Agent"           to HttpClient.DESKTOP_UA,
         "Accept"               to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language"      to "en-US,en;q=0.9",

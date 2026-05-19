@@ -65,20 +65,53 @@ object FilmyflyProvider {
                 ?: return@withContext emptyList()
             val postDoc  = Jsoup.parse(postHtml, postUrl)
 
-            // Find GDFLIX button links
-            val gdLinks = postDoc.select(".button, .button1, .button2, .button3, .button4")
-                .filter { it.text().contains("GDFLIX", true) }
-                .map { it.attr("href") }
-                .filter { it.startsWith("http") }
+            // TS: select all .button,.button1,.button2,.button3,.button4 elements
+            // GDFLIX buttons → GdflixExtractor
+            // Other buttons (non-Watch/Login/GoFile) → add as direct MKV links
+            val results = mutableListOf<StreamResult>()
+            val buttons = postDoc.select(".button2,.button1,.button3,.button4,.button")
+            val skipWords = listOf("Watch", "Login", "GoFile", "Trailer", "Screenshot")
 
-            if (gdLinks.isEmpty()) {
-                // Also check all buttons
-                val anyLinks = postDoc.select("a[href*=gdflix], a[href*=gd-], a[href*=drive]")
-                    .map { it.attr("href") }.filter { it.isNotEmpty() }.take(2)
-                return@withContext anyLinks.flatMap { GdflixExtractor.extract(it, "Filmyfly") }
+            for (btn in buttons) {
+                val title = btn.text().trim()
+                val link  = btn.attr("href").takeIf { it.startsWith("http") } ?: continue
+
+                when {
+                    title.contains("GDFLIX", true) -> {
+                        results += GdflixExtractor.extract(link, "Filmyfly")
+                    }
+                    skipWords.none { title.contains(it, true) } && title.isNotEmpty() -> {
+                        // Direct download link (HubCloud, GDrive, etc.)
+                        val quality = when {
+                            title.contains("4K",    true) || title.contains("2160", true) -> "4K"
+                            title.contains("1080",  true) -> "1080P"
+                            title.contains("720",   true) -> "720P"
+                            title.contains("480",   true) -> "480P"
+                            else -> "HD"
+                        }
+                        when {
+                            link.contains("hubcloud") || link.contains("vcloud") || link.contains("hubdrive") ->
+                                results += HubCloudExtractor.extract(link, "Filmyfly")
+                            else ->
+                                results += StreamResult(
+                                    url = link, quality = quality,
+                                    type = StreamType.MKV,
+                                    source = "Filmyfly",
+                                    label = "$quality — Filmyfly [$title]"
+                                )
+                        }
+                    }
+                }
             }
 
-            gdLinks.take(2).flatMap { GdflixExtractor.extract(it, "Filmyfly") }
+            // Fallback: scan for any gdflix/gdrive links
+            if (results.isEmpty()) {
+                postDoc.select("a[href*=gdflix], a[href*=gd-]")
+                    .take(2).forEach { el ->
+                        results += GdflixExtractor.extract(el.attr("href"), "Filmyfly")
+                    }
+            }
+            results
         } catch (e: Exception) {
             Log.w(TAG, "Filmyfly error: ${e.message}")
             emptyList()

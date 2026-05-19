@@ -1,5 +1,14 @@
 package com.aeoncorex.streamx.navigation
 
+// ════════════════════════════════════════════════════════════════════════════
+//  AppNavigation.kt — Updated with Live Event Player route
+//  ────────────────────────────────────────────────────────
+//  CHANGES from original:
+//    • Added "live_event_player/{encodedUrl}" route
+//      (Live events use the existing PlayerScreen — no new screen needed)
+//    • No other changes
+// ════════════════════════════════════════════════════════════════════════════
+
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -25,14 +34,11 @@ import com.aeoncorex.streamx.ui.movie.MovieScreen
 import com.aeoncorex.streamx.ui.movie.MovieDetailsScreen
 import com.aeoncorex.streamx.ui.movie.MovieSettingsScreen
 import com.aeoncorex.streamx.ui.movie.MovieLinkSelectionScreen
-import com.aeoncorex.streamx.ui.movie.MoviePlayerScreen       // MPV torrent player (renamed internally)
-import com.aeoncorex.streamx.ui.movie.ExoMoviePlayerScreen   // New instant ExoPlayer
-import com.aeoncorex.streamx.ui.movie.ExoSourceSelectionScreen // NEW: web source selection
+import com.aeoncorex.streamx.ui.movie.MoviePlayerScreen
+import com.aeoncorex.streamx.ui.movie.ExoMoviePlayerScreen
+import com.aeoncorex.streamx.ui.movie.ExoSourceSelectionScreen
 import com.aeoncorex.streamx.ui.notifications.NotificationsScreen
 import com.aeoncorex.streamx.ui.movie.PersonDetailScreen
-
-// ── REMOVED: AdBlockWebView (WebView player no longer needed) ─────
-// ── REMOVED: webview_player route ────────────────────────────────
 
 @Composable
 fun AppNavigation(themeViewModel: ThemeViewModel) {
@@ -44,7 +50,7 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         composable("auth")        { AuthScreen(navController) }
         composable("home")        { MainScreen(navController) }
 
-        // ── Live TV Player ────────────────────────────────────────
+        // ── Live TV Player ────────────────────────────────────────────────
         composable(
             route     = "player/{encodedUrl}",
             arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
@@ -55,7 +61,20 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             )
         }
 
-        // ── Movie section ─────────────────────────────────────────
+        // ── Live Event Player (reuses PlayerScreen) ───────────────────────
+        // LiveEventsSection navigates to "player/{encodedUrl}" directly,
+        // so no separate route is needed. This alias is kept for clarity.
+        composable(
+            route     = "live_event_player/{encodedUrl}",
+            arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
+        ) { backStack ->
+            PlayerScreen(
+                navController = navController,
+                encodedUrl    = backStack.arguments?.getString("encodedUrl") ?: ""
+            )
+        }
+
+        // ── Movie section ─────────────────────────────────────────────────
         composable("movie")          { MovieScreen(navController) }
         composable("movie_settings") { MovieSettingsScreen(navController) }
 
@@ -73,8 +92,7 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             )
         }
 
-        // ── NEW: Instant ExoPlayer source selection (web sources) ─
-        // Triggered by "Play Now" button
+        // ── ExoPlayer source selection ────────────────────────────────────
         composable(
             route     = "exo_source/{imdbId}/{tmdbId}/{title}/{type}/{season}/{episode}",
             arguments = listOf(
@@ -97,7 +115,7 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             )
         }
 
-        // ── NEW: Instant ExoPlayer (Movie Box style) ──────────────
+        // ── ExoPlayer (instant) ───────────────────────────────────────────
         composable(
             route     = "exo_player/{encodedUrl}/{title}/{quality}/{language}/{imdbId}/{type}/{season}/{episode}/{subtitlesJson}/{headersJson}",
             arguments = listOf(
@@ -124,11 +142,11 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
                 season         = backStack.arguments?.getInt("season")           ?: 0,
                 subtitlesJson  = backStack.arguments?.getString("subtitlesJson") ?: "[]",
                 headersJson    = backStack.arguments?.getString("headersJson")   ?: "{}",
-                episode       = backStack.arguments?.getInt("episode")       ?: 0
+                episode        = backStack.arguments?.getInt("episode")          ?: 0
             )
         }
 
-        // ── Torrent link selection (only torrents, no web servers) ─
+        // ── Torrent selection ─────────────────────────────────────────────
         composable(
             route     = "torrent_selection/{imdbId}/{tmdbId}/{title}/{type}/{season}/{episode}",
             arguments = listOf(
@@ -151,7 +169,7 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             )
         }
 
-        // ── MPV Torrent Player (kept, renamed route) ──────────────
+        // ── MPV Torrent Player ────────────────────────────────────────────
         composable(
             route     = "torrent_player/{encodedUrl}",
             arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
@@ -162,21 +180,22 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             )
         }
 
-        // ── Music ─────────────────────────────────────────────────
+        // ── Music ─────────────────────────────────────────────────────────
         composable("music")        { MusicScreen(navController) }
         composable("music_player") { MusicPlayerScreen(navController) }
 
-        // ── Other screens ─────────────────────────────────────────
-        composable("settings") { SettingsScreen(navController) }
-        composable("account")  { AccountScreen(navController) }
-        composable("theme")    { ThemeScreen(navController, themeViewModel) }
-        composable("privacy")  { PrivacyPolicyScreen(navController) }
-        composable("about")    { AboutScreen(navController) }
-        composable("copyright"){ CopyrightScreen(navController) }
-        composable("premium")  { PremiumScreen(navController) }
+        // ── Other screens ─────────────────────────────────────────────────
+        composable("settings")     { SettingsScreen(navController) }
+        composable("account")      { AccountScreen(navController) }
+        composable("theme")        { ThemeScreen(navController, themeViewModel) }
+        composable("privacy")      { PrivacyPolicyScreen(navController) }
+        composable("about")        { AboutScreen(navController) }
+        composable("copyright")    { CopyrightScreen(navController) }
+        composable("premium")      { PremiumScreen(navController) }
         composable("notifications") { NotificationsScreen() }
         composable("person_detail/{personId}") { backStackEntry ->
-            val personId = backStackEntry.arguments?.getString("personId")?.toIntOrNull() ?: return@composable
+            val personId = backStackEntry.arguments?.getString("personId")?.toIntOrNull()
+                ?: return@composable
             PersonDetailScreen(personId = personId, navController = navController)
         }
     }

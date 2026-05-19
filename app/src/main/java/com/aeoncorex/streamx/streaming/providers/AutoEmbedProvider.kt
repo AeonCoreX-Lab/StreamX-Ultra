@@ -54,17 +54,13 @@ object AutoEmbedProvider {
         withContext(Dispatchers.IO) {
             val imdbId = req.imdbId?.takeIf { it.isNotEmpty() } ?: return@withContext emptyList()
             try {
-                // CRITICAL: vega uses encodeURI() which keeps { } : " , intact.
-                // Java's URLEncoder.encode() would encode them → broken URL.
-                // We manually encode only spaces and special chars, keeping JSON structure.
                 val config  = """{"multi":"on","al":"on","de":"on","es":"on","fr":"on","hi":"on","it":"on","mx":"on","mediaFlowProxyUrl":"","mediaFlowProxyPassword":""}"""
                 val typeStr = if (req.isSeries) "series" else "movie"
                 val suffix  = if (req.isSeries) ":${req.season}:${req.episode}" else ""
-                // encodeURIComponent equivalent: encode only unsafe chars, keep JSON chars
-                val encodedConfig = config
-                    .replace(" ", "%20")
-                    .replace(""", "%22")  // encode quotes for URL safety
-                val url     = "https://webstreamr.hayd.uk/$encodedConfig/stream/$typeStr/$imdbId$suffix.json"
+                // Use encodeUri() — exact JS encodeURI() port.
+                // encodeURI keeps : and , literal; URLEncoder.encode() wrongly converts them to %3A/%2C
+                val fullUrl = "https://webstreamr.hayd.uk/$config/stream/$typeStr/$imdbId$suffix.json"
+                val url     = encodeUri(fullUrl)
 
                 Log.d(TAG, "Webstreamr: $url")
                 val json = HttpClient.getJson(url) ?: return@withContext emptyList()
@@ -115,8 +111,11 @@ object AutoEmbedProvider {
                             mapOf("Referer" to riveBase, "Origin" to riveBase)
                         ) ?: return@async emptyList()
 
-                        val data    = JSONObject(json).optJSONObject("data") ?: return@async emptyList()
-                        val sources = data.optJSONArray("sources")         ?: return@async emptyList()
+                        // TS: res.data?.data?.sources — root → data → sources
+                    val root = JSONObject(json)
+                    val data = root.optJSONObject("data") ?: return@async emptyList()
+                    val sources = data.optJSONArray("sources")
+                        ?: root.optJSONArray("sources") ?: return@async emptyList()
 
                         buildList {
                             for (i in 0 until sources.length()) {
@@ -141,6 +140,20 @@ object AutoEmbedProvider {
         } catch (e: Exception) {
             Log.w(TAG, "Rive error: ${e.message}")
             emptyList()
+        }
+    }
+
+    // ── JS encodeURI() equivalent ────────────────────────────────────────────
+    // encodeURI safe chars: A-Za-z0-9 ; , / ? : @ & = + $ - _ . ! ~ * ' ( ) #
+    // URLEncoder.encode() additionally encodes : and , which encodeURI DOES NOT
+    private fun encodeUri(s: String): String {
+        val safe = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789;,/?:@&=+$-_.!~*'()#"
+        return buildString {
+            for (byte in s.toByteArray(Charsets.UTF_8)) {
+                val b = byte.toInt() and 0xFF
+                if (b < 128 && safe.contains(b.toChar())) append(b.toChar())
+                else append("%${b.toString(16).padStart(2, '0').uppercase()}")
+            }
         }
     }
 }

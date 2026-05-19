@@ -30,6 +30,7 @@ object ModflixConfig {
         "aea"          to "https://watch-anime.autoembed.cc",
         "rive"         to "https://www.rivestream.app",
         "consumet"     to "https://consumet.zendax.tech",
+        "hdhub4u"     to "https://hdhub4u.foo",
         "kissKh"       to "https://kisskh.do",
         "hdhub"        to "https://new4.hdhub4u.fo",
         "kat"          to "https://katmoviehd.pictures",
