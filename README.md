@@ -1,11 +1,5 @@
 <div align="center">
 
-  <a href="https://github.com/AeonCoreX-Lab">
-    <img src="https://raw.githubusercontent.com/AeonCoreX-Lab/.github/main/badges/aeoncorex-badge.svg" alt="AeonCoreX Official Project" width="220">
-  </a>
-
-  <br><br>
-
   <a href="https://github.com/AeonCoreX-Lab/StreamX-Ultra">
     <img src="assets/logo.png" alt="StreamX Ultra Logo" width="180">
   </a>
@@ -177,6 +171,12 @@ Contributions make the open-source community an amazing place to learn, inspire,
 ## 📄 License
 Distributed under the AGPL-3.0 License. See [LICENSE](LICENSE) for more information.
 <div align="center">
+  <a href="https://github.com/AeonCoreX-Lab">
+    <img src="https://raw.githubusercontent.com/AeonCoreX-Lab/.github/main/badges/aeoncorex-badge.svg" alt="AeonCoreX Official Project" width="220">
+  </a>
+
+  <br><br>
+
 <p>Built with passion by <strong>AeonCoreX</strong></p>
 <img src="assets/aeoncorex-logo.png" width="80" alt="AeonCoreX">
 <p>© 2026 AeonCoreX. All rights reserved.</p>
