@@ -175,7 +175,7 @@ Distributed under the AGPL-3.0 License. See [LICENSE](LICENSE) for more informat
     <img src="https://raw.githubusercontent.com/AeonCoreX-Lab/.github/main/badges/aeoncorex-badge.svg" alt="AeonCoreX Official Project" width="220">
   </a>
 
-  <br><br>
+  <br>
 
 <p>Built with passion by <strong>AeonCoreX</strong></p>
 <img src="assets/aeoncorex-logo.png" width="80" alt="AeonCoreX">
