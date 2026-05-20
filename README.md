@@ -1,19 +1,25 @@
 <div align="center">
 
+  <a href="https://github.com/AeonCoreX-Lab">
+    <img src="https://raw.githubusercontent.com/AeonCoreX-Lab/.github/main/badges/aeoncorex-badge.svg" alt="AeonCoreX Official Project" width="220">
+  </a>
+
+  <br><br>
+
   <a href="https://github.com/AeonCoreX-Lab/StreamX-Ultra">
     <img src="assets/logo.png" alt="StreamX Ultra Logo" width="180">
   </a>
 
   <h1 align="center">StreamX Ultra</h1>
+
   <p align="center">
-    <strong>Next-Generation Live TV & Streaming Platform</strong><br />
+    <strong>Next-Generation Live TV & Streaming Platform</strong><br>
     Built with ❤️ by <a href="https://github.com/AeonCoreX-Lab"><strong>AeonCoreX</strong></a>
   </p>
 
   <p align="center">
-    <a
-     <img src="https://img.shields.io/badge/AeonCoreX-Official%20Project-0A0A0A?style=for-the-badge&logo=vercel&logoColor=white"/>
-     <img
+    <a href="https://github.com/AeonCoreX-Lab">
+      <img src="https://raw.githubusercontent.com/AeonCoreX-Lab/.github/main/badges/aeoncorex-badge.svg" alt="AeonCoreX Official" width="140">
     </a>
     <a href="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android-build.yml">
       <img src="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android-build.yml/badge.svg?branch=main&event=push" alt="Build Status">
