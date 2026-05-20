@@ -14,6 +14,7 @@
     <a
      <img src="https://img.shields.io/badge/AeonCoreX-Official%20Project-0A0A0A?style=for-the-badge&logo=vercel&logoColor=white"/>
      <img
+    </a>
     <a href="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android-build.yml">
       <img src="https://github.com/cybernahid-dev/StreamX-Ultra/actions/workflows/android-build.yml/badge.svg?branch=main&event=push" alt="Build Status">
     </a>
