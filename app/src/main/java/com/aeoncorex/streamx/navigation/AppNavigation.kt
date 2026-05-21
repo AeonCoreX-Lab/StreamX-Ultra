@@ -37,6 +37,7 @@ import com.aeoncorex.streamx.ui.movie.MovieLinkSelectionScreen
 import com.aeoncorex.streamx.ui.movie.MoviePlayerScreen
 import com.aeoncorex.streamx.ui.movie.ExoMoviePlayerScreen
 import com.aeoncorex.streamx.ui.movie.ExoSourceSelectionScreen
+import com.aeoncorex.streamx.ui.movie.YoutubePlayerSheet
 import com.aeoncorex.streamx.ui.notifications.NotificationsScreen
 import com.aeoncorex.streamx.ui.movie.PersonDetailScreen
 

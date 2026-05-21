@@ -52,6 +52,9 @@ fun MovieDetailsScreen(
     var isEpisodesLoading by remember { mutableStateOf(false) }
     var adLoading         by remember { mutableStateOf(false) }
 
+    // ✅ NEW — controls YoutubePlayerSheet visibility
+    var showTrailerSheet  by remember { mutableStateOf(false) }
+
     LaunchedEffect(movieId) {
         isLoading = true
         details   = MovieRepository.getFullDetails(movieId, type)
@@ -66,34 +69,30 @@ fun MovieDetailsScreen(
         }
     }
 
-    // ── Play Now → ExoPlayer (instant, Movie Box style) ──────────
+    // ── Play Now → ExoPlayer ──────────────────────────────────────
     fun playNow(season: Int, episode: Int) {
         if (details == null || activity == null) return
         val titleEnc = URLEncoder.encode(details!!.basic.title, "UTF-8")
         val imdbId   = details!!.imdbId ?: "null"
         val tmdbId   = details!!.basic.id
         val typeStr  = if (type == MovieType.MOVIE) "MOVIE" else "SERIES"
-
         adLoading = true
         AdManager.showInterstitial(activity) {
             adLoading = false
-            // → ExoSourceSelectionScreen (instant HLS/MP4 play)
             navController.navigate("exo_source/$imdbId/$tmdbId/$titleEnc/$typeStr/$season/$episode")
         }
     }
 
-    // ── Play with Torrent → MPV torrent player ────────────────────
+    // ── Play with Torrent → MPV ───────────────────────────────────
     fun playWithTorrent(season: Int, episode: Int) {
         if (details == null || activity == null) return
         val titleEnc = URLEncoder.encode(details!!.basic.title, "UTF-8")
         val imdbId   = details!!.imdbId ?: "null"
         val tmdbId   = details!!.basic.id
         val typeStr  = if (type == MovieType.MOVIE) "MOVIE" else "SERIES"
-
         adLoading = true
         AdManager.showInterstitial(activity) {
             adLoading = false
-            // → MovieLinkSelectionScreen (torrent only)
             navController.navigate("torrent_selection/$imdbId/$tmdbId/$titleEnc/$typeStr/$season/$episode")
         }
     }
@@ -101,61 +100,109 @@ fun MovieDetailsScreen(
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
 
         if (adLoading) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(0.88f)),
-                contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Color.Cyan, modifier = Modifier.size(48.dp), strokeWidth = 3.dp)
+            Box(
+                Modifier.fillMaxSize().background(Color.Black.copy(0.88f)),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    color        = Color.Cyan,
+                    modifier     = Modifier.size(48.dp),
+                    strokeWidth  = 3.dp
+                )
             }
             return@Box
         }
 
         if (isLoading) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.Red)
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.Center),
+                color    = Color.Red
+            )
         } else {
             details?.let { movie ->
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
 
-                    // ── HERO ────────────────────────────────────────
+                    // ── HERO ─────────────────────────────────────────
                     item {
                         Box(modifier = Modifier.fillMaxWidth().height(500.dp)) {
-                            AsyncImage(model = movie.basic.backdropUrl, contentDescription = null,
-                                contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                            Box(modifier = Modifier.fillMaxSize().background(
-                                Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.6f), Color.Black))))
+                            AsyncImage(
+                                model            = movie.basic.backdropUrl,
+                                contentDescription = null,
+                                contentScale     = ContentScale.Crop,
+                                modifier         = Modifier.fillMaxSize()
+                            )
+                            Box(
+                                modifier = Modifier.fillMaxSize().background(
+                                    Brush.verticalGradient(
+                                        listOf(Color.Transparent, Color.Black.copy(0.6f), Color.Black)
+                                    )
+                                )
+                            )
 
                             // Top bar
-                            Row(Modifier.fillMaxWidth().padding(top = 40.dp, start = 16.dp, end = 16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween) {
-                                IconButton(onClick = { navController.popBackStack() },
-                                    modifier = Modifier.background(Color.Black.copy(0.5f), CircleShape)) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 40.dp, start = 16.dp, end = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                IconButton(
+                                    onClick  = { navController.popBackStack() },
+                                    modifier = Modifier.background(Color.Black.copy(0.5f), CircleShape)
+                                ) {
                                     Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
                                 }
-                                IconButton(onClick = { navController.navigate("movie_settings") },
-                                    modifier = Modifier.background(Color.Black.copy(0.5f), CircleShape)) {
+                                IconButton(
+                                    onClick  = { navController.navigate("movie_settings") },
+                                    modifier = Modifier.background(Color.Black.copy(0.5f), CircleShape)
+                                ) {
                                     Icon(Icons.Outlined.Settings, "Settings", tint = Color.White)
                                 }
                             }
 
                             // Info + Buttons
-                            Column(modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)) {
-                                Text(movie.basic.title.uppercase(), style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = FontWeight.Black, color = Color.White)
+                            Column(
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(16.dp)
+                            ) {
+                                Text(
+                                    movie.basic.title.uppercase(),
+                                    style      = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = FontWeight.Black,
+                                    color      = Color.White
+                                )
                                 Spacer(Modifier.height(8.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("${movie.basic.rating} Match", color = Color(0xFF46D369), fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "${movie.basic.rating} Match",
+                                        color      = Color(0xFF46D369),
+                                        fontWeight = FontWeight.Bold
+                                    )
                                     Spacer(Modifier.width(12.dp))
                                     Text(movie.basic.year, color = Color.White)
                                     Spacer(Modifier.width(12.dp))
-                                    Box(Modifier.background(Color.DarkGray, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp)) {
-                                        Text(if (type == MovieType.MOVIE) "HD" else "TV", color = Color.White, fontSize = 12.sp)
+                                    Box(
+                                        Modifier
+                                            .background(Color.DarkGray, RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 4.dp)
+                                    ) {
+                                        Text(
+                                            if (type == MovieType.MOVIE) "HD" else "TV",
+                                            color    = Color.White,
+                                            fontSize = 12.sp
+                                        )
                                     }
                                     Spacer(Modifier.width(12.dp))
                                     Text(movie.runtime, color = Color.Gray)
                                 }
                                 Spacer(Modifier.height(16.dp))
 
-                                // ── Button row ────────────────────────────────
-                                Row(modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                // ── Button row ────────────────────────
+                                Row(
+                                    modifier              = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
 
                                     // 1. PLAY NOW
                                     Button(
@@ -167,51 +214,75 @@ fun MovieDetailsScreen(
                                         shape    = RoundedCornerShape(6.dp),
                                         modifier = Modifier.weight(1.3f).height(46.dp)
                                     ) {
-                                        Icon(Icons.Default.PlayArrow, null,
-                                            tint = Color.Black, modifier = Modifier.size(18.dp))
+                                        Icon(
+                                            Icons.Default.PlayArrow, null,
+                                            tint     = Color.Black,
+                                            modifier = Modifier.size(18.dp)
+                                        )
                                         Spacer(Modifier.width(4.dp))
-                                        Text("Play Now", color = Color.Black,
-                                            fontWeight = FontWeight.Bold, fontSize = 13.sp,
-                                            maxLines = 1)
+                                        Text(
+                                            "Play Now",
+                                            color      = Color.Black,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize   = 13.sp,
+                                            maxLines   = 1
+                                        )
                                     }
 
-                                    // 2. 1337x TORRENT
+                                    // 2. TORRENT
                                     OutlinedButton(
                                         onClick = {
                                             if (type == MovieType.MOVIE) playWithTorrent(0, 0)
                                             else playWithTorrent(selectedSeason, 1)
                                         },
                                         colors  = ButtonDefaults.outlinedButtonColors(contentColor = Color.Cyan),
-                                        border  = androidx.compose.foundation.BorderStroke(1.dp, Color.Cyan.copy(0.6f)),
-                                        shape   = RoundedCornerShape(6.dp),
+                                        border  = androidx.compose.foundation.BorderStroke(
+                                            1.dp, Color.Cyan.copy(0.6f)
+                                        ),
+                                        shape    = RoundedCornerShape(6.dp),
                                         modifier = Modifier.weight(1f).height(46.dp),
                                         contentPadding = PaddingValues(horizontal = 8.dp),
                                     ) {
-                                        Icon(Icons.Rounded.Download, null,
-                                            tint = Color.Cyan, modifier = Modifier.size(16.dp))
+                                        Icon(
+                                            Icons.Rounded.Download, null,
+                                            tint     = Color.Cyan,
+                                            modifier = Modifier.size(16.dp)
+                                        )
                                         Spacer(Modifier.width(4.dp))
-                                        Text("Torrent", color = Color.Cyan,
-                                            fontSize = 12.sp, maxLines = 1)
+                                        Text(
+                                            "Torrent",
+                                            color    = Color.Cyan,
+                                            fontSize = 12.sp,
+                                            maxLines = 1
+                                        )
                                     }
 
-                                    // 3. TRAILER
+                                    // 3. TRAILER ✅ — now opens in-app YoutubePlayerSheet
                                     if (movie.trailerKey != null) {
                                         OutlinedButton(
                                             onClick = {
-                                                context.startActivity(Intent(Intent.ACTION_VIEW,
-                                                    Uri.parse("vnd.youtube:${movie.trailerKey}")))
+                                                showTrailerSheet = true   // ← single line change
                                             },
                                             colors  = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                                            border  = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(0.3f)),
-                                            shape   = RoundedCornerShape(6.dp),
+                                            border  = androidx.compose.foundation.BorderStroke(
+                                                1.dp, Color.White.copy(0.3f)
+                                            ),
+                                            shape    = RoundedCornerShape(6.dp),
                                             modifier = Modifier.weight(0.85f).height(46.dp),
                                             contentPadding = PaddingValues(horizontal = 8.dp),
                                         ) {
-                                            Icon(Icons.Rounded.PlayCircle, null,
-                                                tint = Color.White, modifier = Modifier.size(16.dp))
+                                            Icon(
+                                                Icons.Rounded.PlayCircle, null,
+                                                tint     = Color.White,
+                                                modifier = Modifier.size(16.dp)
+                                            )
                                             Spacer(Modifier.width(4.dp))
-                                            Text("Trailer", color = Color.White,
-                                                fontSize = 12.sp, maxLines = 1)
+                                            Text(
+                                                "Trailer",
+                                                color    = Color.White,
+                                                fontSize = 12.sp,
+                                                maxLines = 1
+                                            )
                                         }
                                     }
                                 }
@@ -224,18 +295,31 @@ fun MovieDetailsScreen(
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(movie.basic.description, color = Color.White, lineHeight = 20.sp)
                             Spacer(Modifier.height(12.dp))
-                            Text("Genres: ${movie.genres.joinToString(", ")}", color = Color.Gray, fontSize = 12.sp)
-                            Text("Director: ${movie.director}",               color = Color.Gray, fontSize = 12.sp)
+                            Text(
+                                "Genres: ${movie.genres.joinToString(", ")}",
+                                color    = Color.Gray,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                "Director: ${movie.director}",
+                                color    = Color.Gray,
+                                fontSize = 12.sp
+                            )
                         }
                     }
 
-                    // ── SERIES EPISODES ───────────────────────────────
+                    // ── SERIES EPISODES ──────────────────────────────
                     if (type == MovieType.SERIES && movie.seasons.isNotEmpty()) {
                         item {
                             Column(Modifier.padding(horizontal = 16.dp)) {
                                 HorizontalDivider(color = Color.Gray.copy(0.3f))
                                 Spacer(Modifier.height(16.dp))
-                                Text("Episodes", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                Text(
+                                    "Episodes",
+                                    color      = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize   = 18.sp
+                                )
                                 LazyRow(Modifier.padding(vertical = 12.dp)) {
                                     items(movie.seasons) { season ->
                                         FilterChip(
@@ -243,15 +327,20 @@ fun MovieDetailsScreen(
                                             onClick   = { selectedSeason = season.seasonNumber },
                                             label     = { Text("Season ${season.seasonNumber}") },
                                             colors    = FilterChipDefaults.filterChipColors(
-                                                containerColor         = Color.DarkGray, labelColor = Color.LightGray,
-                                                selectedContainerColor = Color.Red,     selectedLabelColor = Color.White),
-                                            modifier  = Modifier.padding(end = 8.dp)
+                                                containerColor         = Color.DarkGray,
+                                                labelColor             = Color.LightGray,
+                                                selectedContainerColor = Color.Red,
+                                                selectedLabelColor     = Color.White
+                                            ),
+                                            modifier = Modifier.padding(end = 8.dp)
                                         )
                                     }
                                 }
-
                                 if (isEpisodesLoading) {
-                                    Box(Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                                    Box(
+                                        Modifier.fillMaxWidth().height(100.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
                                         CircularProgressIndicator(color = Color.Red)
                                     }
                                 } else {
@@ -271,7 +360,11 @@ fun MovieDetailsScreen(
                                             }
                                         }
                                     } else {
-                                        Text("No episodes found for this season.", color = Color.Gray, fontSize = 14.sp)
+                                        Text(
+                                            "No episodes found for this season.",
+                                            color    = Color.Gray,
+                                            fontSize = 14.sp
+                                        )
                                     }
                                 }
                                 Spacer(Modifier.height(24.dp))
@@ -281,10 +374,16 @@ fun MovieDetailsScreen(
 
                     // ── CAST ─────────────────────────────────────────
                     item {
-                        Text("Cast", color = Color.White, fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(start = 16.dp, bottom = 8.dp))
-                        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            "Cast",
+                            color      = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            modifier   = Modifier.padding(start = 16.dp, bottom = 8.dp)
+                        )
+                        LazyRow(
+                            contentPadding        = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
                             items(movie.cast) { actor ->
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -296,21 +395,31 @@ fun MovieDetailsScreen(
                                         }
                                 ) {
                                     AsyncImage(
-                                        model = actor.imageUrl,
+                                        model              = actor.imageUrl,
                                         contentDescription = actor.name,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
+                                        contentScale       = ContentScale.Crop,
+                                        modifier           = Modifier
                                             .size(70.dp)
                                             .clip(CircleShape)
                                             .border(1.5.dp, Color(0xFF7C3AED).copy(0.6f), CircleShape)
                                     )
                                     Spacer(Modifier.height(5.dp))
-                                    Text(actor.name, color = Color.LightGray, fontSize = 10.sp,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                                    Text(actor.role, color = Color.Gray, fontSize = 9.sp,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                    Text(
+                                        actor.name,
+                                        color     = Color.LightGray,
+                                        fontSize  = 10.sp,
+                                        maxLines  = 1,
+                                        overflow  = TextOverflow.Ellipsis,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                    Text(
+                                        actor.role,
+                                        color     = Color.Gray,
+                                        fontSize  = 9.sp,
+                                        maxLines  = 1,
+                                        overflow  = TextOverflow.Ellipsis,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
                                 }
                             }
                         }
@@ -320,10 +429,16 @@ fun MovieDetailsScreen(
                     // ── MORE LIKE THIS ────────────────────────────────
                     if (movie.recommendations.isNotEmpty()) {
                         item {
-                            Text("More Like This", color = Color.White, fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(start = 16.dp, bottom = 12.dp))
-                            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(
+                                "More Like This",
+                                color      = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                modifier   = Modifier.padding(start = 16.dp, bottom = 12.dp)
+                            )
+                            LazyRow(
+                                contentPadding        = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
                                 items(movie.recommendations) { recMovie ->
                                     RecommendationCard(movie = recMovie) {
                                         val typeStr = if (recMovie.type == MovieType.MOVIE) "MOVIE" else "SERIES"
@@ -337,44 +452,97 @@ fun MovieDetailsScreen(
                 }
             }
         }
+
+        // ── YouTube Trailer Sheet ─────────────────────────────────
+        // ✅ Renders on top of everything — sheet slides up from bottom
+        if (showTrailerSheet && details?.trailerKey != null) {
+            YoutubePlayerSheet(
+                videoKey  = details!!.trailerKey!!,
+                title     = details!!.basic.title,
+                onDismiss = { showTrailerSheet = false }
+            )
+        }
     }
 }
 
-// ── Reusable composables ─────────────────────────────────────────
+// ── Reusable composables ──────────────────────────────────────────
 
 @Composable
 fun RecommendationCard(movie: Movie, onClick: () -> Unit) {
     Column(modifier = Modifier.width(130.dp).clickable { onClick() }) {
-        Card(shape = RoundedCornerShape(8.dp), modifier = Modifier.size(width = 130.dp, height = 190.dp),
-            elevation = CardDefaults.cardElevation(4.dp)) {
+        Card(
+            shape     = RoundedCornerShape(8.dp),
+            modifier  = Modifier.size(width = 130.dp, height = 190.dp),
+            elevation = CardDefaults.cardElevation(4.dp)
+        ) {
             Box(Modifier.fillMaxSize()) {
-                AsyncImage(model = movie.posterUrl, contentDescription = null,
-                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                Box(Modifier.align(Alignment.TopEnd).padding(4.dp)
-                    .background(Color.Black.copy(0.7f), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 2.dp)) {
-                    Text(movie.rating, color = Color.Yellow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                AsyncImage(
+                    model              = movie.posterUrl,
+                    contentDescription = null,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.fillMaxSize()
+                )
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .background(Color.Black.copy(0.7f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        movie.rating,
+                        color      = Color.Yellow,
+                        fontSize   = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
         Spacer(Modifier.height(6.dp))
-        Text(movie.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            movie.title,
+            color      = Color.White,
+            fontSize   = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines   = 1,
+            overflow   = TextOverflow.Ellipsis
+        )
     }
 }
 
 @Composable
-fun EpisodeRow(episodeNumber: Int, title: String, duration: String, overview: String,
-               stillPath: String?, onClick: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Box(modifier = Modifier.width(130.dp).height(74.dp).clip(RoundedCornerShape(8.dp))
-            .background(Color.DarkGray), contentAlignment = Alignment.Center) {
-            val imageUrl = if (!stillPath.isNullOrEmpty()) "https://image.tmdb.org/t/p/w500$stillPath" else null
+fun EpisodeRow(
+    episodeNumber : Int,
+    title         : String,
+    duration      : String,
+    overview      : String,
+    stillPath     : String?,
+    onClick       : () -> Unit,
+) {
+    Row(
+        modifier          = Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier         = Modifier
+                .width(130.dp).height(74.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.DarkGray),
+            contentAlignment = Alignment.Center
+        ) {
+            val imageUrl = if (!stillPath.isNullOrEmpty())
+                "https://image.tmdb.org/t/p/w500$stillPath" else null
             if (imageUrl != null) {
-                AsyncImage(model = imageUrl, contentDescription = null, contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize())
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.3f)),
-                    contentAlignment = Alignment.Center) {
+                AsyncImage(
+                    model              = imageUrl,
+                    contentDescription = null,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.fillMaxSize()
+                )
+                Box(
+                    Modifier.fillMaxSize().background(Color.Black.copy(0.3f)),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(Icons.Default.PlayArrow, null, tint = Color.White)
                 }
             } else {
@@ -384,13 +552,29 @@ fun EpisodeRow(episodeNumber: Int, title: String, duration: String, overview: St
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "$episodeNumber. $title", color = Color.White, fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                if (duration.isNotEmpty()) { Spacer(Modifier.width(4.dp)); Text(duration, color = Color.Gray, fontSize = 11.sp) }
+                Text(
+                    "$episodeNumber. $title",
+                    color      = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize   = 14.sp,
+                    maxLines   = 1,
+                    overflow   = TextOverflow.Ellipsis,
+                    modifier   = Modifier.weight(1f)
+                )
+                if (duration.isNotEmpty()) {
+                    Spacer(Modifier.width(4.dp))
+                    Text(duration, color = Color.Gray, fontSize = 11.sp)
+                }
             }
             Spacer(Modifier.height(4.dp))
-            Text(text = overview, color = Color.LightGray.copy(0.7f), fontSize = 12.sp, maxLines = 3,
-                overflow = TextOverflow.Ellipsis, lineHeight = 16.sp)
+            Text(
+                overview,
+                color      = Color.LightGray.copy(0.7f),
+                fontSize   = 12.sp,
+                maxLines   = 3,
+                overflow   = TextOverflow.Ellipsis,
+                lineHeight = 16.sp
+            )
         }
     }
 }
