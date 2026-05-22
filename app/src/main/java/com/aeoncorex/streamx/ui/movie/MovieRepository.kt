@@ -7,6 +7,7 @@ import com.aeoncorex.streamx.streaming.CinemetaRepository
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -100,7 +101,7 @@ object MovieRepository {
             && now - cacheLoadedAt < CACHE_TTL_MS) return@withContext cachedKey
 
         val rustKey = try {
-            com.aeoncorex.streamx.StreamXCore.getTmdbKey()
+            StreamXCore.getTmdbKey()
         } catch (e: Throwable) { Log.w(TAG, "Rust vault: ${e.message}"); "" }
 
         if (rustKey.isNotEmpty() && rustKey != "api_key_not_found") {

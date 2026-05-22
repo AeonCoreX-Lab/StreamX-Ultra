@@ -359,7 +359,7 @@ fun MovieDetailsScreen(
                                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                     )
                                     Text(
-                                        actor.character, color = Color.Gray, fontSize = 9.sp,
+                                        actor.role, color = Color.Gray, fontSize = 9.sp,
                                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                     )
@@ -446,7 +446,7 @@ private fun EpisodeItem(ep: EpisodeDto, accentColor: Color, onPlay: () -> Unit) 
             Text("${ep.episodeNumber}. ${ep.name}", color = Color.White, fontSize = 13.sp,
                 fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(4.dp))
-            Text(ep.overview, color = Color.Gray, fontSize = 11.sp,
+            Text(ep.overview ?: "", color = Color.Gray, fontSize = 11.sp,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 15.sp)
         }
         Text(ep.formattedRuntime, color = Color.Gray, fontSize = 11.sp, modifier = Modifier.padding(start = 8.dp))
