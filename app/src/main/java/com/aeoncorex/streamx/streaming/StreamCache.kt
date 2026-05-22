@@ -118,15 +118,13 @@ object StreamCache {
     private val prefetchQueue = ArrayDeque<ProviderRequest>(8)
 
     fun enqueuePrefetch(req: ProviderRequest) = synchronized(lock) {
-        if (prefetchQueue.none { it.streamKey() == req.streamKey() })
+        if (prefetchQueue.none { streamKey(it) == streamKey(req) })
             prefetchQueue.addLast(req)
     }
 
     fun dequeuePrefetch(): ProviderRequest? = synchronized(lock) {
         prefetchQueue.removeFirstOrNull()
     }
-
-    private fun ProviderRequest.streamKey() = streamKey(this)
 
     // ═══════════════════════════════════════════════════════════════
     //  CACHE MANAGEMENT
