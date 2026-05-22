@@ -21,6 +21,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aeoncorex.streamx.ads.AdManager
 import com.aeoncorex.streamx.navigation.AppNavigation
+import com.aeoncorex.streamx.streaming.StreamCache
 import com.aeoncorex.streamx.ui.music.MusicManager
 import com.aeoncorex.streamx.ui.movie.TorrentEngine
 import com.aeoncorex.streamx.ui.theme.StreamXUltraTheme
@@ -38,12 +39,15 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        // ── AdMob init (App Open Ad + Interstitial pre-load) ──────
-        // Must be called before setContent so the App Open Ad
-        // is ready when onStart fires right after onCreate.
+        // ── AdMob init ────────────────────────────────────────────
         AdManager.initialize(application)
 
+        // ── StreamCache init + housekeeping ───────────────────────
+        // Must run before ANY provider fetch so SharedPreferences are ready.
+        // evictExpired() removes stale entries from previous sessions.
+        StreamCache.init(applicationContext)
         lifecycleScope.launch(Dispatchers.IO) {
+            StreamCache.evictExpired()
             try { TorrentEngine.clearCache(applicationContext) }
             catch (e: Exception) { Log.e("MainActivity", "Cache clear failed") }
         }

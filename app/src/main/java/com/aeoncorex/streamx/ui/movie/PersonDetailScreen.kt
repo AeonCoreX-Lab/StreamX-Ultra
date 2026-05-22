@@ -43,14 +43,20 @@ fun PersonDetailScreen(
     var person    by remember { mutableStateOf<PersonDetails?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var bioExpanded by remember { mutableStateOf(false) }
+    var isCinemetaFallback by remember { mutableStateOf(false) }
 
     val Purple    = Color(0xFF7C3AED)
     val DarkBg    = Color(0xFF0A0A12)
     val CardBg    = Color(0xFF111120)
 
     LaunchedEffect(personId) {
-        person    = repository.fetchPersonDetails(personId)
+        val result = repository.fetchPersonDetails(personId)
+        person = result
         isLoading = false
+        isCinemetaFallback = result != null && result.socialLinks.imdbId == null 
+                            && result.socialLinks.instagramId == null
+                            && result.socialLinks.twitterId == null
+                            && result.socialLinks.facebookId == null
     }
 
     BackHandler { navController.popBackStack() }
@@ -73,6 +79,8 @@ fun PersonDetailScreen(
                             tint = Color.Gray, modifier = Modifier.size(56.dp))
                         Spacer(Modifier.height(12.dp))
                         Text("Person not found", color = Color.Gray, fontSize = 16.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Text("TMDB and Cinemeta both unavailable", color = Color(0xFF4A4A5A), fontSize = 12.sp)
                     }
                 }
             }
@@ -84,14 +92,12 @@ fun PersonDetailScreen(
                     // ── Hero ──────────────────────────────────────────
                     item {
                         Box(Modifier.fillMaxWidth().height(380.dp)) {
-                            // Blurred backdrop (profile image scaled up)
                             AsyncImage(
                                 model              = p.profileUrl,
                                 contentDescription = null,
                                 contentScale       = ContentScale.FillWidth,
                                 modifier           = Modifier.fillMaxSize(),
                             )
-                            // Gradient overlay
                             Box(
                                 Modifier.fillMaxSize().background(
                                     Brush.verticalGradient(
@@ -104,7 +110,6 @@ fun PersonDetailScreen(
                                 )
                             )
 
-                            // Back button
                             IconButton(
                                 onClick  = { navController.popBackStack() },
                                 modifier = Modifier
@@ -115,7 +120,6 @@ fun PersonDetailScreen(
                                 Icon(Icons.Default.ArrowBack, null, tint = Color.White)
                             }
 
-                            // Profile image + name
                             Column(
                                 modifier            = Modifier.align(Alignment.BottomCenter)
                                     .padding(bottom = 24.dp),
@@ -146,39 +150,50 @@ fun PersonDetailScreen(
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
                                 )
+                                if (isCinemetaFallback) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "Data from Cinemeta",
+                                        color    = Color(0xFF00C9A7),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                }
                             }
                         }
                     }
 
-                    // ── Social links ──────────────────────────────────
-                    item {
-                        val links = listOf(
-                            p.socialLinks.instagramId?.let { Triple("https://instagram.com/$it", Icons.Rounded.CameraAlt, "Instagram") },
-                            p.socialLinks.twitterId?.let   { Triple("https://twitter.com/$it",   Icons.Rounded.AlternateEmail, "X (Twitter)") },
-                            p.socialLinks.facebookId?.let  { Triple("https://facebook.com/$it",  Icons.Rounded.Facebook,  "Facebook") },
-                            p.socialLinks.imdbId?.let      { Triple("https://imdb.com/name/$it", Icons.Rounded.Movie,      "IMDb") },
-                        ).filterNotNull()
+                    // ── Social links (TMDB only) ──────────────────────
+                    if (!isCinemetaFallback) {
+                        item {
+                            val links = listOf(
+                                p.socialLinks.instagramId?.let { Triple("https://instagram.com/$it", Icons.Rounded.CameraAlt, "Instagram") },
+                                p.socialLinks.twitterId?.let   { Triple("https://twitter.com/$it",   Icons.Rounded.AlternateEmail, "X (Twitter)") },
+                                p.socialLinks.facebookId?.let  { Triple("https://facebook.com/$it",  Icons.Rounded.Facebook,  "Facebook") },
+                                p.socialLinks.imdbId?.let      { Triple("https://imdb.com/name/$it", Icons.Rounded.Movie,      "IMDb") },
+                            ).filterNotNull()
 
-                        if (links.isNotEmpty()) {
-                            Row(
-                                Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment     = Alignment.CenterVertically,
-                            ) {
-                                links.forEach { (url, icon, label) ->
-                                    IconButton(
-                                        onClick  = {
-                                            runCatching {
-                                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                            }
-                                        },
-                                        modifier = Modifier
-                                            .size(44.dp)
-                                            .background(Color.White.copy(0.08f), CircleShape),
-                                    ) {
-                                        Icon(icon, label, tint = Color.White, modifier = Modifier.size(20.dp))
+                            if (links.isNotEmpty()) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment     = Alignment.CenterVertically,
+                                ) {
+                                    links.forEach { (url, icon, label) ->
+                                        IconButton(
+                                            onClick  = {
+                                                runCatching {
+                                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                                }
+                                            },
+                                            modifier = Modifier
+                                                .size(44.dp)
+                                                .background(Color.White.copy(0.08f), CircleShape),
+                                        ) {
+                                            Icon(icon, label, tint = Color.White, modifier = Modifier.size(20.dp))
+                                        }
+                                        Spacer(Modifier.width(8.dp))
                                     }
-                                    Spacer(Modifier.width(8.dp))
                                 }
                             }
                         }
@@ -204,20 +219,30 @@ fun PersonDetailScreen(
                                 "Place of Birth" to p.placeOfBirth,
                             ).filter { it.second != null }
 
-                            infoItems.forEach { (label, value) ->
-                                Row(
-                                    Modifier.fillMaxWidth().padding(vertical = 5.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                ) {
-                                    Text(label,
-                                        color = Color.Gray, fontSize = 13.sp,
-                                        modifier = Modifier.weight(0.45f))
-                                    Text(value ?: "",
-                                        color = Color.White, fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        modifier = Modifier.weight(0.55f))
+                            if (infoItems.isEmpty()) {
+                                Text(
+                                    "Detailed personal information unavailable",
+                                    color = Color(0xFF4A4A5A),
+                                    fontSize = 13.sp,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                                )
+                            } else {
+                                infoItems.forEach { (label, value) ->
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(vertical = 5.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                    ) {
+                                        Text(label,
+                                            color = Color.Gray, fontSize = 13.sp,
+                                            modifier = Modifier.weight(0.45f))
+                                        Text(value ?: "",
+                                            color = Color.White, fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.weight(0.55f))
+                                    }
+                                    HorizontalDivider(color = Color.White.copy(0.05f), thickness = 0.5.dp)
                                 }
-                                HorizontalDivider(color = Color.White.copy(0.05f), thickness = 0.5.dp)
                             }
                         }
                     }
@@ -256,6 +281,26 @@ fun PersonDetailScreen(
                                 )
                             }
                         }
+                    } else if (isCinemetaFallback) {
+                        item {
+                            Column(
+                                Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(CardBg)
+                                    .padding(16.dp)
+                            ) {
+                                Text("Biography", color = Color.White,
+                                    fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "Biography not available from alternative data source.",
+                                    color = Color(0xFF4A4A5A),
+                                    fontSize = 13.sp,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                                )
+                            }
+                        }
                     }
 
                     // ── Known For ─────────────────────────────────────
@@ -282,6 +327,26 @@ fun PersonDetailScreen(
                                 }
                             }
                         }
+                    } else if (isCinemetaFallback) {
+                        item {
+                            Column(
+                                Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(CardBg)
+                                    .padding(16.dp)
+                            ) {
+                                Text("Known For", color = Color.White,
+                                    fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "Filmography not available from alternative data source.",
+                                    color = Color(0xFF4A4A5A),
+                                    fontSize = 13.sp,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                                )
+                            }
+                        }
                     }
 
                     item { Spacer(Modifier.height(60.dp)) }
@@ -291,7 +356,6 @@ fun PersonDetailScreen(
     }
 }
 
-// ── Known For Card ────────────────────────────────────────────────
 @Composable
 private fun KnownForCard(movie: Movie, onClick: () -> Unit) {
     Column(
@@ -308,7 +372,6 @@ private fun KnownForCard(movie: Movie, onClick: () -> Unit) {
                 contentScale       = ContentScale.Crop,
                 modifier           = Modifier.fillMaxSize(),
             )
-            // Rating badge
             if (movie.rating != "0.0" && movie.rating.isNotBlank()) {
                 Box(
                     Modifier.align(Alignment.TopEnd)
@@ -336,7 +399,6 @@ private fun KnownForCard(movie: Movie, onClick: () -> Unit) {
     }
 }
 
-// ── Date formatter ────────────────────────────────────────────────
 private fun formatDate(raw: String): String {
     return try {
         val parts = raw.split("-")

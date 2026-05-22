@@ -5,7 +5,9 @@ import com.aeoncorex.streamx.streaming.HttpClient
 import com.aeoncorex.streamx.streaming.ModflixConfig
 import com.aeoncorex.streamx.streaming.ProviderRequest
 import com.aeoncorex.streamx.streaming.StreamResult
+import com.aeoncorex.streamx.streaming.StreamType
 import com.aeoncorex.streamx.streaming.extractors.GdflixExtractor
+import com.aeoncorex.streamx.streaming.extractors.HubCloudExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
@@ -119,7 +121,7 @@ object FilmyflyProvider {
     }
 
     private fun cleanTitle(title: String) = title
-        .replace(Regex("""[:"'!?.,]"""), " ")
+        .replace(Regex("""[:\"'!?.,]"""), " ")
         .replace(Regex("""\s+"""), " ")
         .trim()
 }

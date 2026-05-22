@@ -35,12 +35,16 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 
 // ── Design tokens ──────────────────────────────────────────────────
-private val Cyan       = Color(0xFF00E5FF)
-private val Purple     = Color(0xFF7C4DFF)
-private val PurpleGlow = Color(0xFFB388FF)
-private val SheetBg    = Color(0xFF08080F)
-private val DarkBg     = Color(0xFF020810)
-private val GlassWhite = Color(0x10FFFFFF)
+private val Cyan          = Color(0xFF00E5FF)
+private val Purple        = Color(0xFF7C4DFF)
+private val PurpleGlow    = Color(0xFFB388FF)
+private val SheetBg       = Color(0xFF08080F)
+private val DarkBg        = Color(0xFF020810)
+// FIX: renamed from GlassWhite → SheetGlass to avoid conflict with the
+// package-level 'val GlassWhite' already defined in MovieScreen.kt
+// (same package com.aeoncorex.streamx.ui.movie). Two top-level vals with
+// the same name in the same package cause "Conflicting declarations".
+private val SheetGlass    = Color(0x10FFFFFF)
 
 /**
  * YoutubePlayerSheet
@@ -113,11 +117,13 @@ fun YoutubePlayerSheet(
 
     // ── Bottom Sheet ──────────────────────────────────────────────
     ModalBottomSheet(
-        onDismissRequest   = onDismiss,
-        sheetState         = sheetState,
-        containerColor     = SheetBg,
-        dragHandle         = null,                 // custom drag area below
-        windowInsets       = WindowInsets(0)
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = SheetBg,
+        dragHandle       = null,        // custom drag area below
+        // FIX: removed 'windowInsets = WindowInsets(0)' — this parameter
+        // does not exist in the Material3 ModalBottomSheet version used here.
+        // Use windowInsetsBottomHeight() on a Spacer below instead (already done).
     ) {
         Box(Modifier.fillMaxWidth()) {
 
@@ -199,12 +205,12 @@ fun YoutubePlayerSheet(
                             overflow   = TextOverflow.Ellipsis
                         )
                     }
-                    // Close button
+                    // Close button — FIX: use renamed SheetGlass instead of GlassWhite
                     Box(
                         Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(GlassWhite)
+                            .background(SheetGlass)
                             .border(1.dp, Color.White.copy(0.12f), CircleShape)
                             .clickable { onDismiss() },
                         contentAlignment = Alignment.Center
@@ -247,10 +253,10 @@ fun YoutubePlayerSheet(
                                 )
                                 settings.apply {
                                     @Suppress("DEPRECATION")
-                                    javaScriptEnabled              = true
-                                    domStorageEnabled              = true
-                                    loadWithOverviewMode           = true
-                                    useWideViewPort                = true
+                                    javaScriptEnabled                = true
+                                    domStorageEnabled                = true
+                                    loadWithOverviewMode             = true
+                                    useWideViewPort                  = true
                                     mediaPlaybackRequiresUserGesture = false // autoplay
                                     setSupportMultipleWindows(true)
                                     // Chrome user agent so YouTube serves proper embed
@@ -288,7 +294,8 @@ fun YoutubePlayerSheet(
                     )
 
                     // Loading overlay (dual spinning rings)
-                    AnimatedVisibility(
+                    // FIX: AnimatedVisibility here is inside a Box scope — OK, no ColumnScope conflict
+                    androidx.compose.animation.AnimatedVisibility(
                         visible  = isLoading,
                         enter    = fadeIn(),
                         exit     = fadeOut(tween(600)),
@@ -360,51 +367,58 @@ fun YoutubePlayerSheet(
     //  FULLSCREEN OVERLAY
     //  Shown when user taps YouTube's fullscreen button
     // ════════════════════════════════════════════════════════════════
-    AnimatedVisibility(
-        visible = isFullscreen,
-        enter   = fadeIn(tween(200)),
-        exit    = fadeOut(tween(200))
-    ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Color.Black)
+    // FIX: wrapped in Box so the composable is inside a BoxScope, not
+    // the implicit ColumnScope that caused "cannot be called in this context
+    // with an implicit receiver". Using fully-qualified name also resolves
+    // the overload ambiguity between ColumnScope.AnimatedVisibility and
+    // the standalone variant imported via 'import androidx.compose.animation.*'.
+    Box(modifier = Modifier.fillMaxSize()) {
+        androidx.compose.animation.AnimatedVisibility(
+            visible = isFullscreen,
+            enter   = fadeIn(tween(200)),
+            exit    = fadeOut(tween(200))
         ) {
-            fullscreenView?.let { view ->
-                AndroidView(
-                    factory  = { view },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            // Subtle exit hint
             Box(
                 Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 40.dp, end = 16.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.Black.copy(0.55f))
-                    .border(1.dp, Color.White.copy(0.1f), RoundedCornerShape(8.dp))
-                    .clickable {
-                        fullscreenCallback?.onCustomViewHidden()
-                        fullscreenView     = null
-                        fullscreenCallback = null
-                    }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                contentAlignment = Alignment.Center
+                    .fillMaxSize()
+                    .background(Color.Black)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Rounded.FullscreenExit, null,
-                        tint     = Color.White.copy(0.75f),
-                        modifier = Modifier.size(16.dp)
+                fullscreenView?.let { view ->
+                    AndroidView(
+                        factory  = { view },
+                        modifier = Modifier.fillMaxSize()
                     )
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        "Exit Fullscreen",
-                        color    = Color.White.copy(0.75f),
-                        fontSize = 12.sp
-                    )
+                }
+
+                // Subtle exit hint
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 40.dp, end = 16.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.Black.copy(0.55f))
+                        .border(1.dp, Color.White.copy(0.1f), RoundedCornerShape(8.dp))
+                        .clickable {
+                            fullscreenCallback?.onCustomViewHidden()
+                            fullscreenView     = null
+                            fullscreenCallback = null
+                        }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Rounded.FullscreenExit, null,
+                            tint     = Color.White.copy(0.75f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            "Exit Fullscreen",
+                            color    = Color.White.copy(0.75f),
+                            fontSize = 12.sp
+                        )
+                    }
                 }
             }
         }

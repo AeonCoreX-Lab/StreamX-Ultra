@@ -46,7 +46,7 @@ object VegaMoviesProvider {
             val base = ModflixConfig.get("Vega")
 
             // Vega has a Typesense search API endpoint
-            val query    = cleanTitle(req.title)
+            val query     = cleanTitle(req.title)
             val searchUrl = "$base/search.php?q=${query.replace(" ", "+")}&page=1"
             Log.d(TAG, "Vega search: $searchUrl")
 
@@ -59,6 +59,7 @@ object VegaMoviesProvider {
             } ?: return@withContext emptyList()
 
             Log.d(TAG, "Vega post: $postUrl")
+            // FIX: store raw HTML so extractMovie() can use it for regex scanning
             val postHtml = HttpClient.getHtml(postUrl, HEADERS) ?: return@withContext emptyList()
             val postDoc  = Jsoup.parse(postHtml, postUrl)
 
@@ -67,7 +68,8 @@ object VegaMoviesProvider {
             if (req.isSeries) {
                 results += extractSeries(postDoc, req)
             } else {
-                results += extractMovie(postDoc, postUrl)
+                // FIX: pass postHtml to extractMovie so it can do regex scan
+                results += extractMovie(postDoc, postUrl, postHtml)
             }
 
             Log.d(TAG, "Vega: ${results.size} streams")
@@ -88,7 +90,7 @@ object VegaMoviesProvider {
             val hits   = JSONObject(json).optJSONArray("hits") ?: return null
             val titleL = req.title.lowercase()
             for (i in 0 until hits.length()) {
-                val doc  = hits.getJSONObject(i).optJSONObject("document") ?: continue
+                val doc   = hits.getJSONObject(i).optJSONObject("document") ?: continue
                 val title = doc.optString("post_title", "").lowercase()
                 if (title.contains(titleL.take(6))) {
                     return doc.optString("permalink").takeIf { it.startsWith("http") }
@@ -106,7 +108,7 @@ object VegaMoviesProvider {
         // vega: .blog-items,.post-list,#archive-container,.movies-grid > children > find a
         val items  = doc.select(".blog-items article a, .post-list article a, #archive-container a, .movies-grid article a, .entry-list-item a")
         for (el in items) {
-            val text = (el.attr("title") + " " + el.text()).lowercase()
+            val text      = (el.attr("title") + " " + el.text()).lowercase()
             val textClean = text.replace("download", "").trim()
             if (textClean.contains(titleL.take(4)))
                 return el.attr("href").takeIf { it.startsWith("http") }
@@ -114,13 +116,20 @@ object VegaMoviesProvider {
         return items.firstOrNull()?.attr("href")?.takeIf { it.startsWith("http") }
     }
 
-    private fun extractMovie(doc: org.jsoup.nodes.Document, postUrl: String): List<StreamResult> {
+    // FIX: added 'html: String' parameter — extractMovie now receives raw HTML
+    // so it can do regex scanning for cloud links (previously used outer-scope
+    // 'postHtml' which is not accessible from this private function).
+    private fun extractMovie(
+        doc    : org.jsoup.nodes.Document,
+        postUrl: String,
+        html   : String
+    ): List<StreamResult> {
         val results = mutableListOf<StreamResult>()
 
-        // TS: match(/<a\s+href="([^"]*cloud\.[^"]*)"/i)
+        // TS: match(/<a\s+href="([^"]*cloud\.[^"]*)"/)
         // Catches vcloud., hubcloud., hubdrive., any URL with cloud. in it
-        val cloudPattern = Regex("""<a\s+href="([^"]*cloud\.[^"]*)"\s""", RegexOption.IGNORE_CASE)
-        val cloudLinks = cloudPattern.findAll(postHtml)
+        val cloudPattern = Regex("""<a\s+href="([^"]*cloud\.[^"]*)"""", RegexOption.IGNORE_CASE)
+        val cloudLinks = cloudPattern.findAll(html)          // FIX: was postHtml (unresolved)
             .map { it.groupValues[1] }
             .filter { it.startsWith("http") }
             .distinct().take(3).toList()
@@ -147,7 +156,7 @@ object VegaMoviesProvider {
     }
 
     private fun extractSeries(doc: org.jsoup.nodes.Document, req: ProviderRequest): List<StreamResult> {
-        val epText  = "episode ${req.episode}"
+        val epText   = "episode ${req.episode}"
         val allLinks = doc.select("a[href*=hubcloud], a[href*=hubdrive], a[href*=/drive/]")
 
         // Try episode-specific links near matching heading
