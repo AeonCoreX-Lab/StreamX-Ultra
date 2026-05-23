@@ -2,7 +2,7 @@ import javax.inject.Inject
 import org.gradle.process.ExecOperations
 
 // ═══════════════════════════════════════════════════════════════════
-//  Gradle 9.4.1 Breaking Changes Fixed + Protobuf Conflict Resolved
+//  Gradle 9.5.0 Compatible + Protobuf/Firestore Crash Fixed
 // ═══════════════════════════════════════════════════════════════════
 val NDK_VERSION = "29.0.14206865"
 
@@ -13,16 +13,16 @@ plugins {
 }
 
 android {
-    namespace = "com.aeoncorex.streamx"  // ✅ Fixed: trailing space removed
+    namespace = "com.aeoncorex.streamx"
     compileSdk = 36
     ndkVersion = NDK_VERSION
     
     defaultConfig {
-        applicationId = "com.aeoncorex.streamx"  // ✅ Fixed: trailing space removed
+        applicationId = "com.aeoncorex.streamx"
         minSdk = 28
         targetSdk = 35
         versionCode = 6
-        versionName = "1.2.1"  // ✅ Fixed: trailing space removed
+        versionName = "2.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
 
@@ -44,11 +44,14 @@ android {
                 
                 val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
                 val envNdk = System.getenv("ANDROID_NDK_HOME")
+                
+                // ✅ FIXED: Proper if-else structure with correct string interpolation
                 val ndkPath = if (!envNdk.isNullOrBlank()) {
-                    envNdk 
-                } else {
-                    val androidHome = System.getenv("ANDROID_HOME") ?: ""                    "$androidHome/ndk/$NDK_VERSION"
+                    envNdk                } else {
+                    val androidHome = System.getenv("ANDROID_HOME") ?: ""
+                    "$androidHome/ndk/$NDK_VERSION"
                 }
+                
                 val rustBuildDir = layout.buildDirectory.dir("rust/targets").get().asFile.absolutePath
                 
                 arguments += listOf(
@@ -94,13 +97,14 @@ android {
             )
         }
     }
-
     signingConfigs {
-        create("release") {            val sf = System.getenv("RELEASE_KEYSTORE_FILE") ?: project.findProperty("RELEASE_KEYSTORE_FILE") as? String
+        create("release") {
+            val sf = System.getenv("RELEASE_KEYSTORE_FILE") ?: project.findProperty("RELEASE_KEYSTORE_FILE") as? String
             val sp = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: project.findProperty("RELEASE_KEYSTORE_PASSWORD") as? String
             val ka = System.getenv("RELEASE_KEY_ALIAS") ?: project.findProperty("RELEASE_KEY_ALIAS") as? String
             val kp = System.getenv("RELEASE_KEY_PASSWORD") ?: project.findProperty("RELEASE_KEY_PASSWORD") as? String
-            if (sf != null && sp != null && ka != null && kp != null) {  // ✅ Fixed: && syntax
+            // ✅ FIXED: Changed "& &" to "&&"
+            if (sf != null && sp != null && ka != null && kp != null) {
                 storeFile = file(sf); storePassword = sp; keyAlias = ka; keyPassword = kp
             }
         }
@@ -141,11 +145,11 @@ abstract class CargoBuildTask @Inject constructor(private val execOps: ExecOpera
     @get:Input abstract val tmdbApiKey: Property<String>
     @get:Input abstract val rustRootPath: Property<String>
     @get:OutputDirectory abstract val outputDir: DirectoryProperty
-    
-    @TaskAction 
+        @TaskAction 
     fun build() {
         val rustRoot = File(rustRootPath.get())
-        val targets = listOf(            "arm64-v8a" to "aarch64-linux-android",
+        val targets = listOf(
+            "arm64-v8a" to "aarch64-linux-android",
             "armeabi-v7a" to "armv7-linux-androideabi",
             "x86_64" to "x86_64-linux-android",
             "x86" to "i686-linux-android"
@@ -182,49 +186,31 @@ tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configu
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  🔥 PROTOBUF CONFLICT FIX - Firestore Crash Solution 🔥
+//  🔥 PROTOBUF/FIRESTORE FIX 🔥
+//  protolite-well-known-types AAR already contains protobuf classes.
+//  DO NOT exclude protobuf-javalite globally - Firestore needs it!
+//  Instead: Force consistent version via resolutionStrategy
 // ═══════════════════════════════════════════════════════════════════
-// Problem: firebase-firestore needs protobuf-javalite via protolite-well-known-types
-// But other deps (NewPipeExtractor, ktor, etc.) may bring conflicting protobuf versions
-//
-// Solution:
-// 1. DO NOT globally exclude protobuf-javalite (Firestore needs it!)
-// 2. Use resolutionStrategy to FORCE consistent protobuf version
-// 3. Exclude protobuf ONLY from specific problematic dependencies
-// ═══════════════════════════════════════════════════════════════════
-
 configurations.all {
-    resolutionStrategy {        // Force consistent protobuf version across all dependencies
+    resolutionStrategy {
         force("com.google.protobuf:protobuf-javalite:3.25.5")
-        
-        // Also force protobuf-kotlin if used
-        force("com.google.protobuf:protobuf-kotlin:3.25.5")
-    }
-    
-    // Exclude protobuf from dependencies that don't need it (prevent duplicates)
+        force("com.google.protobuf:protobuf-kotlin:3.25.5")    }
+    // Only exclude protobuf-lite (older conflicting artifact)
     exclude(group = "com.google.protobuf", module = "protobuf-lite")
-    
-    // Exclude protobuf from NewPipeExtractor specifically (it brings old version)
-    if (name.contains("NewPipeExtractor", ignoreCase = true) || 
-        name.contains("nanojson", ignoreCase = true)) {
-        exclude(group = "com.google.protobuf", module = "protobuf-javalite")
-    }
 }
 
 dependencies {
     implementation(project(":premium-core"))
     
-    // Version Variables
     val media3Version = "1.10.1"
     val lifecycleVersion = "2.8.0"
-    val protobufVersion = "3.25.5"  // ✅ Explicit protobuf version
+    val protobufVersion = "3.25.5"
     
     // Core & Compose
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:$lifecycleVersion")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation(platform("androidx.compose:compose-bom:2026.03.01"))
-
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.material3:material3")
@@ -239,27 +225,25 @@ dependencies {
     implementation("org.jsoup:jsoup:1.22.2")
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
 
-    // ✅ NewPipeExtractor with protobuf excluded (prevents conflict)
+    // NewPipeExtractor - exclude nanojson only (keep protobuf for Firestore)
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.1") {
         exclude(group = "com.github.TeamNewPipe", module = "nanojson")
-        exclude(group = "com.google.protobuf", module = "protobuf-javalite")
-        exclude(group = "com.google.protobuf", module = "protobuf-lite")    }
+    }
     implementation("com.grack:nanojson:1.10")
 
-    // Firebase (Auth + Firestore + FCM)
+    // Firebase
     implementation(platform("com.google.firebase:firebase-bom:34.11.0"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-messaging")
-    implementation("com.google.firebase:firebase-firestore")  // ✅ Needs protolite-well-known-types
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:protolite-well-known-types:18.0.1")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0")
     
-    // ✅ Explicitly add protobuf-javalite for Firestore (if not pulled transitively)
+    // ✅ Explicit protobuf for Firestore runtime
     implementation("com.google.protobuf:protobuf-javalite:$protobufVersion")
-    implementation("com.google.firebase:protolite-well-known-types:18.0.1")
 
-    // Media3 ExoPlayer
-    implementation("androidx.media3:media3-exoplayer:$media3Version")
+    // Media3 ExoPlayer    implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-common:$media3Version")
     implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
     implementation("androidx.media3:media3-exoplayer-dash:$media3Version")
@@ -277,8 +261,5 @@ dependencies {
     implementation("com.startapp:inapp-sdk:5.3.0")
 
     // Torrent Streaming - Ktor CIO
-    implementation("io.ktor:ktor-server-cio:3.4.3") {
-        // Exclude any transitive protobuf from ktor if present
-        exclude(group = "com.google.protobuf", module = "protobuf-javalite")
-    }
+    implementation("io.ktor:ktor-server-cio:3.4.3")
 }
