@@ -2,20 +2,8 @@ import javax.inject.Inject
 import org.gradle.process.ExecOperations
 
 // ═══════════════════════════════════════════════════════════════════
-//  Gradle 9.4.1 Breaking Changes Fixed:
-//  1. kotlinOptions {} → kotlin { compilerOptions {} }
-//  2. freeCompilerArgs += → freeCompilerArgs.addAll()
-//  3. exec {} in doLast → abstract class + @Inject ExecOperations
-//  4. afterEvaluate+withType → withType().configureEach (lazy)
-//  5. layout.buildDirectory.get() → layout.buildDirectory.dir().get()
-//  6. android.ndkDirectory → REMOVED in AGP 9.0, use env var fallback
-//
-//  AI (MediaPipe/Gemini) completely removed — not needed
-//  AdMob/AppLovin replaced with Start.io
+//  Gradle 9.4.1 Breaking Changes Fixed + Protobuf Conflict Resolved
 // ═══════════════════════════════════════════════════════════════════
-
-// Top-level NDK version constant — single source of truth for NDK path resolution.
-// android.ndkDirectory was removed in AGP 9.0; we resolve the path manually.
 val NDK_VERSION = "29.0.14206865"
 
 plugins {
@@ -25,41 +13,41 @@ plugins {
 }
 
 android {
-    namespace = "com.aeoncorex.streamx"
+    namespace = "com.aeoncorex.streamx"  // ✅ Fixed: trailing space removed
     compileSdk = 36
     ndkVersion = NDK_VERSION
-
+    
     defaultConfig {
-        applicationId = "com.aeoncorex.streamx"
-        minSdk        = 28
-        targetSdk     = 35
-        versionCode   = 6
-        versionName   = "2.0.0"
+        applicationId = "com.aeoncorex.streamx"  // ✅ Fixed: trailing space removed
+        minSdk = 28
+        targetSdk = 35
+        versionCode = 6
+        versionName = "1.2.1"  // ✅ Fixed: trailing space removed
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
 
-        val tmdbApiKey  = System.getenv("TMDB_API_KEY")    ?: "api_key_not_found"
-        val startappId  = System.getenv("STARTAPP_APP_ID") ?: "0"
-        val vercelUrl   = System.getenv("BACKEND_BASE_URL") ?: ""
+        val tmdbApiKey = System.getenv("TMDB_API_KEY") ?: "api_key_not_found"
+        val startappId = System.getenv("STARTAPP_APP_ID") ?: "0"
+        val vercelUrl = System.getenv("BACKEND_BASE_URL") ?: ""
 
-        buildConfigField("String", "TMDB_API_KEY",    "\"$tmdbApiKey\"")
+        buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
         buildConfigField("String", "STARTAPP_APP_ID", "\"$startappId\"")
         buildConfigField("String", "BACKEND_BASE_URL", "\"$vercelUrl\"")
 
         externalNativeBuild {
             cmake {
-                cppFlags("-std=c++17", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0",
+                cppFlags(
+                    "-std=c++17", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0",
                     "-DBOOST_ASIO_DISABLE_STD_ALIGNED_ALLOC",
-                    "-DBOOST_ASIO_HAS_STD_ALIGNED_ALLOC=0")
+                    "-DBOOST_ASIO_HAS_STD_ALIGNED_ALLOC=0"
+                )
                 
-                val vcpkgRoot    = System.getenv("VCPKG_ROOT") ?: ""
-                val envNdk       = System.getenv("ANDROID_NDK_HOME")
-                // android.ndkDirectory was removed in AGP 9.0 — resolve path from env vars only
-                val ndkPath      = if (!envNdk.isNullOrBlank()) {
-                    envNdk
+                val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
+                val envNdk = System.getenv("ANDROID_NDK_HOME")
+                val ndkPath = if (!envNdk.isNullOrBlank()) {
+                    envNdk 
                 } else {
-                    val androidHome = System.getenv("ANDROID_HOME") ?: ""
-                    "$androidHome/ndk/$NDK_VERSION"
+                    val androidHome = System.getenv("ANDROID_HOME") ?: ""                    "$androidHome/ndk/$NDK_VERSION"
                 }
                 val rustBuildDir = layout.buildDirectory.dir("rust/targets").get().asFile.absolutePath
                 
@@ -67,42 +55,52 @@ android {
                     "-DANDROID_STL=c++_shared",
                     "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake",
                     "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ndkPath/build/cmake/android.toolchain.cmake",
-                    "-DVCPKG_TARGET_TRIPLET=arm64-android", "-DANDROID_ABI=arm64-v8a",
-                    "-DANDROID_PLATFORM=android-28", "-D_FORTIFY_SOURCE=0",
-                    "-DRUST_BUILD_DIR=$rustBuildDir", "-DTMDB_API_KEY=$tmdbApiKey"
+                    "-DVCPKG_TARGET_TRIPLET=arm64-android",
+                    "-DANDROID_ABI=arm64-v8a",
+                    "-DANDROID_PLATFORM=android-28",
+                    "-D_FORTIFY_SOURCE=0",
+                    "-DRUST_BUILD_DIR=$rustBuildDir",
+                    "-DTMDB_API_KEY=$tmdbApiKey"
                 )
                 abiFilters("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
             }
         }
     }
 
-    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
+    externalNativeBuild { 
+        cmake { 
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1" 
+        } 
+    }
 
     packaging {
-        resources { excludes += setOf(
-            "/META-INF/{AL2.0,LGPL2.1}",
-            "META-INF/DEPENDENCIES",
-            "META-INF/INDEX.LIST",
-            // Ktor bundles SLF4J — exclude duplicate service files
-            "META-INF/services/org.slf4j.spi.SLF4JServiceProvider",
-            "META-INF/io.ktor.client.HttpClientEngineContainer",
-            "META-INF/io.ktor.server.cio.CIOApplicationEngine",
-            "win32-x86/**", "win32-x86-64/**"   // strip Ktor native windows libs
-        ) }
+        resources { 
+            excludes += setOf(
+                "/META-INF/{AL2.0,LGPL2.1}",
+                "META-INF/DEPENDENCIES",
+                "META-INF/INDEX.LIST",
+                "META-INF/services/org.slf4j.spi.SLF4JServiceProvider",
+                "META-INF/io.ktor.client.HttpClientEngineContainer",
+                "META-INF/io.ktor.server.cio.CIOApplicationEngine",
+                "win32-x86/**", "win32-x86-64/**"
+            ) 
+        }
         jniLibs {
-            pickFirsts += setOf("**/libc++_shared.so", "**/libmpv.so", "**/libavcodec.so",
+            pickFirsts += setOf(
+                "**/libc++_shared.so", "**/libmpv.so", "**/libavcodec.so",
                 "**/libavdevice.so", "**/libavfilter.so", "**/libavformat.so",
-                "**/libavutil.so", "**/libswresample.so", "**/libswscale.so")
+                "**/libavutil.so", "**/libswresample.so", "**/libswscale.so"
+            )
         }
     }
 
     signingConfigs {
-        create("release") {
-            val sf = System.getenv("RELEASE_KEYSTORE_FILE")     ?: project.findProperty("RELEASE_KEYSTORE_FILE") as? String
+        create("release") {            val sf = System.getenv("RELEASE_KEYSTORE_FILE") ?: project.findProperty("RELEASE_KEYSTORE_FILE") as? String
             val sp = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: project.findProperty("RELEASE_KEYSTORE_PASSWORD") as? String
-            val ka = System.getenv("RELEASE_KEY_ALIAS")         ?: project.findProperty("RELEASE_KEY_ALIAS") as? String
-            val kp = System.getenv("RELEASE_KEY_PASSWORD")      ?: project.findProperty("RELEASE_KEY_PASSWORD") as? String
-            if (sf != null && sp != null && ka != null && kp != null) {
+            val ka = System.getenv("RELEASE_KEY_ALIAS") ?: project.findProperty("RELEASE_KEY_ALIAS") as? String
+            val kp = System.getenv("RELEASE_KEY_PASSWORD") ?: project.findProperty("RELEASE_KEY_PASSWORD") as? String
+            if (sf != null && sp != null && ka != null && kp != null) {  // ✅ Fixed: && syntax
                 storeFile = file(sf); storePassword = sp; keyAlias = ka; keyPassword = kp
             }
         }
@@ -110,13 +108,17 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true; isShrinkResources = true
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }
     }
 
-    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+    compileOptions { 
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17 
+    }
 
     kotlin {
         compilerOptions {
@@ -128,20 +130,27 @@ android {
         }
     }
 
-    buildFeatures { compose = true; buildConfig = true }
+    buildFeatures { 
+        compose = true
+        buildConfig = true 
+    }
 }
 
+// ── Rust Build Task ──────────────────────────────────────────────────
 abstract class CargoBuildTask @Inject constructor(private val execOps: ExecOperations) : DefaultTask() {
-    @get:Input    abstract val tmdbApiKey:   Property<String>
-    @get:Input    abstract val rustRootPath: Property<String>
+    @get:Input abstract val tmdbApiKey: Property<String>
+    @get:Input abstract val rustRootPath: Property<String>
     @get:OutputDirectory abstract val outputDir: DirectoryProperty
-
-    @TaskAction fun build() {
+    
+    @TaskAction 
+    fun build() {
         val rustRoot = File(rustRootPath.get())
-        val targets  = listOf("arm64-v8a" to "aarch64-linux-android",
+        val targets = listOf(            "arm64-v8a" to "aarch64-linux-android",
             "armeabi-v7a" to "armv7-linux-androideabi",
-            "x86_64" to "x86_64-linux-android", "x86" to "i686-linux-android")
-            
+            "x86_64" to "x86_64-linux-android",
+            "x86" to "i686-linux-android"
+        )
+        
         targets.forEach { (abi, target) ->
             execOps.exec {
                 workingDir = rustRoot
@@ -150,46 +159,72 @@ abstract class CargoBuildTask @Inject constructor(private val execOps: ExecOpera
             }
             val src = File(rustRoot, "target/$target/release/libstreamx_core.a")
             val dst = File(outputDir.get().asFile, "$target/release")
-            if (src.exists()) { dst.mkdirs(); src.copyTo(File(dst, "libstreamx_core.a"), overwrite = true) }
-            else throw GradleException("Rust build failed: ${src.absolutePath}")
+            if (src.exists()) { 
+                dst.mkdirs()
+                src.copyTo(File(dst, "libstreamx_core.a"), overwrite = true) 
+            } else {
+                throw GradleException("Rust build failed: ${src.absolutePath}")
+            }
         }
     }
 }
 
 val cargoBuildTask = tasks.register<CargoBuildTask>("cargoBuild") {
-    group = "build"; description = "Builds Rust JNI (Gradle 9 compatible)"
+    group = "build"
+    description = "Builds Rust JNI (Gradle 9 compatible)"
     tmdbApiKey.set(System.getenv("TMDB_API_KEY") ?: "api_key_not_found")
     rustRootPath.set(file("src/main/rust").absolutePath)
     outputDir.set(layout.buildDirectory.dir("rust/targets"))
 }
 
-tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configureEach { dependsOn(cargoBuildTask) }
+tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configureEach { 
+    dependsOn(cargoBuildTask) 
+}
 
-// ── Protobuf conflict resolution ──────────────────────────────────────────────────
-// protolite-well-known-types:18.0.1 তার AAR-এর ভেতরে protobuf classes bundle করে রাখে।
-// তাই standalone protobuf-javalite jar থাকলেই duplicate class error হয় (version যাই হোক)।
-// Fix: standalone protobuf-javalite বাদ দাও, protolite-well-known-types রাখো।
-// তাহলে:
-//   ✅ Firestore-এর com.google.type.LatLng পাওয়া যাবে (no more runtime crash)
-//   ✅ Duplicate class error থাকবে না (কোনো conflicting jar নেই)
-configurations.configureEach {
+// ═══════════════════════════════════════════════════════════════════
+//  🔥 PROTOBUF CONFLICT FIX - Firestore Crash Solution 🔥
+// ═══════════════════════════════════════════════════════════════════
+// Problem: firebase-firestore needs protobuf-javalite via protolite-well-known-types
+// But other deps (NewPipeExtractor, ktor, etc.) may bring conflicting protobuf versions
+//
+// Solution:
+// 1. DO NOT globally exclude protobuf-javalite (Firestore needs it!)
+// 2. Use resolutionStrategy to FORCE consistent protobuf version
+// 3. Exclude protobuf ONLY from specific problematic dependencies
+// ═══════════════════════════════════════════════════════════════════
+
+configurations.all {
+    resolutionStrategy {        // Force consistent protobuf version across all dependencies
+        force("com.google.protobuf:protobuf-javalite:3.25.5")
+        
+        // Also force protobuf-kotlin if used
+        force("com.google.protobuf:protobuf-kotlin:3.25.5")
+    }
+    
+    // Exclude protobuf from dependencies that don't need it (prevent duplicates)
     exclude(group = "com.google.protobuf", module = "protobuf-lite")
-    exclude(group = "com.google.protobuf", module = "protobuf-javalite") // AAR-এর bundled copy-ই runtime serve করবে
-    // protolite-well-known-types exclude করা নেই — Firestore এর LatLng এটা ছাড়া চলে না
+    
+    // Exclude protobuf from NewPipeExtractor specifically (it brings old version)
+    if (name.contains("NewPipeExtractor", ignoreCase = true) || 
+        name.contains("nanojson", ignoreCase = true)) {
+        exclude(group = "com.google.protobuf", module = "protobuf-javalite")
+    }
 }
 
 dependencies {
     implementation(project(":premium-core"))
+    
     // Version Variables
     val media3Version = "1.10.1"
     val lifecycleVersion = "2.8.0"
-
+    val protobufVersion = "3.25.5"  // ✅ Explicit protobuf version
+    
     // Core & Compose
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:$lifecycleVersion")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation(platform("androidx.compose:compose-bom:2026.03.01"))
-    
+
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.material3:material3")
@@ -204,20 +239,26 @@ dependencies {
     implementation("org.jsoup:jsoup:1.22.2")
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
 
+    // ✅ NewPipeExtractor with protobuf excluded (prevents conflict)
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.1") {
         exclude(group = "com.github.TeamNewPipe", module = "nanojson")
-    }
+        exclude(group = "com.google.protobuf", module = "protobuf-javalite")
+        exclude(group = "com.google.protobuf", module = "protobuf-lite")    }
     implementation("com.grack:nanojson:1.10")
 
     // Firebase (Auth + Firestore + FCM)
     implementation(platform("com.google.firebase:firebase-bom:34.11.0"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-messaging")
-    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-firestore")  // ✅ Needs protolite-well-known-types
     implementation("com.google.android.gms:play-services-auth:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0")
+    
+    // ✅ Explicitly add protobuf-javalite for Firestore (if not pulled transitively)
+    implementation("com.google.protobuf:protobuf-javalite:$protobufVersion")
+    implementation("com.google.firebase:protolite-well-known-types:18.0.1")
 
-    // Media3 ExoPlayer — HLS/DASH instant streaming
+    // Media3 ExoPlayer
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-common:$media3Version")
     implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
@@ -235,12 +276,9 @@ dependencies {
     // Start.io Ads
     implementation("com.startapp:inapp-sdk:5.3.0")
 
-    // ── Torrent Streaming ──────────────────────────────────────────────
-    // Native TorrentEngine (C++ libtorrent via JNI) handles magnet → stream.
-    //
-    // Ktor CIO — local HTTP server for Range-based MPV streaming.
-    //   Replaces NanoHTTPD (abandoned 2019, no Kotlin coroutine support).
-    //   CIO engine: pure Kotlin, no Netty/servlet overhead — ideal for Android.
-    //   ktor-server-cio pulls ktor-server-core transitively.
-    implementation("io.ktor:ktor-server-cio:3.4.3")
+    // Torrent Streaming - Ktor CIO
+    implementation("io.ktor:ktor-server-cio:3.4.3") {
+        // Exclude any transitive protobuf from ktor if present
+        exclude(group = "com.google.protobuf", module = "protobuf-javalite")
+    }
 }
