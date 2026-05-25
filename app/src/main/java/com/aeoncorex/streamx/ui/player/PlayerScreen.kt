@@ -859,7 +859,7 @@ private fun formatData(bytes: Long): String = String.format("%.1f MB", bytes / 1
 private fun formatSpeed(bytes: Long): String = if (bytes > 1024 * 1024) String.format("%.1f MB/s", bytes / 1024.0 / 1024.0) else String.format("%.0f KB/s", bytes / 1024.0)
 
 @Composable
-private fun KeepScreenOn() {
+internal fun KeepScreenOn() {
     val context = LocalContext.current
     DisposableEffect(Unit) {
         val window = (context as? Activity)?.window
@@ -869,7 +869,7 @@ private fun KeepScreenOn() {
 }
 
 @Composable
-private fun HideSystemUi(activity: Activity?) {
+internal fun HideSystemUi(activity: Activity?) {
     val window = activity?.window ?: return
     DisposableEffect(Unit) {
         val controller = WindowCompat.getInsetsController(window, window.decorView)

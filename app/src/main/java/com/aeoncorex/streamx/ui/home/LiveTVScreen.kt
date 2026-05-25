@@ -194,7 +194,6 @@ fun LiveTVScreen(navController: NavController) {
             }
         }
     }
-
     LaunchedEffect(Unit) { fetchData(false) }
 
     ModalNavigationDrawer(
@@ -991,9 +990,8 @@ fun LiveTVTabContent(
                             fontSize   = 15.sp,
                             modifier   = Modifier.padding(bottom = 10.dp)
                         )
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             items(orderedCategoryNames) { cat ->
-                                val meta = getCategoryMeta(cat)
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
@@ -1002,26 +1000,13 @@ fun LiveTVTabContent(
                                             indication        = null
                                         ) { selectedCategory = cat }
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(56.dp)
-                                            .background(
-                                                Brush.radialGradient(
-                                                    listOf(meta.color.copy(0.35f), meta.color.copy(0.08f))
-                                                ),
-                                                CircleShape
-                                            )
-                                            .border(1.5.dp, meta.color.copy(0.5f), CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(meta.emoji, fontSize = 22.sp)
-                                    }
-                                    Spacer(Modifier.height(5.dp))
+                                    FuturisticCategoryIcon(category = cat, size = 64.dp)
+                                    Spacer(Modifier.height(7.dp))
                                     Text(
                                         cat,
                                         color      = Color.White,
                                         fontSize   = 10.sp,
-                                        fontWeight = FontWeight.Medium,
+                                        fontWeight = FontWeight.SemiBold,
                                         maxLines   = 1
                                     )
                                 }
@@ -1058,8 +1043,8 @@ fun LiveTVTabContent(
                                         .background(meta.color, RoundedCornerShape(2.dp))
                                 )
                                 Spacer(Modifier.width(8.dp))
-                                Text(meta.emoji, fontSize = 16.sp)
-                                Spacer(Modifier.width(6.dp))
+                                FuturisticCategoryIcon(category = catName, size = 36.dp)
+                                Spacer(Modifier.width(8.dp))
                                 Column {
                                     Text(
                                         catName,
@@ -1156,73 +1141,102 @@ fun HDStreamzChannelCard(
     onClick:         () -> Unit,
     onFavoriteToggle: () -> Unit
 ) {
-    Card(
-        modifier  = Modifier
-            .width(110.dp)
-            .height(100.dp)
-            .clickable(onClick = onClick),
-        shape     = RoundedCornerShape(14.dp),
-        colors    = CardDefaults.cardColors(containerColor = Color.Transparent),
-        elevation = CardDefaults.cardElevation(0.dp)
+    Box(
+        Modifier
+            .width(140.dp)
+            .height(148.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF14141E))
+            .border(
+                width = 1.dp,
+                brush = Brush.verticalGradient(
+                    listOf(accentColor.copy(.4f), accentColor.copy(.08f))
+                ),
+                shape = RoundedCornerShape(16.dp)
+            )
+            .clickable(onClick = onClick)
     ) {
+        // ── Logo — centred, Fit, occupies top 70% ─────────────────
         Box(
             Modifier
-                .fillMaxSize()
-                .background(Color(0xFF1A1A24))
-                .border(
-                    1.dp,
-                    Brush.verticalGradient(listOf(accentColor.copy(0.3f), Color.White.copy(0.05f))),
-                    RoundedCornerShape(14.dp)
-                )
-                .clip(RoundedCornerShape(14.dp))
+                .fillMaxWidth()
+                .height(105.dp)
+                .align(Alignment.TopCenter)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center
         ) {
-            // Logo
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 28.dp),
-                contentAlignment = Alignment.Center
-            ) {
+            if (channel.logoUrl.isNotEmpty()) {
                 AsyncImage(
                     model              = channel.logoUrl,
-                    contentDescription = null,
-                    modifier           = Modifier.fillMaxWidth().aspectRatio(1f),
-                    contentScale       = ContentScale.Fit
+                    contentDescription = channel.name,
+                    contentScale       = ContentScale.Fit,
+                    modifier           = Modifier.fillMaxSize(),
+                    // placeholder shown while loading
+                    placeholder        = coil.compose.rememberAsyncImagePainter(null),
+                    error              = coil.compose.rememberAsyncImagePainter(null)
                 )
-            }
-            // Bottom gradient + name
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .height(38.dp)
-                    .background(
-                        Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.95f)))
+            } else {
+                // Fallback: first letter in accent circle
+                Box(
+                    Modifier
+                        .size(52.dp)
+                        .background(accentColor.copy(.2f), CircleShape)
+                        .border(1.5.dp, accentColor.copy(.4f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        channel.name.take(1).uppercase(),
+                        color      = accentColor,
+                        fontSize   = 20.sp,
+                        fontWeight = FontWeight.ExtraBold
                     )
-            )
-            Text(
-                text       = channel.name,
-                color      = Color.White,
-                fontSize   = 9.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines   = 1,
-                overflow   = TextOverflow.Ellipsis,
-                modifier   = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 6.dp, start = 4.dp, end = 4.dp)
-            )
-            // Favourite icon
-            IconButton(
-                onClick  = onFavoriteToggle,
-                modifier = Modifier.align(Alignment.TopEnd).size(24.dp)
-            ) {
-                Icon(
-                    imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    contentDescription = null,
-                    tint     = if (isFavorite) accentColor else Color.White.copy(0.4f),
-                    modifier = Modifier.size(13.dp)
-                )
+                }
             }
+        }
+
+        // ── Bottom gradient + name ────────────────────────────────
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(55.dp)
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, Color(0xFF0D0D16))
+                    )
+                )
+        )
+        Text(
+            text       = channel.name,
+            color      = Color.White,
+            fontSize   = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines   = 2,
+            overflow   = TextOverflow.Ellipsis,
+            textAlign  = androidx.compose.ui.text.style.TextAlign.Center,
+            lineHeight  = 13.sp,
+            modifier   = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(bottom = 8.dp, start = 6.dp, end = 6.dp)
+        )
+
+        // ── Favourite icon ────────────────────────────────────────
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .padding(6.dp)
+                .size(22.dp)
+                .background(Color.Black.copy(.5f), CircleShape)
+                .clickable(onClick = onFavoriteToggle),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                contentDescription = null,
+                tint     = if (isFavorite) accentColor else Color.White.copy(.5f),
+                modifier = Modifier.size(13.dp)
+            )
         }
     }
 }
@@ -1329,18 +1343,41 @@ fun HolographicChannelCard(channel: Channel, isFavorite: Boolean, modifier: Modi
         colors    = CardDefaults.cardColors(containerColor = Color.Transparent),
         elevation = CardDefaults.cardElevation(0.dp)
     ) {
+        val accentColor = getCategoryMeta(channel.category).color
         Box(
-            Modifier.fillMaxSize().background(GlassWhite)
-                .border(1.dp, Brush.verticalGradient(listOf(Color.White.copy(0.2f), Color.Transparent)), RoundedCornerShape(16.dp))
+            Modifier.fillMaxSize().background(Color(0xFF12121C))
+                .border(1.dp, Brush.verticalGradient(listOf(accentColor.copy(0.35f), accentColor.copy(0.06f))), RoundedCornerShape(16.dp))
                 .clip(RoundedCornerShape(16.dp))
         ) {
-            Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-                AsyncImage(model = channel.logoUrl, contentDescription = null, modifier = Modifier.fillMaxWidth().aspectRatio(1f), contentScale = ContentScale.Fit)
+            Box(Modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 38.dp),
+                contentAlignment = Alignment.Center) {
+                if (channel.logoUrl.isNotEmpty()) {
+                    AsyncImage(model = channel.logoUrl, contentDescription = null,
+                        modifier = Modifier.fillMaxWidth().aspectRatio(1f), contentScale = ContentScale.Fit)
+                } else {
+                    Box(Modifier.size(44.dp).background(accentColor.copy(.2f), CircleShape)
+                        .border(1.dp, accentColor.copy(.4f), CircleShape),
+                        contentAlignment = Alignment.Center) {
+                        Text(channel.name.take(1).uppercase(), color = accentColor,
+                            fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+                }
             }
-            Box(Modifier.fillMaxWidth().align(Alignment.BottomCenter).height(50.dp).background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.9f)))))
-            Text(channel.name.uppercase(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp, start = 4.dp, end = 4.dp))
-            IconButton(onClick = onFavoriteToggle, modifier = Modifier.align(Alignment.TopEnd).size(30.dp)) {
-                Icon(if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, tint = if (isFavorite) primaryColor else Color.White.copy(0.5f), modifier = Modifier.size(16.dp))
+            Box(Modifier.fillMaxWidth().align(Alignment.BottomCenter).height(50.dp)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.92f)))))
+            Text(channel.name.uppercase(), color = Color.White, fontSize = 10.sp,
+                fontWeight = FontWeight.Bold, maxLines = 2, lineHeight = 13.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .padding(bottom = 7.dp, start = 4.dp, end = 4.dp))
+            Box(Modifier.align(Alignment.TopEnd).padding(5.dp).size(22.dp)
+                    .background(Color.Black.copy(.5f), CircleShape)
+                    .clickable(onClick = onFavoriteToggle),
+                contentAlignment = Alignment.Center) {
+                Icon(if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null,
+                    tint = if (isFavorite) primaryColor else Color.White.copy(0.5f),
+                    modifier = Modifier.size(13.dp))
             }
         }
     }
@@ -1390,23 +1427,8 @@ fun ModernCategorySelector(
                         modifier = Modifier.padding(start = 6.dp, end = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Icon circle
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .background(
-                                    if (isSel) accent.copy(0.25f) else Color.White.copy(0.07f),
-                                    CircleShape
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector        = meta.icon,
-                                contentDescription = cat,
-                                tint               = if (isSel) accent else Color.Gray,
-                                modifier           = Modifier.size(16.dp)
-                            )
-                        }
+                        // Icon circle — small futuristic icon
+                        FuturisticCategoryIcon(category = cat, size = 30.dp)
                         Spacer(Modifier.width(8.dp))
                         // Label
                         Text(
@@ -1437,6 +1459,265 @@ fun ModernCategorySelector(
             }
         }
         HorizontalDivider(color = Color.White.copy(0.08f))
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  FUTURISTIC CATEGORY ICON
+//  Canvas-drawn, animated 3-D style icons for each category.
+//  Replaces flat emoji — every category gets a unique design.
+// ════════════════════════════════════════════════════════════════════════════
+@Composable
+fun FuturisticCategoryIcon(category: String, size: androidx.compose.ui.unit.Dp = 64.dp) {
+    val meta = getCategoryMeta(category)
+    val col  = meta.color
+
+    val inf = rememberInfiniteTransition(label = "fi")
+    val rot by inf.animateFloat(0f, 360f,
+        infiniteRepeatable(tween(9000, easing = LinearEasing)), "r")
+    val pulse by inf.animateFloat(.55f, 1f,
+        infiniteRepeatable(tween(1800, easing = EaseInOutSine), RepeatMode.Reverse), "p")
+    val glow by inf.animateFloat(.2f, .65f,
+        infiniteRepeatable(tween(2200, easing = EaseInOutSine), RepeatMode.Reverse), "g")
+
+    Box(
+        Modifier
+            .size(size)
+            .background(
+                Brush.radialGradient(listOf(col.copy(.28f), Color(0xFF08080F))),
+                CircleShape
+            )
+            .border(
+                width = 1.5.dp,
+                brush = Brush.sweepGradient(
+                    listOf(col.copy(pulse), col.copy(.08f), col.copy(pulse))
+                ),
+                shape = CircleShape
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        val iconSize = size * .62f
+        Canvas(Modifier.size(iconSize)) {
+            val w = size.toPx()
+            val cx = size.value / 2f
+            val cy = size.value / 2f
+
+            when {
+                // ── ALL — 3×3 glowing grid ─────────────────────────
+                category.equals("All", true) -> {
+                    val gap = 7.5f
+                    val dotR = 3.5f
+                    for (row in 0..2) for (col2 in 0..2) {
+                        val x = (col2 - 1) * gap
+                        val y = (row - 1) * gap
+                        val alphaDot = if ((row + col2) % 2 == 0) pulse else (.4f + pulse * .3f)
+                        drawCircle(col.copy(glow * .5f), dotR * 2.2f, Offset(cx + x, cy + y))
+                        drawCircle(col.copy(alphaDot), dotR, Offset(cx + x, cy + y))
+                    }
+                }
+
+                // ── FAVORITES — pulsing heart ──────────────────────
+                category.equals("Favorites", true) -> {
+                    val s = 11f
+                    val path = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(cx, cy + s * .6f)
+                        cubicTo(cx - s * 1.8f, cy - s * .5f, cx - s * 2f, cy - s * 1.8f, cx, cy - s * .6f)
+                        cubicTo(cx + s * 2f, cy - s * 1.8f, cx + s * 1.8f, cy - s * .5f, cx, cy + s * .6f)
+                    }
+                    drawPath(path, col.copy(glow * .4f), style = Stroke(width = 8f))
+                    drawPath(path, col.copy(pulse))
+                }
+
+                // ── SPORTS — spinning soccer hexagon ring ──────────
+                category.contains("Sport", true) -> {
+                    val r = 12f
+                    val spokeR = 10f
+                    // Outer spinning ring
+                    drawCircle(col.copy(.15f), r + 4f)
+                    drawCircle(col.copy(glow * .4f), r + 4f, style = Stroke(1.5f))
+                    // 6 hexagon dots rotating
+                    for (i in 0..5) {
+                        val angle = Math.toRadians((rot + i * 60.0)).toFloat()
+                        val x = cx + spokeR * kotlin.math.cos(angle)
+                        val y = cy + spokeR * kotlin.math.sin(angle)
+                        drawCircle(col.copy(pulse), 3f, Offset(x, y))
+                        drawCircle(col.copy(glow * .5f), 5f, Offset(x, y))
+                    }
+                    // Center circle
+                    drawCircle(col.copy(.3f), 4f)
+                    drawCircle(col, 2.5f)
+                }
+
+                // ── MUSIC — animated wave bars ─────────────────────
+                category.contains("Music", true) -> {
+                    val bars = 5
+                    val barW = 4f
+                    val gap2 = 3f
+                    val totalW = bars * barW + (bars - 1) * gap2
+                    val startX = cx - totalW / 2f
+                    for (i in 0..bars - 1) {
+                        val ph = Math.toRadians((rot * 3 + i * 55.0)).toFloat()
+                        val h = 6f + 10f * ((kotlin.math.sin(ph) + 1f) / 2f)
+                        val x = startX + i * (barW + gap2)
+                        drawRoundRect(
+                            col.copy(pulse),
+                            topLeft = Offset(x, cy - h),
+                            size    = androidx.compose.ui.geometry.Size(barW, h * 2f),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(barW / 2f)
+                        )
+                    }
+                }
+
+                // ── KIDS — spinning star ───────────────────────────
+                category.contains("Kid", true) -> {
+                    val outerR = 13f; val innerR = 6f; val pts = 5
+                    val path2 = androidx.compose.ui.graphics.Path()
+                    for (i in 0 until pts * 2) {
+                        val r2 = if (i % 2 == 0) outerR else innerR
+                        val angle = Math.toRadians((rot + i * 180.0 / pts - 90.0)).toFloat()
+                        val x = cx + r2 * kotlin.math.cos(angle)
+                        val y = cy + r2 * kotlin.math.sin(angle)
+                        if (i == 0) path2.moveTo(x, y) else path2.lineTo(x, y)
+                    }
+                    path2.close()
+                    drawPath(path2, col.copy(glow * .4f), style = Stroke(6f))
+                    drawPath(path2, col.copy(pulse))
+                }
+
+                // ── NEWS / INFORMATIVE — radiating arc signal ──────
+                category.contains("News", true) ||
+                category.contains("Info", true) ||
+                category.contains("Document", true) -> {
+                    for (i in 1..3) {
+                        val r2 = i * 5f
+                        val alpha = (pulse * .7f) * ((4 - i) / 3f)
+                        drawArc(col.copy(alpha), -120f, 60f, false,
+                            Offset(cx - r2, cy - r2),
+                            androidx.compose.ui.geometry.Size(r2 * 2, r2 * 2),
+                            style = Stroke(2f))
+                        drawArc(col.copy(alpha), 0f, 60f, false,
+                            Offset(cx - r2, cy - r2),
+                            androidx.compose.ui.geometry.Size(r2 * 2, r2 * 2),
+                            style = Stroke(2f))
+                    }
+                    drawCircle(col.copy(pulse), 3.5f)
+                }
+
+                // ── MOVIES / ENTERTAINMENT — clapperboard ──────────
+                category.contains("Movie", true) ||
+                category.contains("Entertain", true) -> {
+                    // Film reel ring
+                    drawCircle(col.copy(.2f), 13f)
+                    drawCircle(col.copy(glow * .4f), 13f, style = Stroke(1.5f))
+                    for (i in 0..5) {
+                        val angle = Math.toRadians((rot + i * 60.0)).toFloat()
+                        val x = cx + 9f * kotlin.math.cos(angle)
+                        val y = cy + 9f * kotlin.math.sin(angle)
+                        drawCircle(col.copy(pulse), 2.5f, Offset(x, y))
+                    }
+                    drawCircle(col.copy(.5f), 4.5f)
+                    drawCircle(Color(0xFF0D0D16), 3f)
+                }
+
+                // ── BANGLADESH — green circle + red sun ───────────
+                category.equals("Bangladesh", true) -> {
+                    // Green background disc
+                    drawCircle(Color(0xFF006A4E).copy(pulse * .9f), 14f)
+                    drawCircle(Color(0xFF006A4E), 14f, style = Stroke(1.5f))
+                    // Red circle offset left (Bangladesh flag)
+                    drawCircle(Color(0xFFF42A41).copy(glow + .2f), 8f, Offset(cx - 1f, cy))
+                    drawCircle(Color(0xFFF42A41).copy(pulse), 7f, Offset(cx - 1f, cy))
+                    // Inner glow
+                    drawCircle(Color(0xFFF42A41).copy(.3f), 11f, Offset(cx - 1f, cy))
+                }
+
+                // ── INDIA — tricolor + rotating wheel ─────────────
+                category.equals("India", true) -> {
+                    val h = 9f
+                    drawRect(Color(0xFFFF9933).copy(pulse), Offset(cx - 13f, cy - h), androidx.compose.ui.geometry.Size(26f, h))
+                    drawRect(Color.White.copy(.9f), Offset(cx - 13f, cy - h / 3f), androidx.compose.ui.geometry.Size(26f, h * 0.67f))
+                    drawRect(Color(0xFF138808).copy(pulse), Offset(cx - 13f, cy), androidx.compose.ui.geometry.Size(26f, h))
+                    // Ashoka wheel
+                    drawCircle(Color(0xFF000080).copy(glow * .7f + .2f), 4f)
+                    for (i in 0..11) {
+                        val angle = Math.toRadians((rot + i * 30.0)).toFloat()
+                        val x1 = cx + 1.5f * kotlin.math.cos(angle)
+                        val y1 = cy + 1.5f * kotlin.math.sin(angle)
+                        val x2 = cx + 4f * kotlin.math.cos(angle)
+                        val y2 = cy + 4f * kotlin.math.sin(angle)
+                        drawLine(Color(0xFF000080).copy(pulse), Offset(x1, y1), Offset(x2, y2), 1f)
+                    }
+                }
+
+                // ── USA — stars + stripes ──────────────────────────
+                category.equals("USA", true) -> {
+                    // Red/white stripes
+                    val stripeH = 26f / 7f
+                    for (i in 0..6) {
+                        val stripe = if (i % 2 == 0) Color(0xFFBF0A30) else Color.White
+                        drawRect(stripe.copy(pulse * .9f),
+                            Offset(cx - 13f, cy - 13f + i * stripeH),
+                            androidx.compose.ui.geometry.Size(26f, stripeH))
+                    }
+                    // Blue canton
+                    drawRect(Color(0xFF002868).copy(pulse),
+                        Offset(cx - 13f, cy - 13f),
+                        androidx.compose.ui.geometry.Size(12f, 13f))
+                    // Stars
+                    for (i in 0..4) {
+                        val angle = Math.toRadians((rot * 0.5 + i * 72.0)).toFloat()
+                        val x = (cx - 7f) + 4f * kotlin.math.cos(angle)
+                        val y = (cy - 6.5f) + 4f * kotlin.math.sin(angle)
+                        drawCircle(Color.White.copy(pulse), 1.3f, Offset(x, y))
+                    }
+                }
+
+                // ── UK — Union Jack cross ──────────────────────────
+                category.equals("UK", true) -> {
+                    drawRect(Color(0xFF012169).copy(pulse), Offset(cx - 13f, cy - 13f), androidx.compose.ui.geometry.Size(26f, 26f))
+                    // White X diagonals
+                    drawLine(Color.White.copy(.8f), Offset(cx - 13f, cy - 13f), Offset(cx + 13f, cy + 13f), 4f)
+                    drawLine(Color.White.copy(.8f), Offset(cx + 13f, cy - 13f), Offset(cx - 13f, cy + 13f), 4f)
+                    // Red X diagonals (narrower)
+                    drawLine(Color(0xFFC8102E).copy(pulse), Offset(cx - 13f, cy - 13f), Offset(cx + 13f, cy + 13f), 2f)
+                    drawLine(Color(0xFFC8102E).copy(pulse), Offset(cx + 13f, cy - 13f), Offset(cx - 13f, cy + 13f), 2f)
+                    // White cross
+                    drawLine(Color.White, Offset(cx, cy - 13f), Offset(cx, cy + 13f), 6f)
+                    drawLine(Color.White, Offset(cx - 13f, cy), Offset(cx + 13f, cy), 6f)
+                    // Red cross
+                    drawLine(Color(0xFFC8102E).copy(pulse), Offset(cx, cy - 13f), Offset(cx, cy + 13f), 3.5f)
+                    drawLine(Color(0xFFC8102E).copy(pulse), Offset(cx - 13f, cy), Offset(cx + 13f, cy), 3.5f)
+                }
+
+                // ── GENERIC FLAG countries — rotating ring + country accent ─
+                category.contains("UAE", true) ||
+                category.contains("Pakistan", true) ||
+                category.contains("Saudi", true) ||
+                category.contains("Arabic", true) -> {
+                    drawCircle(col.copy(.25f), 12f)
+                    for (i in 0..7) {
+                        val angle = Math.toRadians((rot + i * 45.0)).toFloat()
+                        val x = cx + 10f * kotlin.math.cos(angle)
+                        val y = cy + 10f * kotlin.math.sin(angle)
+                        drawCircle(col.copy(if (i % 2 == 0) pulse else glow), 2.5f, Offset(x, y))
+                    }
+                    drawCircle(col.copy(pulse), 4f)
+                }
+
+                // ── DEFAULT — orbiting dots ────────────────────────
+                else -> {
+                    drawCircle(col.copy(.2f), 13f)
+                    for (i in 0..2) {
+                        val angle = Math.toRadians((rot + i * 120.0)).toFloat()
+                        val x = cx + 9f * kotlin.math.cos(angle)
+                        val y = cy + 9f * kotlin.math.sin(angle)
+                        drawCircle(col.copy(glow * .6f), 5f, Offset(x, y))
+                        drawCircle(col.copy(pulse), 3f, Offset(x, y))
+                    }
+                    drawCircle(col.copy(pulse), 4f)
+                }
+            }
+        }
     }
 }
 
