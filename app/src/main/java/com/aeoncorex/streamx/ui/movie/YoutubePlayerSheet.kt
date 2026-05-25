@@ -35,33 +35,78 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 
 // ── Design tokens ──────────────────────────────────────────────────
-private val Cyan          = Color(0xFF00E5FF)
-private val Purple        = Color(0xFF7C4DFF)
-private val PurpleGlow    = Color(0xFFB388FF)
-private val SheetBg       = Color(0xFF08080F)
-private val DarkBg        = Color(0xFF020810)
-// FIX: renamed from GlassWhite → SheetGlass to avoid conflict with the
-// package-level 'val GlassWhite' already defined in MovieScreen.kt
-// (same package com.aeoncorex.streamx.ui.movie). Two top-level vals with
-// the same name in the same package cause "Conflicting declarations".
-private val SheetGlass    = Color(0x10FFFFFF)
+private val YtCyan      = Color(0xFF00E5FF)
+private val YtPurple    = Color(0xFF7C4DFF)
+private val YtPurpleGlow= Color(0xFFB388FF)
+private val YtSheetBg   = Color(0xFF08080F)
+private val YtDarkBg    = Color(0xFF020810)
+private val YtGlass     = Color(0x10FFFFFF)
 
-/**
- * YoutubePlayerSheet
- *
- * Full-featured in-app YouTube trailer player.
- *  - ModalBottomSheet slides up with video ready to play
- *  - YouTube IFrame embed — no extra dependency, just WebView
- *  - Fullscreen support: YouTube's own fullscreen button works natively
- *  - Futuristic design: neon accent, dark glass, ambient glow
- *
- * Usage in MovieDetailsScreen:
- *   YoutubePlayerSheet(
- *       videoKey  = movie.trailerKey!!,
- *       title     = movie.basic.title,
- *       onDismiss = { showTrailerSheet = false }
- *   )
- */
+// ══════════════════════════════════════════════════════════════════
+//  IFrame Player API HTML
+//  KEY FIX: loadDataWithBaseURL("https://www.youtube.com", ...)
+//  YouTube allows embed only when the base URL is its own domain.
+//  Directly calling loadUrl("youtube.com/embed/...") in a WebView
+//  triggers Error 153 because YouTube detects the WebView UA and
+//  refuses the "Video player configuration".
+// ══════════════════════════════════════════════════════════════════
+private fun buildYoutubeHtml(videoKey: String) = """
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    overflow: hidden;
+  }
+  #player {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+  }
+  iframe {
+    width: 100% !important;
+    height: 100% !important;
+    border: none;
+  }
+</style>
+</head>
+<body>
+<div id="player"></div>
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+  var player;
+  function onYouTubeIframeAPIReady() {
+    player = new YT.Player('player', {
+      videoId: '$videoKey',
+      playerVars: {
+        autoplay    : 1,
+        rel         : 0,
+        modestbranding: 1,
+        showinfo    : 0,
+        fs          : 1,
+        playsinline : 0,
+        iv_load_policy: 3,
+        controls    : 1,
+        cc_load_policy: 0,
+        disablekb   : 0
+      },
+      events: {
+        onReady: function(e) { e.target.playVideo(); }
+      }
+    });
+  }
+</script>
+</body>
+</html>
+""".trimIndent()
+
+// ══════════════════════════════════════════════════════════════════
+//  YoutubePlayerSheet
+// ══════════════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -70,20 +115,16 @@ fun YoutubePlayerSheet(
     title     : String,
     onDismiss : () -> Unit,
 ) {
-    // ── Fullscreen state (YouTube fullscreen button) ───────────────
     var fullscreenView     by remember { mutableStateOf<View?>(null) }
     var fullscreenCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
-
     val isFullscreen = fullscreenView != null
 
-    // Close fullscreen on back press
     BackHandler(enabled = isFullscreen) {
         fullscreenCallback?.onCustomViewHidden()
         fullscreenView     = null
         fullscreenCallback = null
     }
 
-    // Infinite animations
     val inf = rememberInfiniteTransition(label = "yt")
     val glowAlpha by inf.animateFloat(
         0.4f, 1f,
@@ -98,92 +139,70 @@ fun YoutubePlayerSheet(
         infiniteRepeatable(tween(1500, easing = LinearEasing)), "sB"
     )
 
-    // Loading state — hide after page loads
     var isLoading by remember { mutableStateOf(true) }
 
-    // YouTube embed URL — autoplay, no ads sidebar, minimal branding
-    val embedUrl = remember(videoKey) {
-        "https://www.youtube.com/embed/$videoKey" +
-        "?autoplay=1" +
-        "&rel=0" +
-        "&modestbranding=1" +
-        "&showinfo=0" +
-        "&fs=1" +            // allow fullscreen button
-        "&playsinline=0" +   // let YouTube handle fullscreen natively
-        "&iv_load_policy=3"  // hide annotations
-    }
+    // Pre-build HTML so it doesn't rebuild on recomposition
+    val youtubeHtml = remember(videoKey) { buildYoutubeHtml(videoKey) }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // ── Bottom Sheet ──────────────────────────────────────────────
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState       = sheetState,
-        containerColor   = SheetBg,
-        dragHandle       = null,        // custom drag area below
-        // FIX: removed 'windowInsets = WindowInsets(0)' — this parameter
-        // does not exist in the Material3 ModalBottomSheet version used here.
-        // Use windowInsetsBottomHeight() on a Spacer below instead (already done).
+        containerColor   = YtSheetBg,
+        dragHandle       = null,
     ) {
         Box(Modifier.fillMaxWidth()) {
 
-            // Ambient purple glow top-left
+            // Ambient glow blobs
             Box(
                 Modifier.size(220.dp).offset((-60).dp, (-40).dp).blur(70.dp)
                     .background(
-                        Brush.radialGradient(listOf(Purple.copy(0.3f), Color.Transparent)),
+                        Brush.radialGradient(listOf(YtPurple.copy(0.3f), Color.Transparent)),
                         CircleShape
                     )
             )
-            // Ambient cyan glow bottom-right
             Box(
                 Modifier.size(180.dp).align(Alignment.BottomEnd).offset(40.dp, 30.dp).blur(60.dp)
                     .background(
-                        Brush.radialGradient(listOf(Cyan.copy(0.2f), Color.Transparent)),
+                        Brush.radialGradient(listOf(YtCyan.copy(0.2f), Color.Transparent)),
                         CircleShape
                     )
             )
 
             Column(Modifier.fillMaxWidth()) {
 
-                // ── Neon top accent line ──────────────────────────
+                // Neon top line
                 Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(2.dp)
-                        .drawBehind {
-                            drawRect(
-                                brush = Brush.horizontalGradient(
-                                    listOf(
-                                        Color.Transparent,
-                                        Purple.copy(glowAlpha),
-                                        Cyan.copy(glowAlpha),
-                                        PurpleGlow.copy(glowAlpha * 0.7f),
-                                        Color.Transparent
-                                    )
+                    Modifier.fillMaxWidth().height(2.dp).drawBehind {
+                        drawRect(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color.Transparent,
+                                    YtPurple.copy(glowAlpha),
+                                    YtCyan.copy(glowAlpha),
+                                    YtPurpleGlow.copy(glowAlpha * 0.7f),
+                                    Color.Transparent
                                 )
                             )
-                        }
+                        )
+                    }
                 )
 
-                // ── Header row ────────────────────────────────────
+                // Header
                 Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Play icon with glow
                     Box(
-                        Modifier.size(32.dp)
-                            .drawBehind {
-                                drawCircle(Purple.copy(0.3f), radius = size.minDimension * 1.2f)
-                            },
+                        Modifier.size(32.dp).drawBehind {
+                            drawCircle(YtPurple.copy(0.3f), radius = size.minDimension * 1.2f)
+                        },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Rounded.PlayCircle, null,
-                            tint     = Purple.copy(glowAlpha),
+                            tint     = YtPurple.copy(glowAlpha),
                             modifier = Modifier.size(28.dp)
                         )
                     }
@@ -191,7 +210,7 @@ fun YoutubePlayerSheet(
                     Column(Modifier.weight(1f)) {
                         Text(
                             "OFFICIAL TRAILER",
-                            color         = Cyan.copy(0.65f),
+                            color         = YtCyan.copy(0.65f),
                             fontSize      = 9.sp,
                             fontWeight    = FontWeight.Bold,
                             letterSpacing = 1.5.sp
@@ -205,12 +224,9 @@ fun YoutubePlayerSheet(
                             overflow   = TextOverflow.Ellipsis
                         )
                     }
-                    // Close button — FIX: use renamed SheetGlass instead of GlassWhite
                     Box(
-                        Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(SheetGlass)
+                        Modifier.size(36.dp).clip(CircleShape)
+                            .background(YtGlass)
                             .border(1.dp, Color.White.copy(0.12f), CircleShape)
                             .clickable { onDismiss() },
                         contentAlignment = Alignment.Center
@@ -223,26 +239,24 @@ fun YoutubePlayerSheet(
                     }
                 }
 
-                // ── Video player area (16:9) ──────────────────────
+                // Video area 16:9
                 Box(
                     Modifier
                         .fillMaxWidth()
                         .aspectRatio(16f / 9f)
-                        .background(DarkBg)
-                        // Neon border frame around the video
+                        .background(YtDarkBg)
                         .border(
                             width = 1.dp,
                             brush = Brush.linearGradient(
                                 listOf(
-                                    Purple.copy(glowAlpha * 0.5f),
-                                    Cyan.copy(glowAlpha * 0.4f),
+                                    YtPurple.copy(glowAlpha * 0.5f),
+                                    YtCyan.copy(glowAlpha * 0.4f),
                                     Color.Transparent
                                 )
                             ),
                             shape = RectangleShape
                         )
                 ) {
-                    // YouTube WebView
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory  = { ctx ->
@@ -257,9 +271,10 @@ fun YoutubePlayerSheet(
                                     domStorageEnabled                = true
                                     loadWithOverviewMode             = true
                                     useWideViewPort                  = true
-                                    mediaPlaybackRequiresUserGesture = false // autoplay
+                                    mediaPlaybackRequiresUserGesture = false
                                     setSupportMultipleWindows(true)
-                                    // Chrome user agent so YouTube serves proper embed
+                                    // Chrome UA — keeps YouTube from
+                                    // serving a degraded or blocked player
                                     userAgentString =
                                         "Mozilla/5.0 (Linux; Android 14; Pixel 8) " +
                                         "AppleWebKit/537.36 (KHTML, like Gecko) " +
@@ -268,17 +283,17 @@ fun YoutubePlayerSheet(
                                 webViewClient = object : WebViewClient() {
                                     override fun shouldOverrideUrlLoading(
                                         view: WebView, request: WebResourceRequest
-                                    ): Boolean = false // let WebView handle all YouTube redirects
+                                    ): Boolean = false
 
                                     override fun onPageFinished(view: WebView, url: String) {
-                                        isLoading = false
+                                        // Small delay so the IFrame API finishes
+                                        // initialising before we hide the loader
+                                        view.postDelayed({ isLoading = false }, 1200)
                                     }
                                 }
                                 webChromeClient = object : WebChromeClient() {
-                                    // ✅ YouTube fullscreen button → show native fullscreen
                                     override fun onShowCustomView(
-                                        view     : View,
-                                        callback : CustomViewCallback
+                                        view: View, callback: CustomViewCallback
                                     ) {
                                         fullscreenView     = view
                                         fullscreenCallback = callback
@@ -288,13 +303,22 @@ fun YoutubePlayerSheet(
                                         fullscreenCallback = null
                                     }
                                 }
-                                loadUrl(embedUrl)
+                                // ✅ THE FIX — load HTML with youtube.com as base URL
+                                // YouTube's IFrame API checks document.domain, so the
+                                // base URL must be https://www.youtube.com, otherwise
+                                // the player throws "Video player configuration error".
+                                loadDataWithBaseURL(
+                                    "https://www.youtube.com",
+                                    youtubeHtml,
+                                    "text/html",
+                                    "UTF-8",
+                                    null
+                                )
                             }
                         }
                     )
 
-                    // Loading overlay (dual spinning rings)
-                    // FIX: AnimatedVisibility here is inside a Box scope — OK, no ColumnScope conflict
+                    // Loading overlay
                     androidx.compose.animation.AnimatedVisibility(
                         visible  = isLoading,
                         enter    = fadeIn(),
@@ -302,14 +326,13 @@ fun YoutubePlayerSheet(
                         modifier = Modifier.fillMaxSize()
                     ) {
                         Box(
-                            Modifier.fillMaxSize().background(DarkBg),
+                            Modifier.fillMaxSize().background(YtDarkBg),
                             contentAlignment = Alignment.Center
                         ) {
-                            // Purple ambient blob
                             Box(
-                                Modifier.size(140.dp).blur(40.dp)
+                                Modifier.size(130.dp).blur(40.dp)
                                     .background(
-                                        Brush.radialGradient(listOf(Purple.copy(0.4f), Color.Transparent)),
+                                        Brush.radialGradient(listOf(YtPurple.copy(0.4f), Color.Transparent)),
                                         CircleShape
                                     )
                             )
@@ -317,24 +340,23 @@ fun YoutubePlayerSheet(
                                 Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
                                     CircularProgressIndicator(
                                         modifier    = Modifier.size(72.dp).rotate(spinA),
-                                        color       = Cyan.copy(glowAlpha),
+                                        color       = YtCyan.copy(glowAlpha),
                                         strokeWidth = 2.dp,
                                         trackColor  = Color.Transparent
                                     )
                                     CircularProgressIndicator(
                                         modifier    = Modifier.size(50.dp).rotate(spinB),
-                                        color       = Purple.copy(glowAlpha),
+                                        color       = YtPurple.copy(glowAlpha),
                                         strokeWidth = 2.dp,
                                         trackColor  = Color.Transparent
                                     )
-                                    // Center dot
                                     Box(
                                         Modifier.size(10.dp)
                                             .drawBehind {
-                                                drawCircle(Cyan.copy(0.35f), radius = size.minDimension * 2.2f)
+                                                drawCircle(YtCyan.copy(0.35f), radius = size.minDimension * 2.2f)
                                             }
                                             .background(
-                                                Brush.radialGradient(listOf(Cyan, Purple)),
+                                                Brush.radialGradient(listOf(YtCyan, YtPurple)),
                                                 CircleShape
                                             )
                                     )
@@ -342,7 +364,7 @@ fun YoutubePlayerSheet(
                                 Spacer(Modifier.height(20.dp))
                                 Text(
                                     "LOADING TRAILER",
-                                    color         = Cyan.copy(0.65f),
+                                    color         = YtCyan.copy(0.65f),
                                     fontSize      = 10.sp,
                                     fontWeight    = FontWeight.Bold,
                                     letterSpacing = 2.sp
@@ -352,45 +374,26 @@ fun YoutubePlayerSheet(
                     }
                 }
 
-                // ── Bottom padding for gesture nav bar ────────────
+                // Nav bar bottom spacing
                 Spacer(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(SheetBg)
+                    Modifier.fillMaxWidth().background(YtSheetBg)
                         .windowInsetsBottomHeight(WindowInsets.navigationBars)
                 )
             }
         }
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  FULLSCREEN OVERLAY
-    //  Shown when user taps YouTube's fullscreen button
-    // ════════════════════════════════════════════════════════════════
-    // FIX: wrapped in Box so the composable is inside a BoxScope, not
-    // the implicit ColumnScope that caused "cannot be called in this context
-    // with an implicit receiver". Using fully-qualified name also resolves
-    // the overload ambiguity between ColumnScope.AnimatedVisibility and
-    // the standalone variant imported via 'import androidx.compose.animation.*'.
-    Box(modifier = Modifier.fillMaxSize()) {
+    // Fullscreen overlay
+    Box(Modifier.fillMaxSize()) {
         androidx.compose.animation.AnimatedVisibility(
             visible = isFullscreen,
             enter   = fadeIn(tween(200)),
             exit    = fadeOut(tween(200))
         ) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color.Black)
-            ) {
+            Box(Modifier.fillMaxSize().background(Color.Black)) {
                 fullscreenView?.let { view ->
-                    AndroidView(
-                        factory  = { view },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
                 }
-
-                // Subtle exit hint
                 Box(
                     Modifier
                         .align(Alignment.TopEnd)
@@ -403,8 +406,7 @@ fun YoutubePlayerSheet(
                             fullscreenView     = null
                             fullscreenCallback = null
                         }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    contentAlignment = Alignment.Center
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
@@ -413,11 +415,7 @@ fun YoutubePlayerSheet(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(Modifier.width(5.dp))
-                        Text(
-                            "Exit Fullscreen",
-                            color    = Color.White.copy(0.75f),
-                            fontSize = 12.sp
-                        )
+                        Text("Exit Fullscreen", color = Color.White.copy(0.75f), fontSize = 12.sp)
                     }
                 }
             }

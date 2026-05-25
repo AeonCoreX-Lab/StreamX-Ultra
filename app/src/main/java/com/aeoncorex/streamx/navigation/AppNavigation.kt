@@ -28,6 +28,8 @@ import com.aeoncorex.streamx.ui.about.AboutScreen
 import com.aeoncorex.streamx.ui.music.MusicScreen
 import com.aeoncorex.streamx.ui.music.MusicPlayerScreen
 import com.aeoncorex.streamx.ui.player.PlayerScreen
+import com.aeoncorex.streamx.ui.player.EventPlayerScreen
+import com.aeoncorex.streamx.ui.player.EventWebViewScreen
 import com.aeoncorex.streamx.ui.copyright.CopyrightScreen
 import com.aeoncorex.streamx.ui.premium.PremiumScreen
 import com.aeoncorex.streamx.ui.movie.MovieScreen
@@ -62,16 +64,38 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
             )
         }
 
-        // ── Live Event Player (reuses PlayerScreen) ───────────────────────
-        // LiveEventsSection navigates to "player/{encodedUrl}" directly,
-        // so no separate route is needed. This alias is kept for clarity.
+        // ── Live Event Player ─────────────────────────────────────────────
+        // Route: event_player/{eventId}/{streamIndex}/{encodedTitle}
+        // streamIndex = which stream in event.streams to play first
+        // Player can switch to other streams without leaving the screen
         composable(
-            route     = "live_event_player/{encodedUrl}",
-            arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
-        ) { backStack ->
-            PlayerScreen(
+            route = "event_player/{eventId}/{streamIndex}/{encodedTitle}",
+            arguments = listOf(
+                navArgument("eventId")      { type = NavType.StringType },
+                navArgument("streamIndex")  { type = NavType.IntType; defaultValue = 0 },
+                navArgument("encodedTitle") { type = NavType.StringType; defaultValue = "" }
+            )
+        ) { back ->
+            EventPlayerScreen(
                 navController = navController,
-                encodedUrl    = backStack.arguments?.getString("encodedUrl") ?: ""
+                eventId       = back.arguments?.getString("eventId")    ?: "",
+                streamIndex   = back.arguments?.getInt("streamIndex")   ?: 0,
+                encodedTitle  = back.arguments?.getString("encodedTitle") ?: ""
+            )
+        }
+
+        // Fallback WebView — when all extraction fails, user watches in browser
+        composable(
+            route = "event_webview/{encodedUrl}/{encodedTitle}",
+            arguments = listOf(
+                navArgument("encodedUrl")   { type = NavType.StringType },
+                navArgument("encodedTitle") { type = NavType.StringType; defaultValue = "" }
+            )
+        ) { back ->
+            EventWebViewScreen(
+                navController = navController,
+                encodedUrl    = back.arguments?.getString("encodedUrl")   ?: "",
+                encodedTitle  = back.arguments?.getString("encodedTitle") ?: ""
             )
         }
 

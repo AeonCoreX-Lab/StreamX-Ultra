@@ -9,18 +9,17 @@ import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
 
-// ════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //  EventRepository
-//  ───────────────
-//  • Fetches events.json from the GitHub raw URL (same repo as IPTV data)
-//  • In-memory cache with 2-minute TTL so rapid recompositions don't re-fetch
-//  • Returns empty list gracefully on any network error
-// ════════════════════════════════════════════════════════════════════════════
+//  • Fetches events.json from GitHub raw (same repo as IPTV data)
+//  • Respects strict_mode / requires_stream / requires_thumbnail flags
+//  • 2-minute in-memory cache — avoids re-fetch on recomposition
+//  • Graceful fallback to cached data on network error
+// ════════════════════════════════════════════════════════════════════
 object EventRepository {
 
     private const val TAG = "EventRepository"
 
-    // ── Same base URL as your IPTV repo ──────────────────────────────────
     private const val EVENTS_URL =
         "https://raw.githubusercontent.com/cybernahid-dev/streamx-iptv-data/main/events.json"
 
@@ -29,11 +28,10 @@ object EventRepository {
     private var cachedResponse: EventsResponse? = null
     private var lastFetchTime:  Long = 0L
 
-    // ── Public API ────────────────────────────────────────────────────────
+    // ── Public API ────────────────────────────────────────────────
 
     /**
-     * Returns the full EventsResponse.
-     * Hits the network only when cache is stale (> 2 min old).
+     * Full EventsResponse (cached).
      */
     suspend fun getEvents(forceRefresh: Boolean = false): EventsResponse =
         withContext(Dispatchers.IO) {
@@ -45,41 +43,62 @@ object EventRepository {
                 Log.d(TAG, "Cache hit (${(now - lastFetchTime) / 1000}s old)")
                 return@withContext cachedResponse!!
             }
-
             try {
-                val json = fetchRaw(EVENTS_URL)
+                val json     = fetchRaw(EVENTS_URL)
                 val response = Gson().fromJson(json, EventsResponse::class.java)
                 cachedResponse = response
                 lastFetchTime  = now
-                Log.d(TAG, "Fetched ${response.activeEvents.size} events")
+                Log.d(TAG, "Fetched ${response.activeEvents.size} events " +
+                    "(live=${response.totalLive}, upcoming=${response.totalUpcoming})")
                 response
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to fetch events: ${e.message}")
+                Log.w(TAG, "Fetch failed: ${e.message}")
                 cachedResponse ?: EventsResponse()
             }
         }
 
     /**
-     * Returns only currently-live events (is_live == true).
+     * Events ready to display in the UI.
+     *
+     * Applies strict_mode filtering:
+     *  - strict_mode=true  → only events that have at least one stream URL
+     *  - strict_mode=false → all events (including upcoming without streams)
+     *
+     * Also honours requires_stream and requires_thumbnail flags from the JSON.
+     */
+    suspend fun getActiveEvents(): List<LiveEvent> {
+        val resp = getEvents()
+        return resp.activeEvents.filter { event ->
+            val streamOk = when {
+                resp.strictMode || resp.requiresStream -> event.hasStream && event.streams.isNotEmpty()
+                else -> true
+            }
+            val thumbOk = if (resp.requiresThumbnail) event.thumbnail.isNotEmpty() else true
+            streamOk && thumbOk
+        }
+    }
+
+    /**
+     * Only events currently live (is_live == true) with a valid stream.
      */
     suspend fun getLiveNow(): List<LiveEvent> =
-        getEvents().activeEvents.filter { it.isLive }
+        getActiveEvents().filter { it.isLive }
 
     /**
-     * Returns live + upcoming events combined.
+     * Upcoming events (not yet live).
      */
-    suspend fun getActiveEvents(): List<LiveEvent> =
-        getEvents().activeEvents
+    suspend fun getUpcoming(): List<LiveEvent> =
+        getActiveEvents().filter { !it.isLive }
 
     /**
-     * Clears in-memory cache — call when user triggers pull-to-refresh.
+     * Clears cache — call on pull-to-refresh.
      */
     fun clearCache() {
         cachedResponse = null
         lastFetchTime  = 0L
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────
+    // ── Private ───────────────────────────────────────────────────
 
     private fun fetchRaw(url: String): String {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
