@@ -29,7 +29,6 @@ import com.aeoncorex.streamx.ui.music.MusicScreen
 import com.aeoncorex.streamx.ui.music.MusicPlayerScreen
 import com.aeoncorex.streamx.ui.player.PlayerScreen
 import com.aeoncorex.streamx.ui.player.EventPlayerScreen
-import com.aeoncorex.streamx.ui.player.EventWebViewScreen
 import com.aeoncorex.streamx.ui.copyright.CopyrightScreen
 import com.aeoncorex.streamx.ui.premium.PremiumScreen
 import com.aeoncorex.streamx.ui.movie.MovieScreen
@@ -80,21 +79,6 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
                 navController = navController,
                 eventId       = back.arguments?.getString("eventId")    ?: "",
                 streamIndex   = back.arguments?.getInt("streamIndex")   ?: 0,
-                encodedTitle  = back.arguments?.getString("encodedTitle") ?: ""
-            )
-        }
-
-        // Fallback WebView — when all extraction fails, user watches in browser
-        composable(
-            route = "event_webview/{encodedUrl}/{encodedTitle}",
-            arguments = listOf(
-                navArgument("encodedUrl")   { type = NavType.StringType },
-                navArgument("encodedTitle") { type = NavType.StringType; defaultValue = "" }
-            )
-        ) { back ->
-            EventWebViewScreen(
-                navController = navController,
-                encodedUrl    = back.arguments?.getString("encodedUrl")   ?: "",
                 encodedTitle  = back.arguments?.getString("encodedTitle") ?: ""
             )
         }

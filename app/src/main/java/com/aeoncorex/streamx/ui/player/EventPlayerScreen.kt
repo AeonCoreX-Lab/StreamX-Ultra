@@ -604,11 +604,8 @@ fun EventPlayerScreen(
                 onRetry      = { retryKey++ },
                 onNextServer = { navigateToStream(streamIndex + 1) },
                 onWatchInBrowser = {
-                    val enc      = try { URLEncoder.encode(embedUrl, "UTF-8") } catch (_: Exception) { "" }
-                    val encTitle = try { URLEncoder.encode(eventTitle, "UTF-8") } catch (_: Exception) { "" }
-                    navController.navigate("event_webview/$enc/$encTitle") {
-                        popUpTo("event_player/$eventId/$streamIndex/$encTitle") { inclusive = true }
-                    }
+                    // event_webview route removed — go back to events list
+                    navController.popBackStack()
                 },
                 onBack = { navController.popBackStack() }
             )
