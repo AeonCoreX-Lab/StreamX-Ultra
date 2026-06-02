@@ -193,8 +193,8 @@ tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configu
 // ═══════════════════════════════════════════════════════════════════
 configurations.all {
     resolutionStrategy {
-        force("com.google.protobuf:protobuf-javalite:3.25.5")
-        force("com.google.protobuf:protobuf-kotlin:3.25.5")    }
+        force("com.google.protobuf:protobuf-javalite:4.35.0")
+        force("com.google.protobuf:protobuf-kotlin:4.35.0")    }
     // Only exclude protobuf-lite (older conflicting artifact)
     exclude(group = "com.google.protobuf", module = "protobuf-lite")
 }
@@ -204,7 +204,7 @@ dependencies {
     
     val media3Version = "1.10.1"
     val lifecycleVersion = "2.8.0"
-    val protobufVersion = "3.25.5"
+    val protobufVersion = "4.35.0"
     
     // Core & Compose
     implementation("androidx.core:core-ktx:1.15.0")
@@ -226,7 +226,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
 
     // NewPipeExtractor - exclude nanojson only (keep protobuf for Firestore)
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.1") {
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.2") {
         exclude(group = "com.github.TeamNewPipe", module = "nanojson")
     }
     implementation("com.grack:nanojson:1.10")
@@ -261,5 +261,5 @@ dependencies {
     implementation("com.startapp:inapp-sdk:5.3.0")
 
     // Torrent Streaming - Ktor CIO
-    implementation("io.ktor:ktor-server-cio:3.4.3")
+    implementation("io.ktor:ktor-server-cio:3.5.0")
 }
