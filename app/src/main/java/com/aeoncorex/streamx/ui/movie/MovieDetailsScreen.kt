@@ -809,10 +809,10 @@ private fun EpisodeItem(ep: EpisodeDto, accentColor: Color, onPlay: () -> Unit) 
                 .clip(RoundedCornerShape(8.dp))
                 .background(CardBg)
         ) {
-            val stillUrl = ep.externalStillUrl.ifEmpty {
+            val stillUrl = ep.externalStillUrl?.ifEmpty {
                 if (!ep.stillPath.isNullOrEmpty())
                     "https://image.tmdb.org/t/p/w300${ep.stillPath}" else ""
-            }
+            } ?: ""
             if (stillUrl.isNotEmpty()) {
                 AsyncImage(
                     model              = stillUrl,

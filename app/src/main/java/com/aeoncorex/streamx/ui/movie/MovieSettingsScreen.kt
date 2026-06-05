@@ -73,7 +73,7 @@ fun MovieSettingsScreen(navController: NavController) {
 }
 
 @Composable
-fun SectionHeader(title: String) {
+private fun SectionHeader(title: String) {
     Text(title, color = Color.Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 24.dp, bottom = 8.dp, start = 8.dp))
 }
 

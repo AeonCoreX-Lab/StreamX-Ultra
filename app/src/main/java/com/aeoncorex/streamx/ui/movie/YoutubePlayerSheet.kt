@@ -227,7 +227,7 @@ fun YoutubePlayerSheet(
                     )
             )
 
-            Column(Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth()) colScope@{
 
                 // Neon top line
                 Box(
@@ -417,7 +417,7 @@ fun YoutubePlayerSheet(
                     )
 
                     // Loading overlay
-                    AnimatedVisibility(
+                    this@colScope.AnimatedVisibility(
                         visible  = isLoading && playerError == null,
                         enter    = fadeIn(),
                         exit     = fadeOut(tween(600)),
@@ -472,7 +472,7 @@ fun YoutubePlayerSheet(
                     }
 
                     // Error / Unavailable overlay with fallback
-                    AnimatedVisibility(
+                    this@colScope.AnimatedVisibility(
                         visible  = playerError != null,
                         enter    = fadeIn(tween(400)),
                         exit     = fadeOut(tween(300)),

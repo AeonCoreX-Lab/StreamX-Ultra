@@ -105,9 +105,9 @@ class MainActivity : ComponentActivity() {
     }
 
     // ── Called when app is already running and gets a new intent ──────────────
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent?.let { handleIntent(it) }
+        handleIntent(intent)
     }
 
     // ── Deeplink handler ──────────────────────────────────────────────────────

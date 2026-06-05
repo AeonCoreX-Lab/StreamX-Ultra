@@ -413,20 +413,27 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         while (retryCount < maxRetries) {
             if (decodedUrl.startsWith("magnet:?")) {
                 withContext(Dispatchers.IO) { TorrentEngine.clearCache(context) }
+                val saveDir = withContext(Dispatchers.IO) {
+                    context.getExternalFilesDir("torrents")?.absolutePath
+                        ?: context.cacheDir.absolutePath
+                }
                 var metadataTimeout = 0; var completed = false
-                TorrentEngine.start(context, decodedUrl).collect { state ->
-                    when (state) {
-                        is StreamState.Preparing -> {
-                            statusMsg = state.message
+                TorrentEngine.start(decodedUrl, saveDir)
+                TorrentEngine.status.collect { status ->
+                    when (status.state) {
+                        TorrentEngine.State.METADATA -> {
+                            statusMsg = "Fetching metadata…"
                             if (++metadataTimeout > 240) {
                                 statusMsg = if (retryCount < maxRetries - 1) "Timeout – retrying (${retryCount+1}/$maxRetries)" else "Timeout – last attempt"
                                 TorrentEngine.stop(); completed = true
                             }
                         }
-                        is StreamState.Buffering -> { isPreBuffering = true; torrentProgress = state.progress; statusMsg = "Buffering ${state.progress}%"; downloadSpeed = "${state.speed} KB/s"; seeds = state.seeds; metadataTimeout = 0 }
-                        is StreamState.Ready  -> { videoPath = state.streamUrl; isPreBuffering = false; statusMsg = ""; completed = true }
-                        is StreamState.Error  -> { statusMsg = "Error: ${state.message}"; isPreBuffering = false; completed = true }
+                        TorrentEngine.State.BUFFERING -> { isPreBuffering = true; torrentProgress = status.progress; statusMsg = "Buffering ${status.progress}%"; downloadSpeed = "${status.speedBps / 1000} KB/s"; seeds = status.seeds; metadataTimeout = 0 }
+                        TorrentEngine.State.READY  -> { videoPath = status.streamUrl; isPreBuffering = false; statusMsg = ""; completed = true }
+                        TorrentEngine.State.ERROR  -> { statusMsg = "Error: Torrent engine failed"; isPreBuffering = false; completed = true }
+                        else -> {}
                     }
+                    if (completed) return@collect
                 }
                 if (completed) break; retryCount++; delay(2000)
             } else { videoPath = decodedUrl; isPreBuffering = false; statusMsg = ""; break }

@@ -24,7 +24,7 @@ parking_lot  = "0.12"
 
 # Torrent engine (pure Rust — replaces C++ libtorrent)
 librqbit     = { version = "4", default-features = false,
-                 features = ["sha1-hw"] }
+                 features = ["sha1"] }
 
 # Local HTTP server (serves torrent file with Range support)
 hyper        = { version = "1", features = ["server", "http1"] }

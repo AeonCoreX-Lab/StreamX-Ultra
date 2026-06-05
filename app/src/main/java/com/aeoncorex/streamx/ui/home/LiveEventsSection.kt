@@ -491,7 +491,7 @@ private fun EventCard(
                     // ✅ Thumbnail with Referer header for streamed.pk badge images
                     // streamed.pk/api/images/*.webp requires Referer header
                     val thumbModel = remember(event.thumbnail) {
-                        coil.request.ImageRequest.Builder(context)
+                        ImageRequest.Builder(context)
                             .data(event.thumbnail)
                             .addHeader("Referer", "https://streamed.pk/")
                             .addHeader("Origin",  "https://streamed.pk")
@@ -741,7 +741,7 @@ fun EventStreamDialog(
                 ) {
                     if (event.thumbnail.isNotEmpty()) {
                         val thumbModel2 = remember(event.thumbnail) {
-                            coil.request.ImageRequest.Builder(context)
+                            ImageRequest.Builder(context)
                                 .data(event.thumbnail)
                                 .addHeader("Referer",    "https://streamed.pk/")
                                 .addHeader("Origin",     "https://streamed.pk")
