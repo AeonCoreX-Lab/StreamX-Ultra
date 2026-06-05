@@ -77,7 +77,8 @@ jobs:
             echo 'export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865' >> $BASH_ENV
             sudo apt-get update -y
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-              ccache yasm nasm pkg-config meson ninja-build python3-pip python3-setuptools
+              ccache yasm nasm pkg-config ninja-build python3-pip python3-setuptools
+            sudo pip3 install --break-system-packages "meson>=1.6.1"
       - run:
           name: Build MPV, FFmpeg & Extract Headers
           no_output_timeout: 45m
@@ -231,7 +232,8 @@ jobs:
             echo 'export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865' >> $BASH_ENV
             sudo apt-get update -y
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-              ccache yasm nasm pkg-config meson ninja-build python3-pip python3-setuptools
+              ccache yasm nasm pkg-config ninja-build python3-pip python3-setuptools
+            sudo pip3 install --break-system-packages "meson>=1.6.1"
       - run:
           name: Build MPV, FFmpeg & Extract Headers
           no_output_timeout: 45m
