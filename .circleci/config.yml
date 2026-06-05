@@ -1,0 +1,290 @@
+version: 2.1
+
+executors:
+  android-builder:
+    docker:
+      - image: cimg/android:2024.04
+    resource_class: large
+
+jobs:
+  debug-build:
+    executor: android-builder
+    environment:
+      CCACHE_DIR: "/home/circleci/.cache/ccache"
+      CCACHE_MAXSIZE: "2G"
+    steps:
+      - run:
+          name: Setup Swap Space
+          command: |
+            sudo fallocate -l 4G /swapfile || true
+            sudo chmod 600 /swapfile || true
+            sudo swapon /swapfile || true
+            free -h
+      - checkout
+      - run:
+          name: Initialize Git Submodules
+          command: |
+            git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+            git submodule update --init --recursive
+      - run:
+          name: Get mpv-android upstream commit hash
+          command: |
+            HASH=$(git ls-remote https://github.com/mpv-android/mpv-android.git HEAD 2>/dev/null | awk '{print $1}')
+            if [ -z "$HASH" ]; then HASH="unknown"; fi
+            echo "$HASH" > .mpv-upstream-hash
+            echo "mpv-android HEAD: $HASH"
+      - restore_cache:
+          keys:
+            - v1-mpv-src-{{ checksum ".mpv-upstream-hash" }}
+      - restore_cache:
+          keys:
+            - v1-ccache-{{ checksum "app/src/main/rust/Cargo.lock" }}
+            - v1-ccache-
+      - restore_cache:
+          keys:
+            - v1-rust-registry-{{ checksum "app/src/main/rust/Cargo.lock" }}
+            - v1-rust-registry-
+      - run:
+          name: Install Toolchains, Rust & NDK
+          no_output_timeout: 30m
+          command: |
+            echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865"
+            echo 'export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865' >> $BASH_ENV
+            rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
+            curl -LsSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xvzf - -C ~/.cargo/bin
+            cargo binstall -y cargo-ndk
+            sudo apt-get update -y
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ccache yasm nasm pkg-config python3-pip python3-setuptools
+            python3 -m pip install --upgrade pip
+            pip3 install meson ninja
+      - run:
+          name: Build MPV, FFmpeg & Extract Headers
+          no_output_timeout: 45m
+          command: |
+            export PATH="/usr/lib/ccache:$PATH"
+            ccache -s || true
+            if [ ! -d "mpv-android" ]; then git clone https://github.com/mpv-android/mpv-android.git; fi
+            cd mpv-android/buildscripts
+            export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/29.0.14206865
+            export PATH=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+            chmod +x *.sh
+            git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "git://git.ffmpeg.org/ffmpeg.git"
+            git config --global url."https://".insteadOf git://
+            ./download.sh
+
+            for arch in arm64 armv7l x86 x86_64; do
+              ./buildall.sh --arch $arch
+              if [ "$arch" = "arm64" ]; then ABI="arm64-v8a";
+              elif [ "$arch" = "armv7l" ]; then ABI="armeabi-v7a";
+              else ABI="$arch"; fi
+              TARGET_DIR="../../app/src/main/jniLibs/$ABI"
+              mkdir -p "$TARGET_DIR"
+              find ~/project -type f -name "libmpv.so" | grep "$arch" | head -n 1 | xargs -I {} cp {} "$TARGET_DIR/" || true
+              find ~/project -type f -name "*.so" | grep -E "(libavcodec|libavdevice|libavfilter|libavformat|libavutil|libswresample|libswscale)" | grep "$arch" | while read -r libfile; do
+                cp "$libfile" "$TARGET_DIR/" || true
+              done
+            done
+
+            mkdir -p ~/project/app/src/main/cpp/include/mpv
+            curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/client.h -o ~/project/app/src/main/cpp/include/mpv/client.h
+            curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render.h -o ~/project/app/src/main/cpp/include/mpv/render.h
+            curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render_gl.h -o ~/project/app/src/main/cpp/include/mpv/render_gl.h
+            curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/stream_cb.h -o ~/project/app/src/main/cpp/include/mpv/stream_cb.h
+
+            FFMPEG_INCLUDE_BASE=$(find ~/project/mpv-android/buildscripts/prefix -maxdepth 2 -type d -name "include" | head -n 1)
+            if [ -z "$FFMPEG_INCLUDE_BASE" ]; then
+              FFMPEG_INCLUDE_BASE=$(find ~/project/mpv-android -path "*/include/libavcodec" -type d | head -n 1 | sed 's|/libavcodec||')
+            fi
+            if [ -n "$FFMPEG_INCLUDE_BASE" ]; then
+              for lib in libavcodec libavdevice libavfilter libavformat libavutil libswresample libswscale; do
+                if [ -d "$FFMPEG_INCLUDE_BASE/$lib" ]; then cp -r "$FFMPEG_INCLUDE_BASE/$lib" ~/project/app/src/main/cpp/include/; fi
+              done
+            fi
+      - save_cache:
+          paths:
+            - mpv-android
+            - .mpv-upstream-hash
+          key: v1-mpv-src-{{ checksum ".mpv-upstream-hash" }}
+      - save_cache:
+          paths:
+            - ~/.cache/ccache
+          key: v1-ccache-{{ checksum "app/src/main/rust/Cargo.lock" }}
+      - save_cache:
+          paths:
+            - ~/.cargo/registry
+            - ~/.cargo/git
+            - ~/.cargo/bin
+            - app/src/main/rust/target
+          key: v1-rust-registry-{{ checksum "app/src/main/rust/Cargo.lock" }}
+      - run:
+          name: Build Debug APK
+          command: |
+            echo $GOOGLE_SERVICES_JSON | base64 -d > app/google-services.json
+            chmod +x gradlew
+            TMDB_API_KEY=${TMDB_API_KEY} STARTAPP_APP_ID=${STARTAPP_APP_ID} BACKEND_BASE_URL=${BACKEND_BASE_URL} ./gradlew assembleDebug --stacktrace
+      - store_artifacts:
+          path: app/build/outputs/apk/debug/app-debug.apk
+          destination: StreamX-Ultra-Debug-APK
+      - run:
+          name: Notify GitHub Actions Fallback (on failure)
+          when: on_fail
+          command: |
+            if [[ -n "${GITHUB_PAT}" ]]; then
+              REF="${CIRCLE_BRANCH:-$CIRCLE_TAG}"
+              curl -X POST \
+                -H "Authorization: token ${GITHUB_PAT}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/dispatches" \
+                -d "{\"event_type\":\"circleci-failed\",\"client_payload\":{\"ref\":\"${REF}\",\"sha\":\"${CIRCLE_SHA1}\"}}" || true
+            fi
+
+  release-build:
+    executor: android-builder
+    environment:
+      CCACHE_DIR: "/home/circleci/.cache/ccache"
+      CCACHE_MAXSIZE: "2G"
+    steps:
+      - run:
+          name: Setup Swap Space
+          command: |
+            sudo fallocate -l 4G /swapfile || true
+            sudo chmod 600 /swapfile || true
+            sudo swapon /swapfile || true
+            free -h
+      - checkout
+      - run:
+          name: Initialize Git Submodules
+          command: |
+            git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+            git submodule update --init --recursive
+      - run:
+          name: Get mpv-android upstream commit hash
+          command: |
+            HASH=$(git ls-remote https://github.com/mpv-android/mpv-android.git HEAD 2>/dev/null | awk '{print $1}')
+            if [ -z "$HASH" ]; then HASH="unknown"; fi
+            echo "$HASH" > .mpv-upstream-hash
+            echo "mpv-android HEAD: $HASH"
+      - restore_cache:
+          keys:
+            - v1-mpv-src-{{ checksum ".mpv-upstream-hash" }}
+      - restore_cache:
+          keys:
+            - v1-ccache-{{ checksum "app/src/main/rust/Cargo.lock" }}
+            - v1-ccache-
+      - restore_cache:
+          keys:
+            - v1-rust-registry-{{ checksum "app/src/main/rust/Cargo.lock" }}
+            - v1-rust-registry-
+      - run:
+          name: Install Toolchains, Rust & NDK
+          no_output_timeout: 30m
+          command: |
+            echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865"
+            echo 'export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865' >> $BASH_ENV
+            rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
+            curl -LsSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xvzf - -C ~/.cargo/bin
+            cargo binstall -y cargo-ndk
+            sudo apt-get update -y
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ccache yasm nasm pkg-config python3-pip python3-setuptools
+            python3 -m pip install --upgrade pip
+            pip3 install meson ninja
+      - run:
+          name: Build MPV, FFmpeg & Extract Headers
+          no_output_timeout: 45m
+          command: |
+            export PATH="/usr/lib/ccache:$PATH"
+            if [ ! -d "mpv-android" ]; then git clone https://github.com/mpv-android/mpv-android.git; fi
+            cd mpv-android/buildscripts
+            export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/29.0.14206865
+            export PATH=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+            chmod +x *.sh
+            git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "git://git.ffmpeg.org/ffmpeg.git"
+            git config --global url."https://".insteadOf git://
+            ./download.sh
+
+            for arch in arm64 armv7l x86 x86_64; do
+              ./buildall.sh --arch $arch
+              if [ "$arch" = "arm64" ]; then ABI="arm64-v8a";
+              elif [ "$arch" = "armv7l" ]; then ABI="armeabi-v7a";
+              else ABI="$arch"; fi
+              TARGET_DIR="../../app/src/main/jniLibs/$ABI"
+              mkdir -p "$TARGET_DIR"
+              find ~/project -type f -name "libmpv.so" | grep "$arch" | head -n 1 | xargs -I {} cp {} "$TARGET_DIR/" || true
+              find ~/project -type f -name "*.so" | grep -E "(libavcodec|libavdevice|libavfilter|libavformat|libavutil|libswresample|libswscale)" | grep "$arch" | while read -r libfile; do
+                cp "$libfile" "$TARGET_DIR/" || true
+              done
+            done
+
+            mkdir -p ~/project/app/src/main/cpp/include/mpv
+            curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/client.h -o ~/project/app/src/main/cpp/include/mpv/client.h
+            curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render.h -o ~/project/app/src/main/cpp/include/mpv/render.h
+            curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render_gl.h -o ~/project/app/src/main/cpp/include/mpv/render_gl.h
+            curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/stream_cb.h -o ~/project/app/src/main/cpp/include/mpv/stream_cb.h
+
+            FFMPEG_INCLUDE_BASE=$(find ~/project/mpv-android/buildscripts/prefix -maxdepth 2 -type d -name "include" | head -n 1)
+            if [ -z "$FFMPEG_INCLUDE_BASE" ]; then
+              FFMPEG_INCLUDE_BASE=$(find ~/project/mpv-android -path "*/include/libavcodec" -type d | head -n 1 | sed 's|/libavcodec||')
+            fi
+            if [ -n "$FFMPEG_INCLUDE_BASE" ]; then
+              for lib in libavcodec libavdevice libavfilter libavformat libavutil libswresample libswscale; do
+                if [ -d "$FFMPEG_INCLUDE_BASE/$lib" ]; then cp -r "$FFMPEG_INCLUDE_BASE/$lib" ~/project/app/src/main/cpp/include/; fi
+              done
+            fi
+      - save_cache:
+          paths:
+            - mpv-android
+            - .mpv-upstream-hash
+          key: v1-mpv-src-{{ checksum ".mpv-upstream-hash" }}
+      - save_cache:
+          paths:
+            - ~/.cache/ccache
+          key: v1-ccache-{{ checksum "app/src/main/rust/Cargo.lock" }}
+      - save_cache:
+          paths:
+            - ~/.cargo/registry
+            - ~/.cargo/git
+            - ~/.cargo/bin
+            - app/src/main/rust/target
+          key: v1-rust-registry-{{ checksum "app/src/main/rust/Cargo.lock" }}
+      - run:
+          name: Build Signed Production APK
+          command: |
+            echo "${RELEASE_KEYSTORE_FILE}" | base64 --decode > ~/project/release.keystore
+            echo $GOOGLE_SERVICES_JSON | base64 -d > app/google-services.json
+            chmod +x gradlew
+            TMDB_API_KEY=${TMDB_API_KEY} STARTAPP_APP_ID=${STARTAPP_APP_ID} BACKEND_BASE_URL=${BACKEND_BASE_URL} ./gradlew assembleRelease \
+              -PRELEASE_KEYSTORE_FILE=${RELEASE_KEYSTORE_FILE} \
+              -PRELEASE_KEYSTORE_PASSWORD=${RELEASE_KEYSTORE_PASSWORD} \
+              -PRELEASE_KEY_ALIAS=${RELEASE_KEY_ALIAS} \
+              -PRELEASE_KEY_PASSWORD=${RELEASE_KEY_PASSWORD}
+      - store_artifacts:
+          path: app/build/outputs/apk/release/
+          destination: StreamX-Ultra-Release-APK
+      - run:
+          name: Notify GitHub Actions Fallback (on failure)
+          when: on_fail
+          command: |
+            if [[ -n "${GITHUB_PAT}" ]]; then
+              REF="${CIRCLE_BRANCH:-$CIRCLE_TAG}"
+              curl -X POST \
+                -H "Authorization: token ${GITHUB_PAT}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/dispatches" \
+                -d "{\"event_type\":\"circleci-failed\",\"client_payload\":{\"ref\":\"${REF}\",\"sha\":\"${CIRCLE_SHA1}\"}}" || true
+            fi
+
+workflows:
+  version: 2
+  build-pipeline:
+    jobs:
+      - debug-build:
+          filters:
+            branches:
+              only: main
+      - release-build:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v.*/
+              
