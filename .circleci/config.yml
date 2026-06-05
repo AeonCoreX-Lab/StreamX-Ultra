@@ -3,7 +3,7 @@ version: 2.1
 executors:
   android-builder:
     docker:
-      - image:  cimg/android:2026.03.1
+      - image: cimg/android:2026.03.1
     resource_class: large
 
 jobs:
@@ -16,9 +16,12 @@ jobs:
       - run:
           name: Setup Swap Space
           command: |
-            sudo fallocate -l 4G /swapfile || true
-            sudo chmod 600 /swapfile || true
-            sudo swapon /swapfile || true
+            sudo swapoff /swapfile 2>/dev/null || true
+            sudo rm -f /swapfile 2>/dev/null || true
+            sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
             free -h
       - checkout
       - run:
@@ -36,13 +39,11 @@ jobs:
       - run:
           name: Generate cache keys
           command: |
-            # Rust/Cargo cache key - file na thakle fallback
             if [ -f "app/src/main/rust/Cargo.lock" ]; then
               cat app/src/main/rust/Cargo.lock > .rust-cache-key
             else
               echo "rust-no-lock-$(date +%Y%m%d)" > .rust-cache-key
             fi
-            # ccache key - same
             if [ -f "app/src/main/rust/Cargo.lock" ]; then
               cat app/src/main/rust/Cargo.lock > .ccache-key
             else
@@ -63,13 +64,10 @@ jobs:
           name: Install Rust Toolchain
           no_output_timeout: 10m
           command: |
-            # rustup install kora (image e nai)
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
             echo 'source $HOME/.cargo/env' >> $BASH_ENV
             source $HOME/.cargo/env
-            # Android targets
             rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
-            # cargo-ndk install
             curl -LsSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xvzf - -C ~/.cargo/bin
             cargo binstall -y cargo-ndk
       - run:
@@ -79,9 +77,10 @@ jobs:
             echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865"
             echo 'export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865' >> $BASH_ENV
             sudo apt-get update -y
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ccache yasm nasm pkg-config python3-pip python3-setuptools
-            python3 -m pip install --upgrade pip
-            pip3 install meson ninja
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+              ccache yasm nasm pkg-config \
+              python3-pip python3-setuptools \
+              meson ninja-build
       - run:
           name: Build MPV, FFmpeg & Extract Headers
           no_output_timeout: 45m
@@ -174,9 +173,12 @@ jobs:
       - run:
           name: Setup Swap Space
           command: |
-            sudo fallocate -l 4G /swapfile || true
-            sudo chmod 600 /swapfile || true
-            sudo swapon /swapfile || true
+            sudo swapoff /swapfile 2>/dev/null || true
+            sudo rm -f /swapfile 2>/dev/null || true
+            sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
             free -h
       - checkout
       - run:
@@ -232,9 +234,10 @@ jobs:
             echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865"
             echo 'export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865' >> $BASH_ENV
             sudo apt-get update -y
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ccache yasm nasm pkg-config python3-pip python3-setuptools
-            python3 -m pip install --upgrade pip
-            pip3 install meson ninja
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+              ccache yasm nasm pkg-config \
+              python3-pip python3-setuptools \
+              meson ninja-build
       - run:
           name: Build MPV, FFmpeg & Extract Headers
           no_output_timeout: 45m
