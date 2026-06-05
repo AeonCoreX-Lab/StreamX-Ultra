@@ -54,12 +54,13 @@ jobs:
             ${{ runner.os }}-rust-
 
       # ── MPV + FFmpeg ───────────────────────────────────────────────────────
-      - name: Install build tools
+     - name: Install latest Meson & Ninja
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y meson ninja-build yasm nasm python3-pip pkg-config
+          sudo apt-get update
+          sudo apt-get install -y python3-pip python3-setuptools
+          python3 -m pip install --upgrade pip
           pip3 install meson ninja
-
+          
       - name: Build mpv-android (Universal Support)
         run: |
           sudo apt update && sudo apt install -y meson ninja-build yasm nasm python3-pip pkg-config
