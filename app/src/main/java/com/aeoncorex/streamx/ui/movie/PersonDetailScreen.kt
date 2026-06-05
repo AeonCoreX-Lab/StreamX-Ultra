@@ -50,10 +50,15 @@ fun PersonDetailScreen(
     val CardBg    = Color(0xFF111120)
 
     LaunchedEffect(personId) {
+        if (personId <= 0) {
+            // Cinemeta-only cast member — no TMDB personId available
+            isLoading = false
+            return@LaunchedEffect
+        }
         val result = repository.fetchPersonDetails(personId)
         person = result
         isLoading = false
-        isCinemetaFallback = result != null && result.socialLinks.imdbId == null 
+        isCinemetaFallback = result != null && result.socialLinks.imdbId == null
                             && result.socialLinks.instagramId == null
                             && result.socialLinks.twitterId == null
                             && result.socialLinks.facebookId == null

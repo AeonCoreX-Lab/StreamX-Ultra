@@ -141,30 +141,37 @@ data class CastDto(
 data class CrewDto(val id: Int, val name: String, val job: String?)
 data class VideoDto(val key: String, val site: String, val type: String)
 
-// ── Rich details model (assembled by MovieRepository) ────────────────────────
 data class FullMovieDetails(
-    val basic:           Movie,
-    val runtime:         String,
-    val genres:          List<String>,
-    val cast:            List<CastMember>,
-    val director:        String,
-    val trailerKey:      String?,
-    val recommendations: List<Movie>,
-    val seasons:         List<SeasonDto>  = emptyList(),
-    val imdbId:          String?,
-    val logo:            String           = "",
-    val awards:          String           = "",
-    val country:         String           = "",
-    val status:          String           = "",
-    val imdbRating:      Double           = 0.0,
-    val cinemetaEnriched: Boolean         = false
+    val basic           : Movie,
+    val runtime         : String,
+    val genres          : List<String>,
+    val cast            : List<CastMember>,
+    val director        : String,
+    val trailerKey      : String?,
+    val recommendations : List<Movie>,
+    val seasons         : List<SeasonDto>,
+    val imdbId          : String?,
+
+    // Cinemeta-exclusive enrichments
+    val logo            : String  = "",     // Netflix-style title logo
+    val awards          : String  = "",     // e.g. "Won 3 Oscars..."
+    val country         : String  = "",     // e.g. "USA"
+    val language        : String  = "",     // ← NEW: e.g. "English"
+    val status          : String  = "",     // e.g. "Ended", "Returning Series"
+
+    // Dual ratings — shown side-by-side in UI
+    val tmdbRating      : Double  = 0.0,   // ← NEW: TMDB vote_average (green ⭐)
+    val imdbRating      : Double  = 0.0,   // IMDb rating via Cinemeta  (gold ★)
+
+    val cinemetaEnriched: Boolean = false   // true if Cinemeta data merged
 )
 
+// ── CastMember ────────────────────────────────────────────────────────────
 data class CastMember(
-    val name:      String,
-    val role:      String,
-    val imageUrl:  String,
-    val personId:  Int    = 0
+    val name     : String,
+    val role     : String,
+    val imageUrl : String,
+    val personId : Int     // 0 = Cinemeta-only (no navigation), >0 = TMDB
 )
 
 // ── Person / Actor detail ─────────────────────────────────────────────────────

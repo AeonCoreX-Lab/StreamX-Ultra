@@ -1,21 +1,14 @@
 package com.aeoncorex.streamx.navigation
 
-// ════════════════════════════════════════════════════════════════════════════
-//  AppNavigation.kt — Updated with Live Event Player route
-//  ────────────────────────────────────────────────────────
-//  CHANGES from original:
-//    • Added "live_event_player/{encodedUrl}" route
-//      (Live events use the existing PlayerScreen — no new screen needed)
-//    • No other changes
-// ════════════════════════════════════════════════════════════════════════════
-
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.aeoncorex.streamx.ui.account.AccountScreen
+import com.aeoncorex.streamx.ui.addons.AddonScreen
 import com.aeoncorex.streamx.ui.auth.AuthScreen
 import com.aeoncorex.streamx.ui.main.MainScreen
 import com.aeoncorex.streamx.ui.settings.SettingsScreen
@@ -38,13 +31,28 @@ import com.aeoncorex.streamx.ui.movie.MovieLinkSelectionScreen
 import com.aeoncorex.streamx.ui.movie.MoviePlayerScreen
 import com.aeoncorex.streamx.ui.movie.ExoMoviePlayerScreen
 import com.aeoncorex.streamx.ui.movie.ExoSourceSelectionScreen
-import com.aeoncorex.streamx.ui.movie.YoutubePlayerSheet
 import com.aeoncorex.streamx.ui.notifications.NotificationsScreen
 import com.aeoncorex.streamx.ui.movie.PersonDetailScreen
+import java.net.URLEncoder
 
 @Composable
-fun AppNavigation(themeViewModel: ThemeViewModel) {
+fun AppNavigation(
+    themeViewModel:    ThemeViewModel,
+    pendingInstallUrl: String? = null   // from deeplink: streamx://install-addon?url=...
+) {
     val navController = rememberNavController()
+
+    // ── Navigate to addon install screen when deeplink is received ─────────────
+    LaunchedEffect(pendingInstallUrl) {
+        if (!pendingInstallUrl.isNullOrEmpty()) {
+            val enc = URLEncoder.encode(pendingInstallUrl, "UTF-8")
+            // Navigate to addons screen with pre-filled install URL
+            navController.navigate("addons?installUrl=$enc") {
+                // Don't add to back stack if we're on splash
+                launchSingleTop = true
+            }
+        }
+    }
 
     NavHost(navController = navController, startDestination = "splash") {
         composable("splash")      { SplashScreen(navController) }
@@ -52,21 +60,35 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
         composable("auth")        { AuthScreen(navController) }
         composable("home")        { MainScreen(navController) }
 
-        // ── Live TV Player ────────────────────────────────────────────────
+        // ── Addon Management ──────────────────────────────────────────────────
+        // Accepts optional installUrl from deeplink
+        composable(
+            route = "addons?installUrl={installUrl}",
+            arguments = listOf(
+                navArgument("installUrl") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
+            )
+        ) { backStack ->
+            val installUrl = backStack.arguments?.getString("installUrl")
+                ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+            AddonScreen(navController = navController, autoInstallUrl = installUrl)
+        }
+
+        // Simple addons route (no install URL)
+        composable("addons") { AddonScreen(navController) }
+
+        // ── Live TV ───────────────────────────────────────────────────────────
         composable(
             route     = "player/{encodedUrl}",
             arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
-        ) { backStack ->
-            PlayerScreen(
-                navController = navController,
-                encodedUrl    = backStack.arguments?.getString("encodedUrl") ?: ""
-            )
+        ) { back ->
+            PlayerScreen(navController = navController,
+                encodedUrl = back.arguments?.getString("encodedUrl") ?: "")
         }
 
-        // ── Live Event Player ─────────────────────────────────────────────
-        // Route: event_player/{eventId}/{streamIndex}/{encodedTitle}
-        // streamIndex = which stream in event.streams to play first
-        // Player can switch to other streams without leaving the screen
         composable(
             route = "event_player/{eventId}/{streamIndex}/{encodedTitle}",
             arguments = listOf(
@@ -75,15 +97,13 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
                 navArgument("encodedTitle") { type = NavType.StringType; defaultValue = "" }
             )
         ) { back ->
-            EventPlayerScreen(
-                navController = navController,
-                eventId       = back.arguments?.getString("eventId")    ?: "",
-                streamIndex   = back.arguments?.getInt("streamIndex")   ?: 0,
-                encodedTitle  = back.arguments?.getString("encodedTitle") ?: ""
-            )
+            EventPlayerScreen(navController = navController,
+                eventId      = back.arguments?.getString("eventId")     ?: "",
+                streamIndex  = back.arguments?.getInt("streamIndex")    ?: 0,
+                encodedTitle = back.arguments?.getString("encodedTitle") ?: "")
         }
 
-        // ── Movie section ─────────────────────────────────────────────────
+        // ── Movie ─────────────────────────────────────────────────────────────
         composable("movie")          { MovieScreen(navController) }
         composable("movie_settings") { MovieSettingsScreen(navController) }
 
@@ -93,15 +113,12 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
                 navArgument("movieId") { type = NavType.IntType },
                 navArgument("type")    { type = NavType.StringType }
             )
-        ) { backStack ->
-            MovieDetailsScreen(
-                navController = navController,
-                movieId       = backStack.arguments?.getInt("movieId") ?: 0,
-                movieType     = backStack.arguments?.getString("type") ?: "MOVIE"
-            )
+        ) { back ->
+            MovieDetailsScreen(navController = navController,
+                movieId   = back.arguments?.getInt("movieId") ?: 0,
+                movieType = back.arguments?.getString("type") ?: "MOVIE")
         }
 
-        // ── ExoPlayer source selection ────────────────────────────────────
         composable(
             route     = "exo_source/{imdbId}/{tmdbId}/{title}/{type}/{season}/{episode}",
             arguments = listOf(
@@ -112,19 +129,16 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
                 navArgument("season")  { type = NavType.IntType },
                 navArgument("episode") { type = NavType.IntType }
             )
-        ) { backStack ->
-            ExoSourceSelectionScreen(
-                navController = navController,
-                imdbId        = backStack.arguments?.getString("imdbId")  ?: "",
-                tmdbId        = backStack.arguments?.getInt("tmdbId")     ?: 0,
-                title         = backStack.arguments?.getString("title")   ?: "",
-                type          = backStack.arguments?.getString("type")    ?: "MOVIE",
-                season        = backStack.arguments?.getInt("season")     ?: 0,
-                episode       = backStack.arguments?.getInt("episode")    ?: 0
-            )
+        ) { back ->
+            ExoSourceSelectionScreen(navController = navController,
+                imdbId  = back.arguments?.getString("imdbId")  ?: "",
+                tmdbId  = back.arguments?.getInt("tmdbId")     ?: 0,
+                title   = back.arguments?.getString("title")   ?: "",
+                type    = back.arguments?.getString("type")    ?: "MOVIE",
+                season  = back.arguments?.getInt("season")     ?: 0,
+                episode = back.arguments?.getInt("episode")    ?: 0)
         }
 
-        // ── ExoPlayer (instant) ───────────────────────────────────────────
         composable(
             route     = "exo_player/{encodedUrl}/{title}/{quality}/{language}/{imdbId}/{type}/{season}/{episode}/{subtitlesJson}/{headersJson}",
             arguments = listOf(
@@ -139,73 +153,66 @@ fun AppNavigation(themeViewModel: ThemeViewModel) {
                 navArgument("subtitlesJson") { type = NavType.StringType; defaultValue = "%5B%5D" },
                 navArgument("headersJson")   { type = NavType.StringType; defaultValue = "%7B%7D" }
             )
-        ) { backStack ->
-            ExoMoviePlayerScreen(
-                navController  = navController,
-                streamUrl      = backStack.arguments?.getString("encodedUrl")    ?: "",
-                title          = backStack.arguments?.getString("title")         ?: "",
-                quality        = backStack.arguments?.getString("quality")       ?: "Auto",
-                language       = backStack.arguments?.getString("language")      ?: "English",
-                imdbId         = backStack.arguments?.getString("imdbId"),
-                movieType      = backStack.arguments?.getString("type")          ?: "MOVIE",
-                season         = backStack.arguments?.getInt("season")           ?: 0,
-                subtitlesJson  = backStack.arguments?.getString("subtitlesJson") ?: "[]",
-                headersJson    = backStack.arguments?.getString("headersJson")   ?: "{}",
-                episode        = backStack.arguments?.getInt("episode")          ?: 0
-            )
+        ) { back ->
+            ExoMoviePlayerScreen(navController = navController,
+                streamUrl     = back.arguments?.getString("encodedUrl")    ?: "",
+                title         = back.arguments?.getString("title")         ?: "",
+                quality       = back.arguments?.getString("quality")       ?: "Auto",
+                language      = back.arguments?.getString("language")      ?: "English",
+                imdbId        = back.arguments?.getString("imdbId"),
+                movieType     = back.arguments?.getString("type")          ?: "MOVIE",
+                season        = back.arguments?.getInt("season")           ?: 0,
+                subtitlesJson = back.arguments?.getString("subtitlesJson") ?: "[]",
+                headersJson   = back.arguments?.getString("headersJson")   ?: "{}",
+                episode       = back.arguments?.getInt("episode")          ?: 0)
         }
 
-        // ── Torrent selection ─────────────────────────────────────────────
+        // ── Torrent ───────────────────────────────────────────────────────────
         composable(
             route     = "torrent_selection/{imdbId}/{tmdbId}/{title}/{type}/{season}/{episode}",
             arguments = listOf(
-                navArgument("imdbId")   { type = NavType.StringType },
-                navArgument("tmdbId")   { type = NavType.IntType },
-                navArgument("title")    { type = NavType.StringType },
-                navArgument("type")     { type = NavType.StringType },
-                navArgument("season")   { type = NavType.IntType },
-                navArgument("episode")  { type = NavType.IntType }
+                navArgument("imdbId")  { type = NavType.StringType },
+                navArgument("tmdbId")  { type = NavType.IntType },
+                navArgument("title")   { type = NavType.StringType },
+                navArgument("type")    { type = NavType.StringType },
+                navArgument("season")  { type = NavType.IntType },
+                navArgument("episode") { type = NavType.IntType }
             )
-        ) { backStack ->
-            MovieLinkSelectionScreen(
-                navController = navController,
-                imdbId   = backStack.arguments?.getString("imdbId")  ?: "",
-                tmdbId   = backStack.arguments?.getInt("tmdbId")     ?: 0,
-                title    = backStack.arguments?.getString("title")   ?: "",
-                type     = backStack.arguments?.getString("type")    ?: "MOVIE",
-                season   = backStack.arguments?.getInt("season")     ?: 0,
-                episode  = backStack.arguments?.getInt("episode")    ?: 0
-            )
+        ) { back ->
+            MovieLinkSelectionScreen(navController = navController,
+                imdbId  = back.arguments?.getString("imdbId")  ?: "",
+                tmdbId  = back.arguments?.getInt("tmdbId")     ?: 0,
+                title   = back.arguments?.getString("title")   ?: "",
+                type    = back.arguments?.getString("type")    ?: "MOVIE",
+                season  = back.arguments?.getInt("season")     ?: 0,
+                episode = back.arguments?.getInt("episode")    ?: 0)
         }
 
-        // ── MPV Torrent Player ────────────────────────────────────────────
         composable(
             route     = "torrent_player/{encodedUrl}",
             arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
-        ) { backStack ->
-            MoviePlayerScreen(
-                navController = navController,
-                encodedUrl    = backStack.arguments?.getString("encodedUrl") ?: ""
-            )
+        ) { back ->
+            MoviePlayerScreen(navController = navController,
+                encodedUrl = back.arguments?.getString("encodedUrl") ?: "")
         }
 
-        // ── Music ─────────────────────────────────────────────────────────
+        // ── Music ─────────────────────────────────────────────────────────────
         composable("music")        { MusicScreen(navController) }
         composable("music_player") { MusicPlayerScreen(navController) }
 
-        // ── Other screens ─────────────────────────────────────────────────
-        composable("settings")     { SettingsScreen(navController) }
-        composable("account")      { AccountScreen(navController) }
-        composable("theme")        { ThemeScreen(navController, themeViewModel) }
-        composable("privacy")      { PrivacyPolicyScreen(navController) }
-        composable("about")        { AboutScreen(navController) }
-        composable("copyright")    { CopyrightScreen(navController) }
-        composable("premium")      { PremiumScreen(navController) }
+        // ── Other ─────────────────────────────────────────────────────────────
+        composable("settings")      { SettingsScreen(navController) }
+        composable("account")       { AccountScreen(navController) }
+        composable("theme")         { ThemeScreen(navController, themeViewModel) }
+        composable("privacy")       { PrivacyPolicyScreen(navController) }
+        composable("about")         { AboutScreen(navController) }
+        composable("copyright")     { CopyrightScreen(navController) }
+        composable("premium")       { PremiumScreen(navController) }
         composable("notifications") { NotificationsScreen() }
-        composable("person_detail/{personId}") { backStackEntry ->
-            val personId = backStackEntry.arguments?.getString("personId")?.toIntOrNull()
-                ?: return@composable
-            PersonDetailScreen(personId = personId, navController = navController)
+        composable("person_detail/{personId}") { back ->
+            PersonDetailScreen(
+                personId      = back.arguments?.getString("personId")?.toIntOrNull() ?: return@composable,
+                navController = navController)
         }
     }
 }

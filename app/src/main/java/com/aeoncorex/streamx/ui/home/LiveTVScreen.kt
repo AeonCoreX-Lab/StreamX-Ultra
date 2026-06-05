@@ -610,7 +610,7 @@ fun HDStreamzMatchCard(
     val accentColor = sportColorFromHex(event.sportColor)
     val cardBg      = Color(0xFF1A1A24)
 
-    // Format time label — "LIVE" / "Today, HH:mm" / "Tomorrow, HH:mm" / "dd MMM, HH:mm"
+    // Format time label — "LIVE" / "In X min, HH:mm" / "Tomorrow, HH:mm" / "dd MMM, HH:mm"
     val timeLabel = remember(event.startTime, event.isLive) {
         if (event.isLive) {
             val ms = parseEventTime(event.startTime) ?: return@remember "LIVE"
@@ -621,7 +621,7 @@ fun HDStreamzMatchCard(
             parseEventTime(event.startTime)?.let { ms ->
                 val now = System.currentTimeMillis()
                 val cal = Calendar.getInstance().apply { timeInMillis = ms }
-                val todayCal = Calendar.getInstance()
+                val todayCal    = Calendar.getInstance()
                 val tomorrowCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
                 val hm = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms))
 
@@ -629,8 +629,13 @@ fun HDStreamzMatchCard(
                     a.get(Calendar.YEAR) == b.get(Calendar.YEAR) &&
                     a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR)
 
+                val minsUntil = (ms - now) / 60_000
+
                 when {
-                    sameDay(cal, todayCal)    -> "In ${((ms - now) / 60_000)} min, $hm"
+                    sameDay(cal, todayCal) && minsUntil < 0 ->
+                        // Event has started but is_live=false — show as live
+                        "● LIVE  $hm"
+                    sameDay(cal, todayCal)    -> "In ${minsUntil} min, $hm"
                     sameDay(cal, tomorrowCal) -> "Tomorrow, $hm"
                     else -> "${SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(ms))}, $hm"
                 }

@@ -1,8 +1,12 @@
 package com.aeoncorex.streamx.ui.movie
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -28,6 +32,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,20 +46,42 @@ private val YtPurpleGlow= Color(0xFFB388FF)
 private val YtSheetBg   = Color(0xFF08080F)
 private val YtDarkBg    = Color(0xFF020810)
 private val YtGlass     = Color(0x10FFFFFF)
+private val YtErrorRed  = Color(0xFFFF5252)
 
 // ══════════════════════════════════════════════════════════════════
-//  IFrame Player API HTML
-//  KEY FIX: loadDataWithBaseURL("https://www.youtube.com", ...)
-//  YouTube allows embed only when the base URL is its own domain.
-//  Directly calling loadUrl("youtube.com/embed/...") in a WebView
-//  triggers Error 153 because YouTube detects the WebView UA and
-//  refuses the "Video player configuration".
+//  YOUTUBE IFRAME PLAYER API — FULL FIXED VERSION
+//  Fixes applied:
+//  1. playsinline=1  (was 0 — caused mobile fullscreen crash)
+//  2. enablejsapi=1  (required for API events)
+//  3. origin=https://www.youtube.com  (security / embed auth)
+//  4. mute=1 + autoplay=1  (mobile browser autoplay policy)
+//  5. host=https://www.youtube-nocookie.com  (fewer restrictions)
+//  6. JS Bridge for error detection + fallback to YouTube app
+//  7. MixedContentMode + DOM storage for modern WebView
+//  8. Hardware acceleration manifest flag required
 // ══════════════════════════════════════════════════════════════════
+
+/** JS bridge to catch player errors from WebView */
+class YoutubeJsBridge(
+    private val onError: (String) -> Unit,
+    private val onReady: () -> Unit
+) {
+    @JavascriptInterface
+    fun onPlayerError(errorCode: String) {
+        onError(errorCode)
+    }
+
+    @JavascriptInterface
+    fun onPlayerReady() {
+        onReady()
+    }
+}
+
 private fun buildYoutubeHtml(videoKey: String) = """
 <!DOCTYPE html>
 <html>
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -76,36 +103,63 @@ private fun buildYoutubeHtml(videoKey: String) = """
 </head>
 <body>
 <div id="player"></div>
-<script src="https://www.youtube.com/iframe_api"></script>
 <script>
+  var tag = document.createElement('script');
+  tag.src = "https://www.youtube.com/iframe_api";
+  var firstScriptTag = document.getElementsByTagName('script')[0];
+  firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
   var player;
   function onYouTubeIframeAPIReady() {
     player = new YT.Player('player', {
       videoId: '$videoKey',
+      host: 'https://www.youtube-nocookie.com',
       playerVars: {
-        autoplay    : 1,
-        rel         : 0,
-        modestbranding: 1,
-        showinfo    : 0,
-        fs          : 1,
-        playsinline : 0,
-        iv_load_policy: 3,
-        controls    : 1,
-        cc_load_policy: 0,
-        disablekb   : 0
+        autoplay       : 1,
+        mute           : 1,
+        rel            : 0,
+        modestbranding : 1,
+        showinfo       : 0,
+        fs             : 1,
+        playsinline    : 1,
+        iv_load_policy : 3,
+        controls       : 1,
+        cc_load_policy : 0,
+        disablekb      : 0,
+        enablejsapi    : 1,
+        origin         : 'https://www.youtube.com'
       },
       events: {
-        onReady: function(e) { e.target.playVideo(); }
+        onReady: function(e) {
+          e.target.playVideo();
+          try { YoutubeBridge.onPlayerReady(); } catch(err) {}
+        },
+        onError: function(e) {
+          try { YoutubeBridge.onPlayerError(e.data.toString()); } catch(err) {}
+        },
+        onStateChange: function(e) {
+          // State -1 = unstarted, 0 = ended, 1 = playing, 2 = paused, 3 = buffering, 5 = cued
+          if (e.data === 1) {
+            try { YoutubeBridge.onPlayerReady(); } catch(err) {}
+          }
+        }
       }
     });
   }
+
+  // Safety: if API fails to load, report after 8s
+  setTimeout(function() {
+    if (typeof YT === 'undefined' || !player || !player.playVideo) {
+      try { YoutubeBridge.onPlayerError('api_timeout'); } catch(err) {}
+    }
+  }, 8000);
 </script>
 </body>
 </html>
 """.trimIndent()
 
 // ══════════════════════════════════════════════════════════════════
-//  YoutubePlayerSheet
+//  YoutubePlayerSheet — FULL FIXED
 // ══════════════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
@@ -115,9 +169,16 @@ fun YoutubePlayerSheet(
     title     : String,
     onDismiss : () -> Unit,
 ) {
+    val context = LocalContext.current
+
     var fullscreenView     by remember { mutableStateOf<View?>(null) }
     var fullscreenCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
     val isFullscreen = fullscreenView != null
+
+    // Error / fallback states
+    var playerError   by remember { mutableStateOf<String?>(null) }
+    var isLoading     by remember { mutableStateOf(true) }
+    var isReady       by remember { mutableStateOf(false) }
 
     BackHandler(enabled = isFullscreen) {
         fullscreenCallback?.onCustomViewHidden()
@@ -139,11 +200,7 @@ fun YoutubePlayerSheet(
         infiniteRepeatable(tween(1500, easing = LinearEasing)), "sB"
     )
 
-    var isLoading by remember { mutableStateOf(true) }
-
-    // Pre-build HTML so it doesn't rebuild on recomposition
     val youtubeHtml = remember(videoKey) { buildYoutubeHtml(videoKey) }
-
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -269,28 +326,70 @@ fun YoutubePlayerSheet(
                                     @Suppress("DEPRECATION")
                                     javaScriptEnabled                = true
                                     domStorageEnabled                = true
+                                    databaseEnabled                  = true
                                     loadWithOverviewMode             = true
                                     useWideViewPort                  = true
                                     mediaPlaybackRequiresUserGesture = false
                                     setSupportMultipleWindows(true)
-                                    // Chrome UA — keeps YouTube from
-                                    // serving a degraded or blocked player
+                                    javaScriptCanOpenWindowsAutomatically = true
+                                    mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+
+                                    // Modern Chrome UA — MUST for YouTube to serve correct player
                                     userAgentString =
                                         "Mozilla/5.0 (Linux; Android 14; Pixel 8) " +
                                         "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                                        "Chrome/124.0.0.0 Mobile Safari/537.36"
+                                        "Chrome/126.0.0.0 Mobile Safari/537.36"
                                 }
+
+                                // JS Bridge for error / ready callbacks
+                                addJavascriptInterface(
+                                    YoutubeJsBridge(
+                                        onError = { code ->
+                                            playerError = code
+                                            isLoading = false
+                                        },
+                                        onReady = {
+                                            isReady = true
+                                            isLoading = false
+                                        }
+                                    ),
+                                    "YoutubeBridge"
+                                )
+
                                 webViewClient = object : WebViewClient() {
                                     override fun shouldOverrideUrlLoading(
                                         view: WebView, request: WebResourceRequest
-                                    ): Boolean = false
+                                    ): Boolean {
+                                        val url = request.url.toString()
+                                        // Open YouTube links externally instead of inside WebView
+                                        if (url.contains("youtube.com") || url.contains("youtu.be")) {
+                                            val intent = Intent(Intent.ACTION_VIEW, request.url)
+                                            context.startActivity(intent)
+                                            return true
+                                        }
+                                        return false
+                                    }
 
                                     override fun onPageFinished(view: WebView, url: String) {
-                                        // Small delay so the IFrame API finishes
-                                        // initialising before we hide the loader
-                                        view.postDelayed({ isLoading = false }, 1200)
+                                        // Give IFrame API time to init before hiding loader
+                                        view.postDelayed({
+                                            if (!isReady && playerError == null) {
+                                                // Still loading, keep spinner
+                                            }
+                                        }, 1500)
+                                    }
+
+                                    override fun onReceivedError(
+                                        view: WebView,
+                                        errorCode: Int,
+                                        description: String?,
+                                        failingUrl: String?
+                                    ) {
+                                        playerError = "webview_$errorCode"
+                                        isLoading = false
                                     }
                                 }
+
                                 webChromeClient = object : WebChromeClient() {
                                     override fun onShowCustomView(
                                         view: View, callback: CustomViewCallback
@@ -303,10 +402,9 @@ fun YoutubePlayerSheet(
                                         fullscreenCallback = null
                                     }
                                 }
-                                // ✅ THE FIX — load HTML with youtube.com as base URL
-                                // YouTube's IFrame API checks document.domain, so the
-                                // base URL must be https://www.youtube.com, otherwise
-                                // the player throws "Video player configuration error".
+
+                                // ✅ FIXED: loadDataWithBaseURL with youtube.com base
+                                // Using nocookie host in HTML + origin param for max compatibility
                                 loadDataWithBaseURL(
                                     "https://www.youtube.com",
                                     youtubeHtml,
@@ -319,8 +417,8 @@ fun YoutubePlayerSheet(
                     )
 
                     // Loading overlay
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible  = isLoading,
+                    AnimatedVisibility(
+                        visible  = isLoading && playerError == null,
                         enter    = fadeIn(),
                         exit     = fadeOut(tween(600)),
                         modifier = Modifier.fillMaxSize()
@@ -372,6 +470,93 @@ fun YoutubePlayerSheet(
                             }
                         }
                     }
+
+                    // Error / Unavailable overlay with fallback
+                    AnimatedVisibility(
+                        visible  = playerError != null,
+                        enter    = fadeIn(tween(400)),
+                        exit     = fadeOut(tween(300)),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .background(YtDarkBg),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = YtErrorRed.copy(0.8f),
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    "This video is unavailable",
+                                    color = Color.White.copy(0.9f),
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "Error: ${playerError ?: "unknown"} — The uploader restricted embedding.",
+                                    color = Color.White.copy(0.5f),
+                                    fontSize = 12.sp
+                                )
+                                Spacer(Modifier.height(20.dp))
+
+                                // Open in YouTube App button
+                                Box(
+                                    Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                listOf(YtPurple.copy(0.8f), YtCyan.copy(0.6f))
+                                            )
+                                        )
+                                        .clickable {
+                                            val intent = Intent(
+                                                Intent.ACTION_VIEW,
+                                                Uri.parse("https://www.youtube.com/watch?v=$videoKey")
+                                            )
+                                            intent.setPackage("com.google.android.youtube")
+                                            try {
+                                                context.startActivity(intent)
+                                            } catch (e: ActivityNotFoundException) {
+                                                // YouTube app not installed, open browser
+                                                context.startActivity(
+                                                    Intent(
+                                                        Intent.ACTION_VIEW,
+                                                        Uri.parse("https://www.youtube.com/watch?v=$videoKey")
+                                                    )
+                                                )
+                                            }
+                                        }
+                                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Rounded.PlayArrow,
+                                            null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            "Watch on YouTube",
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Nav bar bottom spacing
@@ -385,7 +570,7 @@ fun YoutubePlayerSheet(
 
     // Fullscreen overlay
     Box(Modifier.fillMaxSize()) {
-        androidx.compose.animation.AnimatedVisibility(
+        AnimatedVisibility(
             visible = isFullscreen,
             enter   = fadeIn(tween(200)),
             exit    = fadeOut(tween(200))

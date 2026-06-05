@@ -17,7 +17,7 @@ object ModflixConfig {
 
     private const val TAG         = "ModflixConfig"
     private const val CONFIG_URL  =
-        "https://raw.githubusercontent.com/himanshu8443/providers/main/modflix.json"
+        "https://aeoncorex-lab.github.io/streamx-addons/modflix.json"
     private const val CACHE_MS    = 3_600_000L   // 1 hour
 
     @Volatile private var cache:     JSONObject? = null

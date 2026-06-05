@@ -23,7 +23,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
           cache: gradle
-          
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
 
@@ -32,6 +32,7 @@ jobs:
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
 
+      # ── Rust toolchain (for torrent engine + addon transport) ─────────────
       - name: Install Rust and Cargo-NDK
         run: |
           rustup target add aarch64-linux-android
@@ -39,45 +40,29 @@ jobs:
           rustup target add x86_64-linux-android
           rustup target add i686-linux-android
           cargo install cargo-ndk
-          
-      - name: Install latest Meson & Ninja
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-pip python3-setuptools
-          python3 -m pip install --upgrade pip
-          pip3 install meson ninja
 
-      # Cache for C++ builds
-      - name: Restore vcpkg artifacts
-        uses: actions/cache@v3
+      # ── Cache Rust registry + build artifacts ─────────────────────────────
+      - name: Cache Rust build
+        uses: actions/cache@v4
         with:
           path: |
-            ~/.cache/vcpkg/archives
-            vcpkg_installed
-          key: ${{ runner.os }}-vcpkg-v5-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
+            ~/.cargo/registry
+            ~/.cargo/git
+            app/src/main/rust/target
+          key: ${{ runner.os }}-rust-${{ hashFiles('app/src/main/rust/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-vcpkg-v5-
+            ${{ runner.os }}-rust-
 
-      - name: Get latest vcpkg commit ID
-        id: vcpkg-git
+      # ── MPV + FFmpeg ───────────────────────────────────────────────────────
+      - name: Install build tools
         run: |
-          LATEST_ID=$(git ls-remote https://github.com/microsoft/vcpkg.git HEAD | awk '{ print $1 }')
-          echo "commit_id=$LATEST_ID" >> $GITHUB_OUTPUT
-          echo "Latest vcpkg ID: $LATEST_ID"
+          sudo apt-get update -qq
+          sudo apt-get install -y meson ninja-build yasm nasm python3-pip pkg-config
+          pip3 install meson ninja
 
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgDirectory: ${{ github.workspace }}/vcpkg
-          vcpkgJsonGlob: 'app/src/main/cpp/vcpkg.json'
-          vcpkgGitURL: https://github.com/microsoft/vcpkg.git
-          vcpkgGitCommitId: ${{ steps.vcpkg-git.outputs.commit_id }}
-          doNotUpdateVcpkg: false
-          
-      - name: Build mpv-android (Universal Support)
+      - name: Build mpv-android
         run: |
-          sudo apt update && sudo apt install -y meson ninja-build yasm nasm python3-pip pkg-config
-          git clone https://github.com/mpv-android/mpv-android.git
+          git clone --depth 1 https://github.com/mpv-android/mpv-android.git
           cd mpv-android/buildscripts
           export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/29.0.14206865
           export PATH=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
@@ -86,84 +71,51 @@ jobs:
           git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "git://git.ffmpeg.org/ffmpeg.git"
           git config --global url."https://".insteadOf git://
 
-          echo "📥 Downloading sources..."
           ./download.sh
 
-          for arch in arm64 armv7l x86 x86_64; do
-            echo "----------------------------------------"
-            echo "🚀 Building mpv for: $arch"
-            echo "----------------------------------------"
-
+          for arch in arm64 armv7l x86_64; do
             ./buildall.sh --arch $arch
 
-            if [ "$arch" = "arm64" ]; then ABI="arm64-v8a";
-            elif [ "$arch" = "armv7l" ]; then ABI="armeabi-v7a";
+            if   [ "$arch" = "arm64"   ]; then ABI="arm64-v8a"
+            elif [ "$arch" = "armv7l"  ]; then ABI="armeabi-v7a"
             else ABI="$arch"; fi
 
             TARGET_DIR="../../app/src/main/jniLibs/$ABI"
             mkdir -p "$TARGET_DIR"
 
-            echo "🔍 Extracting libmpv.so for $ABI..."
-            find ${{ github.workspace }} -type f -name "libmpv.so" | grep "$arch" | head -n 1 | xargs -I {} cp {} "$TARGET_DIR/" || true
-
-            echo "📦 Extracting FFmpeg .so files for $ABI..."
-            find ${{ github.workspace }} -type f -name "*.so" | grep -E "(libavcodec|libavdevice|libavfilter|libavformat|libavutil|libswresample|libswscale)" | grep "$arch" | while read -r libfile; do
-              cp "$libfile" "$TARGET_DIR/" || true
+            find ${{ github.workspace }} -name "libmpv.so"   | grep "$arch" | head -1 | xargs -I{} cp {} "$TARGET_DIR/" || true
+            find ${{ github.workspace }} -name "*.so" | grep -E "(libavcodec|libavdevice|libavfilter|libavformat|libavutil|libswresample|libswscale)" | grep "$arch" | while read f; do
+              cp "$f" "$TARGET_DIR/" || true
             done
           done
 
-          # ── MPV C++ header files ───────────────────────────────────
-          echo "📂 Downloading mpv header files..."
+          # MPV + FFmpeg headers
           mkdir -p ${{ github.workspace }}/app/src/main/cpp/include/mpv
-          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/client.h    -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/client.h
-          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render.h    -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/render.h
-          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render_gl.h -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/render_gl.h
-          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/stream_cb.h -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/stream_cb.h
+          for h in client render render_gl stream_cb; do
+            curl -sL "https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/$h.h" \
+              -o "${{ github.workspace }}/app/src/main/cpp/include/mpv/$h.h"
+          done
 
-          # ── FFmpeg C++ header files ────────────────────────────────
-          echo "📂 Copying FFmpeg header files..."
-          FFMPEG_INCLUDE_BASE=$(find ${{ github.workspace }}/mpv-android/buildscripts/prefix \
-            -maxdepth 2 -type d -name "include" | head -n 1)
-
-          if [ -z "$FFMPEG_INCLUDE_BASE" ]; then
-            echo "⚠️  Normal path not found — trying recursive search..."
-            FFMPEG_INCLUDE_BASE=$(find ${{ github.workspace }}/mpv-android \
-              -path "*/include/libavcodec" -type d | head -n 1 | sed 's|/libavcodec||')
-          fi
-
-          if [ -n "$FFMPEG_INCLUDE_BASE" ]; then
-            echo "✅ FFmpeg include base: $FFMPEG_INCLUDE_BASE"
+          FFMPEG_INC=$(find ${{ github.workspace }}/mpv-android -path "*/include/libavcodec" -type d | head -1 | sed 's|/libavcodec||')
+          if [ -n "$FFMPEG_INC" ]; then
             for lib in libavcodec libavdevice libavfilter libavformat libavutil libswresample libswscale; do
-              if [ -d "$FFMPEG_INCLUDE_BASE/$lib" ]; then
-                cp -r "$FFMPEG_INCLUDE_BASE/$lib" ${{ github.workspace }}/app/src/main/cpp/include/
-                echo "  ✅ Copied $lib"
-              fi
+              [ -d "$FFMPEG_INC/$lib" ] && cp -r "$FFMPEG_INC/$lib" ${{ github.workspace }}/app/src/main/cpp/include/
             done
-          else
-            echo "❌ ERROR: FFmpeg headers not found."
-            exit 1
           fi
-
-          echo ""
-          echo "📋 include/ directory:"
-          ls -la ${{ github.workspace }}/app/src/main/cpp/include/
 
       - name: Create google-services.json
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
-        run: |
-          echo $GOOGLE_SERVICES_JSON | base64 -d > app/google-services.json
+        run: echo $GOOGLE_SERVICES_JSON | base64 -d > app/google-services.json
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
       - name: Build Debug APK
         env:
-          TMDB_API_KEY:          ${{ secrets.TMDB_API_KEY }}
-          # GEMINI_API_KEY removed — AI system removed from app
-          # AdMob removed — replaced by Start.io (no secret needed in build)
-          STARTAPP_APP_ID:       ${{ secrets.STARTAPP_APP_ID }}
-          BACKEND_BASE_URL:   ${{ secrets.BACKEND_BASE_URL}}
+          TMDB_API_KEY:      ${{ secrets.TMDB_API_KEY }}
+          STARTAPP_APP_ID:   ${{ secrets.STARTAPP_APP_ID }}
+          BACKEND_BASE_URL:  ${{ secrets.BACKEND_BASE_URL }}
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload Debug APK

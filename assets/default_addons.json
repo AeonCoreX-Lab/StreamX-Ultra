@@ -1,0 +1,82 @@
+[
+  {
+    "value":        "autoEmbed",
+    "display_name": "MultiStream",
+    "version":      "1.6",
+    "icon":         "",
+    "type":         "global",
+    "disabled":     false,
+    "sourceAuthor": "himanshu8443",
+    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+  },
+  {
+    "value":        "vega",
+    "display_name": "VegaMovies",
+    "version":      "2.8",
+    "icon":         "",
+    "type":         "global",
+    "disabled":     false,
+    "sourceAuthor": "himanshu8443",
+    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+  },
+  {
+    "value":        "drive",
+    "display_name": "MoviesDrive",
+    "version":      "2.1",
+    "icon":         "",
+    "type":         "global",
+    "disabled":     false,
+    "sourceAuthor": "himanshu8443",
+    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+  },
+  {
+    "value":        "hdhub4u",
+    "display_name": "HDHub4u",
+    "version":      "2.0",
+    "icon":         "",
+    "type":         "india",
+    "disabled":     false,
+    "sourceAuthor": "himanshu8443",
+    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+  },
+  {
+    "value":        "filmyfly",
+    "display_name": "FilmyFly",
+    "version":      "1.4",
+    "icon":         "",
+    "type":         "india",
+    "disabled":     false,
+    "sourceAuthor": "himanshu8443",
+    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+  },
+  {
+    "value":        "topmovies",
+    "display_name": "TopMovies",
+    "version":      "1.0",
+    "icon":         "",
+    "type":         "india",
+    "disabled":     false,
+    "sourceAuthor": "himanshu8443",
+    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+  },
+  {
+    "value":        "hiAnime",
+    "display_name": "HiAnime",
+    "version":      "1.3",
+    "icon":         "",
+    "type":         "anime",
+    "disabled":     false,
+    "sourceAuthor": "himanshu8443",
+    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+  },
+  {
+    "value":        "kissKh",
+    "display_name": "KissKh",
+    "version":      "1.2",
+    "icon":         "",
+    "type":         "drama",
+    "disabled":     false,
+    "sourceAuthor": "himanshu8443",
+    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+  }
+]

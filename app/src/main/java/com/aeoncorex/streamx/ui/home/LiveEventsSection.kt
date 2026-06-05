@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.aeoncorex.streamx.data.EventRepository
 import com.aeoncorex.streamx.model.EventStream
 import com.aeoncorex.streamx.model.LiveEvent
@@ -64,6 +65,9 @@ private fun formatTime(iso: String): String {
         val ev   = Calendar.getInstance().apply { time = date }
         val t    = SimpleDateFormat("h:mm a", Locale.getDefault()).format(date)
         when {
+            now[Calendar.YEAR] == ev[Calendar.YEAR] &&
+            now[Calendar.DAY_OF_YEAR] == ev[Calendar.DAY_OF_YEAR] &&
+            now.timeInMillis > ev.timeInMillis                          -> "● LIVE  $t"
             now[Calendar.YEAR] == ev[Calendar.YEAR] &&
             now[Calendar.DAY_OF_YEAR] == ev[Calendar.DAY_OF_YEAR]     -> "Today  $t"
             now[Calendar.YEAR] == ev[Calendar.YEAR] &&
@@ -484,15 +488,27 @@ private fun EventCard(
                 contentAlignment = Alignment.Center
             ) {
                 if (event.thumbnail.isNotEmpty()) {
-                    // ✅ Thumbnail: Fit so it's never cropped/distorted
+                    // ✅ Thumbnail with Referer header for streamed.pk badge images
+                    // streamed.pk/api/images/*.webp requires Referer header
+                    val thumbModel = remember(event.thumbnail) {
+                        coil.request.ImageRequest.Builder(context)
+                            .data(event.thumbnail)
+                            .addHeader("Referer", "https://streamed.pk/")
+                            .addHeader("Origin",  "https://streamed.pk")
+                            .addHeader("User-Agent",
+                                "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0.0.0")
+                            .crossfade(true)
+                            .build()
+                    }
                     AsyncImage(
-                        model              = event.thumbnail,
+                        model              = thumbModel,
                         contentDescription = null,
                         contentScale       = ContentScale.Fit,
                         modifier           = Modifier
                             .fillMaxWidth()
                             .fillMaxHeight()
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        onError            = { /* fall through to initials below */ }
                     )
                 } else if (hasTwoTeams) {
                     // VS layout with initials
@@ -724,8 +740,18 @@ fun EventStreamDialog(
                         )
                 ) {
                     if (event.thumbnail.isNotEmpty()) {
+                        val thumbModel2 = remember(event.thumbnail) {
+                            coil.request.ImageRequest.Builder(context)
+                                .data(event.thumbnail)
+                                .addHeader("Referer",    "https://streamed.pk/")
+                                .addHeader("Origin",     "https://streamed.pk")
+                                .addHeader("User-Agent",
+                                    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0.0.0")
+                                .crossfade(true)
+                                .build()
+                        }
                         AsyncImage(
-                            model              = event.thumbnail,
+                            model              = thumbModel2,
                             contentDescription = null,
                             contentScale       = ContentScale.Fit,
                             modifier           = Modifier
