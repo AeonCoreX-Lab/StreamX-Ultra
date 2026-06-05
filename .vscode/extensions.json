@@ -1,0 +1,63 @@
+{
+  "recommendations": [
+    // ==========================================
+    // Android / Kotlin
+    // ==========================================
+    "vscjava.vscode-gradle",
+    "fwcd.kotlin",
+    "redhat.vscode-xml",
+
+    // ==========================================
+    // Rust
+    // ==========================================
+    "rust-lang.rust-analyzer",
+    "tamasfe.even-better-toml",
+
+    // ==========================================
+    // C / C++
+    // ==========================================
+    "ms-vscode.cpptools",
+
+    // ==========================================
+    // YAML / JSON / Configs
+    // ==========================================
+    "redhat.vscode-yaml",
+    "esbenp.prettier-vscode",
+
+    // ==========================================
+    // Shell / Scripts
+    // ==========================================
+    "foxundermoon.shell-format",
+    "timonwong.shellcheck",
+
+    // ==========================================
+    // Git / GitHub
+    // ==========================================
+    "github.vscode-pull-request-github",
+    "eamodio.gitlens",
+
+    // ==========================================
+    // Code Quality
+    // ==========================================
+    "sonarsource.sonarlint-vscode",
+    "streetsidesoftware.code-spell-checker",
+
+    // ==========================================
+    // Editor Enhancement
+    // ==========================================
+    "editorconfig.editorconfig",
+    "usernamehw.errorlens",
+    "aaron-bond.better-comments",
+
+    // ==========================================
+    // Theme / Icons (Optional)
+    // ==========================================
+    "pkief.material-icon-theme",
+    "zhuangtongfa.material-theme"
+  ],
+
+  "unwantedRecommendations": [
+    "ms-vscode.vscode-typescript-next",
+    "ms-toolsai.jupyter"
+  ]
+}

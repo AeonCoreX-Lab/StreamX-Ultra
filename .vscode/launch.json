@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Android App Debug",
+      "type": "android",
+      "request": "launch",
+      "appSrcRoot": "${workspaceRoot}/app/src/main",
+      "apkFile": "${workspaceRoot}/app/build/outputs/apk/debug/app-debug.apk",
+      "adbPort": 5037
+    },
+    {
+      "name": "Attach to Native (JNI)",
+      "type": "cppdbg",
+      "request": "attach",
+      "program": "${workspaceRoot}/app/build/intermediates/cmake/debug/obj/arm64-v8a/libnative.so",
+      "processId": "${command:pickProcess}",
+      "MIMode": "lldb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
+    }
+  ]
+}
