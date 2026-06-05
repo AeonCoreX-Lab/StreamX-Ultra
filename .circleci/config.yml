@@ -291,7 +291,7 @@ jobs:
           name: Build Signed Production APK
           command: |
             source $HOME/.cargo/env
-            echo "${RELEASE_KEYSTORE}" | base64 --decode > ~/project/release.keystore
+            echo "${RELEASE_KEYSTORE_FILE}" | base64 --decode > ~/project/release.keystore
             echo $GOOGLE_SERVICES_JSON | base64 -d > app/google-services.json
             chmod +x gradlew
             TMDB_API_KEY=${TMDB_API_KEY} STARTAPP_APP_ID=${STARTAPP_APP_ID} BACKEND_BASE_URL=${BACKEND_BASE_URL} ./gradlew assembleRelease \
