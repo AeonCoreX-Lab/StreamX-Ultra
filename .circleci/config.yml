@@ -16,9 +16,8 @@ jobs:
       - run:
           name: Setup Swap Space
           command: |
-            # Jodi swap already thake, skip
             if ! swapon --show | grep -q /swapfile; then
-              sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+              sudo fallocate -l 4G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
               sudo chmod 600 /swapfile
               sudo mkswap /swapfile
               sudo swapon /swapfile
@@ -42,12 +41,9 @@ jobs:
           command: |
             if [ -f "app/src/main/rust/Cargo.lock" ]; then
               cat app/src/main/rust/Cargo.lock > .rust-cache-key
-            else
-              echo "rust-no-lock-$(date +%Y%m%d)" > .rust-cache-key
-            fi
-            if [ -f "app/src/main/rust/Cargo.lock" ]; then
               cat app/src/main/rust/Cargo.lock > .ccache-key
             else
+              echo "rust-no-lock-$(date +%Y%m%d)" > .rust-cache-key
               echo "ccache-no-lock-$(date +%Y%m%d)" > .ccache-key
             fi
       - restore_cache:
@@ -79,9 +75,7 @@ jobs:
             echo 'export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865' >> $BASH_ENV
             sudo apt-get update -y
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-              ccache yasm nasm pkg-config \
-              python3-pip python3-setuptools \
-              meson ninja-build
+              ccache yasm nasm pkg-config meson ninja-build python3-pip python3-setuptools
       - run:
           name: Build MPV, FFmpeg & Extract Headers
           no_output_timeout: 45m
@@ -174,12 +168,12 @@ jobs:
       - run:
           name: Setup Swap Space
           command: |
-            sudo swapoff /swapfile 2>/dev/null || true
-            sudo rm -f /swapfile 2>/dev/null || true
-            sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
-            sudo chmod 600 /swapfile
-            sudo mkswap /swapfile
-            sudo swapon /swapfile
+            if ! swapon --show | grep -q /swapfile; then
+              sudo fallocate -l 4G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+              sudo chmod 600 /swapfile
+              sudo mkswap /swapfile
+              sudo swapon /swapfile
+            fi
             free -h
       - checkout
       - run:
@@ -199,12 +193,9 @@ jobs:
           command: |
             if [ -f "app/src/main/rust/Cargo.lock" ]; then
               cat app/src/main/rust/Cargo.lock > .rust-cache-key
-            else
-              echo "rust-no-lock-$(date +%Y%m%d)" > .rust-cache-key
-            fi
-            if [ -f "app/src/main/rust/Cargo.lock" ]; then
               cat app/src/main/rust/Cargo.lock > .ccache-key
             else
+              echo "rust-no-lock-$(date +%Y%m%d)" > .rust-cache-key
               echo "ccache-no-lock-$(date +%Y%m%d)" > .ccache-key
             fi
       - restore_cache:
@@ -236,9 +227,7 @@ jobs:
             echo 'export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865' >> $BASH_ENV
             sudo apt-get update -y
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-              ccache yasm nasm pkg-config \
-              python3-pip python3-setuptools \
-              meson ninja-build
+              ccache yasm nasm pkg-config meson ninja-build python3-pip python3-setuptools
       - run:
           name: Build MPV, FFmpeg & Extract Headers
           no_output_timeout: 45m
@@ -302,7 +291,7 @@ jobs:
           name: Build Signed Production APK
           command: |
             source $HOME/.cargo/env
-            echo "${RELEASE_KEYSTORE_FILE}" | base64 --decode > ~/project/release.keystore
+            echo "${RELEASE_KEYSTORE}" | base64 --decode > ~/project/release.keystore
             echo $GOOGLE_SERVICES_JSON | base64 -d > app/google-services.json
             chmod +x gradlew
             TMDB_API_KEY=${TMDB_API_KEY} STARTAPP_APP_ID=${STARTAPP_APP_ID} BACKEND_BASE_URL=${BACKEND_BASE_URL} ./gradlew assembleRelease \
