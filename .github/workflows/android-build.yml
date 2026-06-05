@@ -43,6 +43,15 @@ jobs:
           curl -LsSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xvzf - -C ~/.cargo/bin
           cargo binstall -y cargo-ndk
 
+      # ── Ensure build tools for vendored OpenSSL (required by librqbit → openssl-sys) ─
+      - name: Ensure OpenSSL vendored build tools
+        run: |
+          # perl + make are pre-installed on ubuntu-latest, but verify
+          perl --version | head -1
+          make --version | head -1
+          # nasm needed by openssl vendored on some configs
+          sudo apt-get install -y nasm 2>/dev/null || true
+
       # ── Cache Rust registry + build artifacts ─────────────────────────────
       - name: Cache Rust build
         uses: actions/cache@v4
@@ -63,10 +72,31 @@ jobs:
           python3 -m pip install --upgrade pip
           pip3 install meson ninja
           
+      # ── MPV Android Source & C++ Compilation Cache ─────────────────────────
+      - name: Cache MPV Sources and ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            mpv-android
+            ~/.cache/ccache
+          key: ${{ runner.os }}-mpv-${{ hashFiles('**/buildall.sh', '**/download.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-mpv-
+
       - name: Build mpv-android (Universal Support)
+        env:
+          CCACHE_DIR: "/home/runner/.cache/ccache"
+          CCACHE_MAXSIZE: "2G"
         run: |
-          sudo apt update && sudo apt install -y meson ninja-build yasm nasm python3-pip pkg-config
-          git clone https://github.com/mpv-android/mpv-android.git
+          # ccache পাথ সেটআপ করা যাতে কম্পাইলার ccache ব্যবহার করে
+          export PATH="/usr/lib/ccache:$PATH"
+          ccache -s # বিল্ড শুরুর আগে ক্যাশ স্ট্যাটাস দেখাবে
+
+          # যদি ক্যাশ থেকে mpv-android ফোল্ডার না আসে, তবেই ক্লোন করবে
+          if [ ! -d "mpv-android" ]; then
+            git clone https://github.com/mpv-android/mpv-android.git
+          fi
+          
           cd mpv-android/buildscripts
           export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/29.0.14206865
           export PATH=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
@@ -75,12 +105,12 @@ jobs:
           git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "git://git.ffmpeg.org/ffmpeg.git"
           git config --global url."https://".insteadOf git://
 
-          echo "📥 Downloading sources..."
+          echo "📥 Checking/Downloading sources..."
           ./download.sh
 
           for arch in arm64 armv7l x86 x86_64; do
             echo "----------------------------------------"
-            echo "🚀 Building mpv for: $arch"
+            echo "🚀 Building mpv for: $arch (with ccache)"
             echo "----------------------------------------"
 
             ./buildall.sh --arch $arch
@@ -133,10 +163,7 @@ jobs:
             exit 1
           fi
 
-          echo ""
-          echo "📋 include/ directory:"
-          ls -la ${{ github.workspace }}/app/src/main/cpp/include/
-
+          ccache -s # বিল্ড শেষে ক্যাশ কতটুকু হিট করলো তা দেখাবে
       - name: Create google-services.json
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}

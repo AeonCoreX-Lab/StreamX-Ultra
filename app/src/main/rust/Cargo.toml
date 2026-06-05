@@ -45,6 +45,11 @@ thiserror    = "1"
 uuid         = { version = "1", features = ["v4"] }
 lazy_static  = "1.4"
 
+# ── OpenSSL (vendored: compile from source for Android cross-build) ────────
+# librqbit v4 transitively pulls native-tls → openssl-sys.
+# Vendored feature compiles OpenSSL via NDK toolchain — no system install needed.
+openssl      = { version = "0.10", features = ["vendored"] }
+
 [profile.release]
 lto           = true
 opt-level     = "z"      # size-optimised for .so on Android

@@ -412,6 +412,7 @@ private fun EventCard(
     modifier : Modifier,
     onClick  : () -> Unit
 ) {
+    val context          = LocalContext.current
     val accent           = sportColor(event.sportColor)
     val title            = event.title.decodeHtml()
     val (initA, initB)   = teamInitials(title)
@@ -718,6 +719,7 @@ fun EventStreamDialog(
     onDismiss        : () -> Unit,
     onStreamSelected : (EventStream) -> Unit
 ) {
+    val context   = LocalContext.current
     val accent    = sportColor(event.sportColor)
     val title     = event.title.decodeHtml()
     val timeLabel = formatTime(event.startTime)

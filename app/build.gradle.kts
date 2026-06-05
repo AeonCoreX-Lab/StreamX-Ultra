@@ -52,8 +52,6 @@ android {
                 
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
-                    "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ndkPath/build/cmake/android.toolchain.cmake",
-                    "-DVCPKG_TARGET_TRIPLET=arm64-android",
                     "-DANDROID_ABI=arm64-v8a",
                     "-DANDROID_PLATFORM=android-28",
                     "-D_FORTIFY_SOURCE=0",
