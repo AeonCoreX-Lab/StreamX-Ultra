@@ -1,0 +1,81 @@
+# See https://pre-commit.com for more info
+# See https://pre-commit.com/hooks.html for more hooks
+
+repos:
+  # ==========================================
+  # 1. General File Checks (Built-in)
+  # ==========================================
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: |
+          (?x)^(
+              \.md$|
+              \.patch$
+          )
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-xml
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+      - id: detect-private-key
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+
+  # ==========================================
+  # 2. Secret Scanning (GitLeaks)
+  # ==========================================
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.2
+    hooks:
+      - id: gitleaks
+        args: ['--config', '.gitleaks.toml', '--verbose']
+
+  # ==========================================
+  # 3. Kotlin Formatting (ktlint)
+  # ==========================================
+  - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
+    rev: v2.14.0
+    hooks:
+      - id: pretty-format-kotlin
+        args: [--autofix]
+        files: \.(kt|kts)$
+
+  # ==========================================
+  # 4. Rust Formatting (rustfmt)
+  # ==========================================
+  - repo: local
+    hooks:
+      - id: rustfmt
+        name: Rust Format
+        entry: rustfmt
+        language: system
+        types: [rust]
+        args: ['--check']
+        pass_filenames: false
+        always_run: true
+
+  # ==========================================
+  # 5. Shell Script Checks
+  # ==========================================
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
+    hooks:
+      - id: shellcheck
+        files: \.(sh|bash)$
+        args: ['--severity=warning']
+
+  # ==========================================
+  # 6. Gradle Wrapper Validation
+  # ==========================================
+  - repo: https://github.com/jeremylong/gradle-precommit
+    rev: v1.0
+    hooks:
+      - id: gradle-wrapper-validation
+        files: gradle/wrapper/gradle-wrapper\.jar
