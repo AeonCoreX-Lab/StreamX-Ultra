@@ -16,12 +16,14 @@ jobs:
       - run:
           name: Setup Swap Space
           command: |
-            if ! swapon --show | grep -q /swapfile; then
-              sudo fallocate -l 4G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
-              sudo chmod 600 /swapfile
-              sudo mkswap /swapfile
-              sudo swapon /swapfile
-            fi
+            (
+              if ! swapon --show | grep -q /swapfile; then
+                sudo fallocate -l 4G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+                sudo chmod 600 /swapfile
+                sudo mkswap /swapfile
+                sudo swapon /swapfile
+              fi
+            ) || echo "Warning: swap setup not permitted in this environment, continuing without swap"
             free -h
       - checkout
       - run:
@@ -168,12 +170,14 @@ jobs:
       - run:
           name: Setup Swap Space
           command: |
-            if ! swapon --show | grep -q /swapfile; then
-              sudo fallocate -l 4G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
-              sudo chmod 600 /swapfile
-              sudo mkswap /swapfile
-              sudo swapon /swapfile
-            fi
+            (
+              if ! swapon --show | grep -q /swapfile; then
+                sudo fallocate -l 4G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+                sudo chmod 600 /swapfile
+                sudo mkswap /swapfile
+                sudo swapon /swapfile
+              fi
+            ) || echo "Warning: swap setup not permitted in this environment, continuing without swap"
             free -h
       - checkout
       - run:
