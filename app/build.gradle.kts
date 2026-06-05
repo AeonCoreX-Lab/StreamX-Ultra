@@ -154,7 +154,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
-    implementation("com.google.code.gson:gson:2.11.0")
+    implementation("com.google.code.gson:gson:2.14.0")
 
     // ── Ktor (for any remaining server needs) ─────────────────────────
     // TorrentStreamServer.kt is DELETED — but keep Ktor if used elsewhere
@@ -162,14 +162,14 @@ dependencies {
 
     // ── JS addon execution (Rhino) ────────────────────────────────────
     // Executes bundled Vega-style provider JS modules
-    implementation("org.mozilla:rhino:1.7.14")
+    implementation("org.mozilla:rhino:1.9.1")
 
     // ── Ads ───────────────────────────────────────────────────────────
     implementation("com.google.android.gms:play-services-ads:23.4.0")
 
     // ── Other ─────────────────────────────────────────────────────────
     implementation("androidx.datastore:datastore-preferences:1.1.1")
-    implementation("com.google.accompanist:accompanist-systemuicontroller:0.34.0")
+    implementation("com.google.accompanist:accompanist-systemuicontroller:0.36.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
