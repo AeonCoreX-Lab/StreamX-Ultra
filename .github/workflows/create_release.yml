@@ -63,11 +63,12 @@ jobs:
             ${{ runner.os }}-rust-release-
             ${{ runner.os }}-rust-
 
-      # ── MPV + FFmpeg ───────────────────────────────────────────────────────
-      - name: Install latest Meson & Ninja
+      # ── MPV + FFmpeg Dependencies (Fixed ccache installation here) ─────────
+      - name: Install latest Meson, Ninja, and ccache
         run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-pip python3-setuptools
+          sudo apt-get update -y
+          # ccache এবং অন্যান্য প্রয়োজনীয় বিল্ড টুলস নন-ইন্টারেক্টিভলি ইনস্টল করা হচ্ছে
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ccache yasm nasm pkg-config python3-pip python3-setuptools
           python3 -m pip install --upgrade pip
           pip3 install meson ninja
           
@@ -88,9 +89,14 @@ jobs:
           CCACHE_DIR: "/home/runner/.cache/ccache"
           CCACHE_MAXSIZE: "2G"
         run: |
-          # ccache পাথ সেটআপ করা যাতে কম্পাইলার ccache ব্যবহার করে
-          export PATH="/usr/lib/ccache:$PATH"
-          ccache -s # বিল্ড শুরুর আগে ক্যাশ স্ট্যাটাস দেখাবে
+          # ccache ইনস্টলড আছে কিনা এবং পাথ ঠিক আছে কিনা তা নিশ্চিত করা
+          if command -v ccache &> /dev/null; then
+              echo "✅ ccache found! Setting up paths..."
+              export PATH="/usr/lib/ccache:$PATH"
+              ccache -s # বিল্ড শুরুর আগে ক্যাশ স্ট্যাটাস দেখাবে
+          else
+              echo "⚠️ ccache not found in PATH! Falling back to standard compiler..."
+          fi
 
           # যদি ক্যাশ থেকে mpv-android ফোল্ডার না আসে, তবেই ক্লোন করবে
           if [ ! -d "mpv-android" ]; then
@@ -163,7 +169,10 @@ jobs:
             exit 1
           fi
 
-          ccache -s # বিল্ড শেষে ক্যাশ কতটুকু হিট করলো তা দেখাবে
+          # শুধুমাত্র ccache এভেইলেবল থাকলেই ফাইনাল স্ট্যাটাস প্রিন্ট করবে
+          if command -v ccache &> /dev/null; then
+              ccache -s # বিল্ড শেষে ক্যাশ কতটুকু হিট করলো তা দেখাবে
+          fi
 
       - name: Decode Keystore
         run: echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > ${{ github.workspace }}/release.keystore
@@ -227,3 +236,4 @@ jobs:
           body:     ${{ steps.build_changelog.outputs.changelog }}
         env:
           GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
+          
