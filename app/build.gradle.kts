@@ -258,5 +258,5 @@ dependencies {
     // Torrent Streaming - Ktor CIO
     // implementation("io.ktor:ktor-server-cio:3.4.3")
    // ── JS addon execution (Rhino) ────────────────────────────────────
-    implementation("org.mozilla:rhino:1.9.2")
+    implementation("org.mozilla:rhino:1.9.1")
 }
