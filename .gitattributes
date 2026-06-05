@@ -1,0 +1,30 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Explicitly declare text files you want to always be normalized and converted
+# to native line endings on checkout.
+*.java text
+*.kt text
+*.kts text
+*.rs text
+*.c text
+*.cpp text
+*.h text
+*.gradle text
+*.xml text
+*.yml text
+*.yaml text
+*.json text
+*.md text
+*.sh text eol=lf
+
+# Denote all files that are truly binary and should not be modified.
+*.so binary
+*.jar binary
+*.aar binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.mp3 binary
+*.mp4 binary
+*.ttf binary
