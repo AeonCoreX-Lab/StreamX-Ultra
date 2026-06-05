@@ -3,7 +3,7 @@ version: 2.1
 executors:
   android-builder:
     docker:
-      - image: cimg/android:2024.04
+      - image:  cimg/android:2026.03.1
     resource_class: large
 
 jobs:
@@ -33,26 +33,51 @@ jobs:
             if [ -z "$HASH" ]; then HASH="unknown"; fi
             echo "$HASH" > .mpv-upstream-hash
             echo "mpv-android HEAD: $HASH"
+      - run:
+          name: Generate cache keys
+          command: |
+            # Rust/Cargo cache key - file na thakle fallback
+            if [ -f "app/src/main/rust/Cargo.lock" ]; then
+              cat app/src/main/rust/Cargo.lock > .rust-cache-key
+            else
+              echo "rust-no-lock-$(date +%Y%m%d)" > .rust-cache-key
+            fi
+            # ccache key - same
+            if [ -f "app/src/main/rust/Cargo.lock" ]; then
+              cat app/src/main/rust/Cargo.lock > .ccache-key
+            else
+              echo "ccache-no-lock-$(date +%Y%m%d)" > .ccache-key
+            fi
       - restore_cache:
           keys:
             - v1-mpv-src-{{ checksum ".mpv-upstream-hash" }}
       - restore_cache:
           keys:
-            - v1-ccache-{{ checksum "app/src/main/rust/Cargo.lock" }}
+            - v1-ccache-{{ checksum ".ccache-key" }}
             - v1-ccache-
       - restore_cache:
           keys:
-            - v1-rust-registry-{{ checksum "app/src/main/rust/Cargo.lock" }}
+            - v1-rust-registry-{{ checksum ".rust-cache-key" }}
             - v1-rust-registry-
       - run:
-          name: Install Toolchains, Rust & NDK
-          no_output_timeout: 30m
+          name: Install Rust Toolchain
+          no_output_timeout: 10m
+          command: |
+            # rustup install kora (image e nai)
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+            echo 'source $HOME/.cargo/env' >> $BASH_ENV
+            source $HOME/.cargo/env
+            # Android targets
+            rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
+            # cargo-ndk install
+            curl -LsSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xvzf - -C ~/.cargo/bin
+            cargo binstall -y cargo-ndk
+      - run:
+          name: Install Android NDK & Build Tools
+          no_output_timeout: 20m
           command: |
             echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865"
             echo 'export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865' >> $BASH_ENV
-            rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
-            curl -LsSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xvzf - -C ~/.cargo/bin
-            cargo binstall -y cargo-ndk
             sudo apt-get update -y
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ccache yasm nasm pkg-config python3-pip python3-setuptools
             python3 -m pip install --upgrade pip
@@ -61,6 +86,7 @@ jobs:
           name: Build MPV, FFmpeg & Extract Headers
           no_output_timeout: 45m
           command: |
+            source $HOME/.cargo/env
             export PATH="/usr/lib/ccache:$PATH"
             ccache -s || true
             if [ ! -d "mpv-android" ]; then git clone https://github.com/mpv-android/mpv-android.git; fi
@@ -108,17 +134,18 @@ jobs:
       - save_cache:
           paths:
             - ~/.cache/ccache
-          key: v1-ccache-{{ checksum "app/src/main/rust/Cargo.lock" }}
+          key: v1-ccache-{{ checksum ".ccache-key" }}
       - save_cache:
           paths:
             - ~/.cargo/registry
             - ~/.cargo/git
             - ~/.cargo/bin
             - app/src/main/rust/target
-          key: v1-rust-registry-{{ checksum "app/src/main/rust/Cargo.lock" }}
+          key: v1-rust-registry-{{ checksum ".rust-cache-key" }}
       - run:
           name: Build Debug APK
           command: |
+            source $HOME/.cargo/env
             echo $GOOGLE_SERVICES_JSON | base64 -d > app/google-services.json
             chmod +x gradlew
             TMDB_API_KEY=${TMDB_API_KEY} STARTAPP_APP_ID=${STARTAPP_APP_ID} BACKEND_BASE_URL=${BACKEND_BASE_URL} ./gradlew assembleDebug --stacktrace
@@ -164,26 +191,46 @@ jobs:
             if [ -z "$HASH" ]; then HASH="unknown"; fi
             echo "$HASH" > .mpv-upstream-hash
             echo "mpv-android HEAD: $HASH"
+      - run:
+          name: Generate cache keys
+          command: |
+            if [ -f "app/src/main/rust/Cargo.lock" ]; then
+              cat app/src/main/rust/Cargo.lock > .rust-cache-key
+            else
+              echo "rust-no-lock-$(date +%Y%m%d)" > .rust-cache-key
+            fi
+            if [ -f "app/src/main/rust/Cargo.lock" ]; then
+              cat app/src/main/rust/Cargo.lock > .ccache-key
+            else
+              echo "ccache-no-lock-$(date +%Y%m%d)" > .ccache-key
+            fi
       - restore_cache:
           keys:
             - v1-mpv-src-{{ checksum ".mpv-upstream-hash" }}
       - restore_cache:
           keys:
-            - v1-ccache-{{ checksum "app/src/main/rust/Cargo.lock" }}
+            - v1-ccache-{{ checksum ".ccache-key" }}
             - v1-ccache-
       - restore_cache:
           keys:
-            - v1-rust-registry-{{ checksum "app/src/main/rust/Cargo.lock" }}
+            - v1-rust-registry-{{ checksum ".rust-cache-key" }}
             - v1-rust-registry-
       - run:
-          name: Install Toolchains, Rust & NDK
-          no_output_timeout: 30m
+          name: Install Rust Toolchain
+          no_output_timeout: 10m
           command: |
-            echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865"
-            echo 'export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865' >> $BASH_ENV
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+            echo 'source $HOME/.cargo/env' >> $BASH_ENV
+            source $HOME/.cargo/env
             rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
             curl -LsSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xvzf - -C ~/.cargo/bin
             cargo binstall -y cargo-ndk
+      - run:
+          name: Install Android NDK & Build Tools
+          no_output_timeout: 20m
+          command: |
+            echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865"
+            echo 'export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865' >> $BASH_ENV
             sudo apt-get update -y
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ccache yasm nasm pkg-config python3-pip python3-setuptools
             python3 -m pip install --upgrade pip
@@ -192,6 +239,7 @@ jobs:
           name: Build MPV, FFmpeg & Extract Headers
           no_output_timeout: 45m
           command: |
+            source $HOME/.cargo/env
             export PATH="/usr/lib/ccache:$PATH"
             if [ ! -d "mpv-android" ]; then git clone https://github.com/mpv-android/mpv-android.git; fi
             cd mpv-android/buildscripts
@@ -238,17 +286,18 @@ jobs:
       - save_cache:
           paths:
             - ~/.cache/ccache
-          key: v1-ccache-{{ checksum "app/src/main/rust/Cargo.lock" }}
+          key: v1-ccache-{{ checksum ".ccache-key" }}
       - save_cache:
           paths:
             - ~/.cargo/registry
             - ~/.cargo/git
             - ~/.cargo/bin
             - app/src/main/rust/target
-          key: v1-rust-registry-{{ checksum "app/src/main/rust/Cargo.lock" }}
+          key: v1-rust-registry-{{ checksum ".rust-cache-key" }}
       - run:
           name: Build Signed Production APK
           command: |
+            source $HOME/.cargo/env
             echo "${RELEASE_KEYSTORE_FILE}" | base64 --decode > ~/project/release.keystore
             echo $GOOGLE_SERVICES_JSON | base64 -d > app/google-services.json
             chmod +x gradlew
