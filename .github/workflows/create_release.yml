@@ -5,118 +5,15 @@ on:
     tags:
       - 'v*.*'
   workflow_dispatch:
-  repository_dispatch:
-    types: [circleci-failed]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
-  check-circleci:
-    runs-on: ubuntu-latest
-    outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
-    steps:
-      - name: Evaluate fallback necessity
-        id: check
-        env:
-          CIRCLE_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
-        run: |
-          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
-            echo "Instant fallback triggered by CircleCI failure notification."
-            echo "should_run=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          if [[ -z "$CIRCLE_TOKEN" ]]; then
-            echo "CIRCLECI_TOKEN secret not found. Running fallback build."
-            echo "should_run=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          api_test=$(curl -s -o /dev/null -w "%{http_code}" -H "Circle-Token: $CIRCLE_TOKEN" \
-            "https://circleci.com/api/v2/me" || true)
-          
-          if [[ "$api_test" != "200" ]]; then
-            echo "CircleCI API unreachable (HTTP $api_test). Running fallback build."
-            echo "should_run=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          pipeline_found="false"
-          pipeline_id=""
-          for i in {1..6}; do
-            response=$(curl -s -H "Circle-Token: $CIRCLE_TOKEN" \
-              "https://circleci.com/api/v2/project/gh/${{ github.repository }}/pipeline")
-            
-            if ! echo "$response" | jq -e . >/dev/null 2>&1; then
-              echo "Invalid API response. Running fallback."
-              echo "should_run=true" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-            
-            pipeline_id=$(echo "$response" | jq -r --arg SHA "${{ github.sha }}" '.items[] | select(.vcs.revision==$SHA) | .id' | head -n 1)
-            
-            if [[ -n "$pipeline_id" && "$pipeline_id" != "null" ]]; then
-              pipeline_found="true"
-              echo "Found CircleCI pipeline: $pipeline_id"
-              break
-            fi
-            
-            echo "No pipeline found for commit ${{ github.sha }}. Retry $i/6 in 30s..."
-            sleep 30
-          done
-          
-          if [[ "$pipeline_found" == "false" ]]; then
-            echo "No CircleCI pipeline found after 3 minutes. Likely out of credits. Running fallback."
-            echo "should_run=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          for i in {1..30}; do
-            wf_response=$(curl -s -H "Circle-Token: $CIRCLE_TOKEN" \
-              "https://circleci.com/api/v2/pipeline/$pipeline_id/workflow")
-            
-            if ! echo "$wf_response" | jq -e . >/dev/null 2>&1; then
-              echo "Invalid workflow response. Running fallback."
-              echo "should_run=true" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-            
-            status=$(echo "$wf_response" | jq -r '.items[0].status')
-            echo "CircleCI workflow status: $status (poll $i/30)"
-            
-            if [[ "$status" == "success" ]]; then
-              echo "CircleCI build succeeded. Skipping GitHub Actions fallback."
-              echo "should_run=false" >> $GITHUB_OUTPUT
-              exit 0
-            elif [[ "$status" == "running" ]] || [[ "$status" == "on_hold" ]] || [[ "$status" == "not_run" ]]; then
-              sleep 30
-              continue
-            else
-              echo "CircleCI workflow failed/cancelled (status: $status). Running fallback."
-              echo "should_run=true" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-          done
-          
-          echo "Timeout waiting for CircleCI. Running fallback."
-          echo "should_run=true" >> $GITHUB_OUTPUT
-
   build-and-release:
     runs-on: ubuntu-latest
-    needs: check-circleci
-    if: needs.check-circleci.outputs.should_run == 'true'
-    timeout-minutes: 180
+    timeout-minutes: 240         # Release builds all 4 ABIs — needs more time
     permissions:
       contents: write
       pull-requests: read
       issues: read
-    env:
-      CCACHE_DIR: "/home/runner/.cache/ccache"
-      CCACHE_MAXSIZE: "2G"
-      CARGO_BUILD_JOBS: 1
 
     steps:
       - name: Checkout repository
@@ -126,7 +23,7 @@ jobs:
           token: ${{ secrets.ACCESS_TOKEN }}
           fetch-depth: 0
 
-      - name: Set up JDK 17
+      - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -139,154 +36,214 @@ jobs:
         run: |
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
- 
-      - name: Setup Swap Space (OOM fix)
-        run: |
-          sudo swapoff /swapfile 2>/dev/null || true
-          sudo rm -f /swapfile 2>/dev/null || true
-          sudo fallocate -l 8G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          sudo swapon --show
-          free -h
-          
-          
 
+      # Release: all 4 Rust targets
       - name: Install Rust and Cargo-NDK
         run: |
-          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
-          curl -LsSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xvzf - -C ~/.cargo/bin
-          cargo binstall -y cargo-ndk
+          rustup target add aarch64-linux-android
+          rustup target add armv7-linux-androideabi
+          rustup target add x86_64-linux-android
+          rustup target add i686-linux-android
+          cargo install cargo-ndk
 
-      - name: Ensure OpenSSL vendored build tools
+      - name: Install build tools
         run: |
-          perl --version | head -1
-          make --version | head -1
-          sudo apt-get install -y nasm 2>/dev/null || true
+          sudo apt-get update -qq
+          sudo apt-get install -y meson ninja-build yasm nasm pkg-config python3-pip
+          pip3 install --quiet meson --upgrade
 
-      - name: Get mpv-android upstream commit hash
-        id: mpv_hash
-        run: |
-          HASH=$(git ls-remote https://github.com/mpv-android/mpv-android.git HEAD 2>/dev/null | awk '{print $1}')
-          if [ -z "$HASH" ]; then HASH="unknown"; fi
-          echo "hash=$HASH" >> $GITHUB_OUTPUT
-          echo "mpv-android HEAD: $HASH"
-
-      - name: Cache MPV Android source
-        uses: actions/cache@v4
-        with:
-          path: mpv-android
-          key: ${{ runner.os }}-mpv-src-v1-${{ steps.mpv_hash.outputs.hash }}
-
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: ${{ runner.os }}-ccache-v1-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-ccache-v1-
-
-      - name: Cache Rust build
+      # ── vcpkg binary cache (all 4 Android triplets) ────────────────────
+      - name: Restore vcpkg binary cache
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/bin
-            app/src/main/rust/target
-          key: ${{ runner.os }}-rust-v1-${{ hashFiles('**/Cargo.lock') }}
+            ~/.cache/vcpkg/archives
+            vcpkg_installed
+          key: ${{ runner.os }}-vcpkg-v6-all-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}
           restore-keys: |
-            ${{ runner.os }}-rust-v1-
+            ${{ runner.os }}-vcpkg-v6-all-
 
-      - name: Install latest Meson, Ninja, and ccache
+      - name: Get latest vcpkg commit ID
+        id: vcpkg-git
         run: |
-          sudo apt-get update -y
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ccache yasm nasm pkg-config python3-pip python3-setuptools
-          python3 -m pip install --upgrade pip
-          pip3 install meson ninja
+          LATEST_ID=$(git ls-remote https://github.com/microsoft/vcpkg.git HEAD | awk '{ print $1 }')
+          echo "commit_id=$LATEST_ID" >> $GITHUB_OUTPUT
 
-      - name: Build mpv-android (Universal Support)
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
+          vcpkgJsonGlob: 'app/src/main/cpp/vcpkg.json'
+          vcpkgGitURL: https://github.com/microsoft/vcpkg.git
+          vcpkgGitCommitId: ${{ steps.vcpkg-git.outputs.commit_id }}
+          doNotUpdateVcpkg: false
+
+      # ── Build FFmpeg via vcpkg for all 4 Android ABI triplets ──────────
+      # First run: ~40 min (4 × FFmpeg compile). Warm cache: ~2 min.
+      - name: Build FFmpeg via vcpkg (all 4 Android ABIs)
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: |
-          if command -v ccache &> /dev/null; then
-              export PATH="/usr/lib/ccache:$PATH"
-              ccache -s
-          fi
+          VCPKG="${{ github.workspace }}/vcpkg/vcpkg"
+          INSTALL_ROOT="${{ github.workspace }}/vcpkg_installed"
 
-          if [ ! -d "mpv-android" ]; then
-            git clone https://github.com/mpv-android/mpv-android.git
-          fi
-          
+          for TRIPLET in arm64-android arm-android x64-android x86-android; do
+            echo "📦 vcpkg install ffmpeg[openssl] → $TRIPLET"
+            $VCPKG install "ffmpeg[openssl]" \
+              --triplet "$TRIPLET" \
+              --host-triplet x64-linux \
+              --x-install-root="$INSTALL_ROOT" \
+              --no-print-usage
+            echo "  ✅ $TRIPLET done"
+          done
+
+          echo ""
+          echo "📋 Installed triplets:"
+          ls -1 "$INSTALL_ROOT/"
+
+      # ── mpv artifact cache (all 4 ABIs) ────────────────────────────────
+      - name: Get mpv-android HEAD commit (for cache key)
+        id: mpv-version
+        run: |
+          COMMIT=$(git ls-remote https://github.com/mpv-android/mpv-android.git HEAD \
+                   | awk '{print $1}' | head -c 12)
+          echo "commit=$COMMIT" >> $GITHUB_OUTPUT
+          echo "mpv-android HEAD: $COMMIT"
+
+      - name: Cache mpv + FFmpeg native artifacts (all ABIs)
+        id: mpv-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/src/main/jniLibs
+            app/src/main/cpp/include
+          key: ${{ runner.os }}-mpv-vcpkg-all-v1-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}-${{ steps.mpv-version.outputs.commit }}
+          restore-keys: |
+            ${{ runner.os }}-mpv-vcpkg-all-v1-
+
+      # ── Build mpv for all 4 ABIs (FFmpeg from vcpkg, not from source) ──
+      - name: Build mpv (all ABIs, using vcpkg FFmpeg — skip FFmpeg compile)
+        if: steps.mpv-cache.outputs.cache-hit != 'true'
+        env:
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_HOME }}
+        run: |
+          WS="${{ github.workspace }}"
+          INSTALL_ROOT="$WS/vcpkg_installed"
+
+          git clone --depth=1 https://github.com/mpv-android/mpv-android.git
           cd mpv-android/buildscripts
-          export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/29.0.14206865
-          export PATH=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
-          chmod +x *.sh
 
           git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "git://git.ffmpeg.org/ffmpeg.git"
           git config --global url."https://".insteadOf git://
+          chmod +x *.sh
 
-          echo "Checking/Downloading sources..."
+          echo "📥 Downloading mpv sources..."
           ./download.sh
 
-          for arch in arm64 armv7l x86 x86_64; do
-            echo "----------------------------------------"
-            echo "Building mpv for: $arch"
-            echo "----------------------------------------"
+          export PATH="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
 
-            ./buildall.sh --arch $arch
+          # ABI mapping: mpv-arch → android-ABI → vcpkg-triplet → prefix-dir-names
+          declare -A VCPKG_TRIPLET=( [arm64]=arm64-android [armv7l]=arm-android [x86_64]=x64-android [x86]=x86-android )
+          declare -A ABI_NAME=(      [arm64]=arm64-v8a      [armv7l]=armeabi-v7a  [x86_64]=x86_64      [x86]=x86 )
+          declare -A PREFIX_ALTS=(   [arm64]="arm64-v8a arm64" [armv7l]="armeabi-v7a arm" [x86_64]="x86_64 x86-64" [x86]="x86 x86_32" )
 
-            if [ "$arch" = "arm64" ]; then ABI="arm64-v8a";
-            elif [ "$arch" = "armv7l" ]; then ABI="armeabi-v7a";
-            else ABI="$arch"; fi
+          for MPV_ARCH in arm64 armv7l x86_64 x86; do
+            TRIPLET="${VCPKG_TRIPLET[$MPV_ARCH]}"
+            ABI="${ABI_NAME[$MPV_ARCH]}"
+            VCPKG_DIR="$INSTALL_ROOT/$TRIPLET"
 
-            TARGET_DIR="../../app/src/main/jniLibs/$ABI"
-            mkdir -p "$TARGET_DIR"
+            echo ""
+            echo "═══════════════════════════════════════"
+            echo "🔧 Populating prefix for $MPV_ARCH (vcpkg: $TRIPLET)"
+            echo "═══════════════════════════════════════"
 
-            echo "Extracting libmpv.so for $ABI..."
-            find ${{ github.workspace }} -type f -name "libmpv.so" | grep "$arch" | head -n 1 | xargs -I {} cp {} "$TARGET_DIR/" || true
+            # Populate both possible prefix dir name variants
+            for PREFIX_ARCH in ${PREFIX_ALTS[$MPV_ARCH]}; do
+              PREFIX_DIR="$WS/mpv-android/buildscripts/prefix/$PREFIX_ARCH"
+              mkdir -p "$PREFIX_DIR/lib" "$PREFIX_DIR/include" "$PREFIX_DIR/lib/pkgconfig"
 
-            echo "Extracting FFmpeg .so files for $ABI..."
-            find ${{ github.workspace }} -type f -name "*.so" | grep -E "(libavcodec|libavdevice|libavfilter|libavformat|libavutil|libswresample|libswscale)" | grep "$arch" | while read -r libfile; do
-              cp "$libfile" "$TARGET_DIR/" || true
+              find "$VCPKG_DIR/lib" -maxdepth 1 \
+                \( -name "libav*.so" -o -name "libsw*.so" \
+                   -o -name "libssl.so" -o -name "libcrypto.so" \
+                   -o -name "libav*.a"  -o -name "libsw*.a"  \
+                   -o -name "libssl.a"  -o -name "libcrypto.a" \) \
+                -exec cp {} "$PREFIX_DIR/lib/" \; 2>/dev/null || true
+
+              for HDIR in libavcodec libavdevice libavfilter libavformat \
+                          libavutil libswresample libswscale openssl; do
+                [ -d "$VCPKG_DIR/include/$HDIR" ] && \
+                  cp -r "$VCPKG_DIR/include/$HDIR" "$PREFIX_DIR/include/"
+              done
+
+              find "$VCPKG_DIR/lib/pkgconfig" \
+                \( -name "libav*.pc" -o -name "libsw*.pc" \
+                   -o -name "libssl*.pc" -o -name "openssl*.pc" \) \
+                -exec cp {} "$PREFIX_DIR/lib/pkgconfig/" \; 2>/dev/null || true
+
+              find "$PREFIX_DIR/lib/pkgconfig" -name "*.pc" -exec \
+                sed -i \
+                  -e "s|^prefix=.*|prefix=$PREFIX_DIR|" \
+                  -e "s|^exec_prefix=.*|exec_prefix=$PREFIX_DIR|" \
+                {} \;
+
+              echo "  ✅ prefix/$PREFIX_ARCH ($(find $PREFIX_DIR/lib -name '*.so' | wc -l) .so)"
             done
           done
 
-          echo "Downloading mpv header files..."
-          mkdir -p ${{ github.workspace }}/app/src/main/cpp/include/mpv
-          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/client.h    -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/client.h
-          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render.h    -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/render.h
-          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/render_gl.h -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/render_gl.h
-          curl -L https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/stream_cb.h -o ${{ github.workspace }}/app/src/main/cpp/include/mpv/stream_cb.h
+          echo ""
+          echo "🔧 Patching buildall.sh to skip FFmpeg & OpenSSL builds..."
+          sed -i -E '/[^#]*(build[-_]?(ffmpeg|openssl)|ffmpeg\.sh|openssl\.sh)/s|^|#[vcpkg-skip] |' \
+            buildall.sh || true
+          grep -iE "ffmpeg|openssl" buildall.sh | grep -v "^#" || \
+            echo "  (no unpatched ffmpeg/openssl lines remaining)"
 
-          echo "Copying FFmpeg header files..."
-          FFMPEG_INCLUDE_BASE=$(find ${{ github.workspace }}/mpv-android/buildscripts/prefix \
-            -maxdepth 2 -type d -name "include" | head -n 1)
+          echo ""
+          echo "🚀 Building mpv for all 4 ABIs..."
+          for MPV_ARCH in arm64 armv7l x86_64 x86; do
+            echo ""
+            echo "── Building $MPV_ARCH ──"
+            ./buildall.sh --arch "$MPV_ARCH"
 
-          if [ -z "$FFMPEG_INCLUDE_BASE" ]; then
-            echo "Normal path not found — trying recursive search..."
-            FFMPEG_INCLUDE_BASE=$(find ${{ github.workspace }}/mpv-android \
-              -path "*/include/libavcodec" -type d | head -n 1 | sed 's|/libavcodec||')
-          fi
+            ABI="${ABI_NAME[$MPV_ARCH]}"
+            TRIPLET="${VCPKG_TRIPLET[$MPV_ARCH]}"
+            VCPKG_DIR="$INSTALL_ROOT/$TRIPLET"
+            TARGET_DIR="$WS/app/src/main/jniLibs/$ABI"
+            mkdir -p "$TARGET_DIR"
 
-          if [ -n "$FFMPEG_INCLUDE_BASE" ]; then
-            echo "FFmpeg include base: $FFMPEG_INCLUDE_BASE"
-            for lib in libavcodec libavdevice libavfilter libavformat libavutil libswresample libswscale; do
-              if [ -d "$FFMPEG_INCLUDE_BASE/$lib" ]; then
-                cp -r "$FFMPEG_INCLUDE_BASE/$lib" ${{ github.workspace }}/app/src/main/cpp/include/
-                echo "  Copied $lib"
-              fi
+            MPV_SO=$(find "$WS/mpv-android" -name "libmpv.so" | grep -i "$MPV_ARCH" | head -1)
+            [ -n "$MPV_SO" ] && cp "$MPV_SO" "$TARGET_DIR/" || \
+              { echo "❌ libmpv.so not found for $ABI"; exit 1; }
+
+            for LIB in libavcodec libavdevice libavfilter libavformat \
+                       libavutil libswresample libswscale; do
+              SO=$(find "$VCPKG_DIR/lib" -maxdepth 1 -name "${LIB}.so" | head -1)
+              [ -n "$SO" ] && cp "$SO" "$TARGET_DIR/" && echo "  ✅ $LIB ($ABI)" || \
+                echo "  ⚠️  $LIB.so not found for $ABI"
             done
-          else
-            echo "ERROR: FFmpeg headers not found."
-            exit 1
-          fi
 
-          if command -v ccache &> /dev/null; then
-              ccache -s
-          fi
+            echo "  📋 jniLibs/$ABI: $(ls $TARGET_DIR | wc -l) files"
+          done
+
+          # ── Headers (only needed once — use arm64) ─────────────────
+          mkdir -p "$WS/app/src/main/cpp/include/mpv"
+          for H in client render render_gl stream_cb; do
+            curl -sL "https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/${H}.h" \
+                 -o "$WS/app/src/main/cpp/include/mpv/${H}.h"
+          done
+          for HDIR in libavcodec libavdevice libavfilter libavformat \
+                      libavutil libswresample libswscale; do
+            [ -d "$INSTALL_ROOT/arm64-android/include/$HDIR" ] && \
+              cp -r "$INSTALL_ROOT/arm64-android/include/$HDIR" \
+                    "$WS/app/src/main/cpp/include/"
+          done
+
+          echo ""
+          echo "📋 Final include/ contents:"
+          ls "$WS/app/src/main/cpp/include/"
 
       - name: Decode Keystore
-        run: echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > ${{ github.workspace }}/release.keystore
+        run: |
+          echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > ${{ github.workspace }}/release.keystore
 
       - name: Create google-services.json
         env:
@@ -318,21 +275,21 @@ jobs:
           name: StreamX-Ultra-Release-APK
           path: app/build/outputs/apk/release/*.apk
 
-      - name: Generate Release Notes
+      - name: "StreamX Bot: Generate Release Notes"
         id: build_changelog
         uses: mikepenz/release-changelog-builder-action@v4
         with:
           toTag: ${{ github.ref_name }}
           configurationJson: |
             {
-              "template": "# StreamX Ultra ${{ github.ref_name }}\n\n## Change Log\n#{{changelog}}\n\n---\n\n### Download Info\n- **Version**: ${{ github.ref_name }}\n- **Status**: Stable Release\n\n*Generated by StreamX Bot* | AeonCoreX",
+              "template": "# 🚀 StreamX Ultra ${{ github.ref_name }}\n\n## 📋 Change Log\n#{{changelog}}\n\n---\n\n### 📦 Download Info\n- **Version**: ${{ github.ref_name }}\n- **Status**: Stable Release\n\n🤖 *Generated by StreamX Bot* | © AeonCoreX™",
               "categories": [
-                {"title": "## New Features",   "labels": ["feat","feature","new"]},
-                {"title": "## Bug Fixes",      "labels": ["fix","bug","hotfix"]},
-                {"title": "## UI/UX",          "labels": ["ui","design"]},
-                {"title": "## Performance",    "labels": ["perf","refactor"]}
+                  {"title": "## ✨ New Features", "labels": ["feat", "feature", "new"]},
+                  {"title": "## 🐛 Bug Fixes",    "labels": ["fix", "bug", "hotfix"]},
+                  {"title": "## 🎨 UI/UX",        "labels": ["ui", "design"]},
+                  {"title": "## ⚡ Performance",  "labels": ["perf", "refactor"]}
               ],
-              "ignore_labels": ["release","ignore","ci"],
+              "ignore_labels": ["release", "ignore", "ci"],
               "sort": "label"
             }
         env:
@@ -347,4 +304,3 @@ jobs:
           body:     ${{ steps.build_changelog.outputs.changelog }}
         env:
           GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
-          
