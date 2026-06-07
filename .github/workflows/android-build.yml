@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90          # Guard against runaway builds (was: no limit → silent hang)
+    timeout-minutes: 90
 
     steps:
       - name: Checkout repository
@@ -25,6 +25,11 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
+      # ── cmake 4.x (vcpkg requires >= 4.3.2) ───────────────────────────
+      # Must run BEFORE vcpkg setup — ubuntu-latest ships cmake 3.x only.
+      - name: Install cmake 4.x (required by vcpkg)
+        uses: lukka/get-cmake@latest
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
 
@@ -33,7 +38,7 @@ jobs:
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
 
-      # Debug: only arm64 Rust target — no need to compile 4 targets
+      # Debug: arm64-v8a only — no need to compile 4 targets
       - name: Install Rust (arm64 only for Debug)
         run: |
           rustup target add aarch64-linux-android
@@ -43,12 +48,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y meson ninja-build yasm nasm pkg-config python3-pip
-          pip3 install --quiet meson --upgrade
+          pip3 install --break-system-packages meson --upgrade
 
       # ── vcpkg binary cache ─────────────────────────────────────────────
-      # Stores compiled FFmpeg binaries for arm64-android.
-      # Key includes vcpkg.json hash → auto-invalidates if FFmpeg version changes.
-      # Cache version bumped to v6 to force rebuild after removing libtorrent.
+      # Stores compiled FFmpeg arm64-android binary.
+      # Cache v6 → force rebuild after replacing libtorrent with ffmpeg.
       - name: Restore vcpkg binary cache
         uses: actions/cache@v4
         with:
@@ -74,10 +78,7 @@ jobs:
           vcpkgGitCommitId: ${{ steps.vcpkg-git.outputs.commit_id }}
           doNotUpdateVcpkg: false
 
-      # ── Build FFmpeg via vcpkg for arm64-android ───────────────────────
-      # First run: ~15 min (compiles FFmpeg from source)
-      # Subsequent runs: ~30 sec (restored from vcpkg binary cache above)
-      # vcpkg.json now has ffmpeg[openssl] instead of libtorrent/boost/openssl
+      # ── Build FFmpeg via vcpkg (arm64-android only for Debug) ──────────
       - name: Build FFmpeg via vcpkg (arm64-android)
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
@@ -90,13 +91,11 @@ jobs:
             --no-print-usage
 
           echo ""
-          echo "✅ vcpkg FFmpeg libs (arm64-android):"
+          echo "✅ vcpkg arm64-android libs:"
           ls -1 "${{ github.workspace }}/vcpkg_installed/arm64-android/lib/" \
-            | grep -E "libav|libsw|libssl|libcrypto" || true
+            | grep -E "libav|libsw|libssl|libcrypto" || echo "(empty — check vcpkg log)"
 
       # ── mpv artifact cache ─────────────────────────────────────────────
-      # Caches jniLibs/ + include/ so the 45-min mpv build is skipped on
-      # subsequent runs when neither vcpkg.json nor mpv-android has changed.
       - name: Get mpv-android HEAD commit (for cache key)
         id: mpv-version
         run: |
@@ -112,14 +111,15 @@ jobs:
           path: |
             app/src/main/jniLibs
             app/src/main/cpp/include
-          key: ${{ runner.os }}-mpv-vcpkg-arm64-v1-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}-${{ steps.mpv-version.outputs.commit }}
+          key: ${{ runner.os }}-mpv-vcpkg-arm64-v2-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}-${{ steps.mpv-version.outputs.commit }}
           restore-keys: |
-            ${{ runner.os }}-mpv-vcpkg-arm64-v1-
+            ${{ runner.os }}-mpv-vcpkg-arm64-v2-
 
-      # ── Build mpv only (arm64), FFmpeg comes from vcpkg ───────────────
-      # On cache hit this entire step is skipped → ~0 min instead of ~45 min
-      # On cache miss: builds only mpv (not FFmpeg) → ~10-15 min instead of 45
-      - name: Build mpv (arm64, using vcpkg FFmpeg — skip FFmpeg compile)
+      # ── Build mpv (arm64 only, FFmpeg from vcpkg) ──────────────────────
+      # FIX 1: prefix path was wrong — mpv-android uses prefix/{arch}/usr/local/
+      # FIX 2: replaced sed patch with a hard no-op script override
+      # FIX 3: build-openssl.sh also replaced (mpv-android builds its own openssl)
+      - name: Build mpv (arm64, using vcpkg FFmpeg — skip FFmpeg source build)
         if: steps.mpv-cache.outputs.cache-hit != 'true'
         env:
           ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_HOME }}
@@ -134,62 +134,80 @@ jobs:
           git config --global url."https://".insteadOf git://
           chmod +x *.sh
 
-          echo "📥 Downloading mpv sources (FFmpeg download will be skipped)..."
+          echo "📥 Downloading mpv sources..."
           ./download.sh
 
-          echo ""
-          echo "🔧 Pre-populating prefix with vcpkg FFmpeg for arm64..."
-          # mpv-android may use either 'arm64' or 'arm64-v8a' as the prefix dir name.
-          # We populate both so the build works regardless of the version.
-          for PREFIX_ARCH in arm64-v8a arm64; do
-            PREFIX_DIR="$WS/mpv-android/buildscripts/prefix/$PREFIX_ARCH"
-            mkdir -p "$PREFIX_DIR/lib" "$PREFIX_DIR/include" "$PREFIX_DIR/lib/pkgconfig"
+          # ── FIX: Replace build-ffmpeg.sh + build-openssl.sh with no-ops ──
+          # Rationale: sed patch on buildall.sh is fragile (structure changes
+          # with mpv-android versions). Replacing the scripts themselves is
+          # reliable regardless of how buildall.sh calls them.
+          #
+          # We pre-populate the prefix with vcpkg FFmpeg+OpenSSL so mpv's
+          # meson configure step finds them via pkg-config.
 
-            # Shared + static libs
+          cat > build-ffmpeg.sh << 'NOOP'
+          #!/bin/bash
+          # [vcpkg-skip] FFmpeg built via vcpkg — source build skipped
+          echo "✅ [vcpkg] FFmpeg source build skipped — using vcpkg FFmpeg"
+          exit 0
+          NOOP
+          chmod +x build-ffmpeg.sh
+
+          cat > build-openssl.sh << 'NOOP'
+          #!/bin/bash
+          # [vcpkg-skip] OpenSSL built via vcpkg — source build skipped
+          echo "✅ [vcpkg] OpenSSL source build skipped — using vcpkg OpenSSL"
+          exit 0
+          NOOP
+          chmod +x build-openssl.sh
+
+          echo ""
+          echo "🔧 Pre-populating prefix with vcpkg FFmpeg+OpenSSL (arm64)..."
+          echo "   ⚠️  Correct path: prefix/{arch}/usr/local/ (not prefix/{arch}/)"
+
+          for PREFIX_ARCH in arm64-v8a arm64; do
+            # FIXED: mpv-android installs to prefix/{arch}/usr/local/ — not prefix/{arch}/
+            USR_LOCAL="$WS/mpv-android/buildscripts/prefix/$PREFIX_ARCH/usr/local"
+            mkdir -p "$USR_LOCAL/lib" "$USR_LOCAL/include" "$USR_LOCAL/lib/pkgconfig"
+
+            # Shared + static libs from vcpkg
             find "$VCPKG_ARM64/lib" -maxdepth 1 \
               \( -name "libav*.so" -o -name "libsw*.so" \
                  -o -name "libssl.so" -o -name "libcrypto.so" \
                  -o -name "libav*.a"  -o -name "libsw*.a"  \
                  -o -name "libssl.a"  -o -name "libcrypto.a" \) \
-              -exec cp {} "$PREFIX_DIR/lib/" \; 2>/dev/null || true
+              -exec cp {} "$USR_LOCAL/lib/" \; 2>/dev/null || true
 
             # Headers
             for HDIR in libavcodec libavdevice libavfilter libavformat \
                         libavutil libswresample libswscale openssl; do
               [ -d "$VCPKG_ARM64/include/$HDIR" ] && \
-                cp -r "$VCPKG_ARM64/include/$HDIR" "$PREFIX_DIR/include/"
+                cp -r "$VCPKG_ARM64/include/$HDIR" "$USR_LOCAL/include/"
             done
 
-            # pkgconfig — copy then fix the prefix= path
+            # pkgconfig files — copy then fix the prefix= path
             find "$VCPKG_ARM64/lib/pkgconfig" \
               \( -name "libav*.pc" -o -name "libsw*.pc" \
                  -o -name "libssl*.pc" -o -name "openssl*.pc" \) \
-              -exec cp {} "$PREFIX_DIR/lib/pkgconfig/" \; 2>/dev/null || true
+              -exec cp {} "$USR_LOCAL/lib/pkgconfig/" \; 2>/dev/null || true
 
-            find "$PREFIX_DIR/lib/pkgconfig" -name "*.pc" -exec \
+            find "$USR_LOCAL/lib/pkgconfig" -name "*.pc" -exec \
               sed -i \
-                -e "s|^prefix=.*|prefix=$PREFIX_DIR|" \
-                -e "s|^exec_prefix=.*|exec_prefix=$PREFIX_DIR|" \
+                -e "s|^prefix=.*|prefix=$USR_LOCAL|" \
+                -e "s|^exec_prefix=.*|exec_prefix=$USR_LOCAL|" \
               {} \;
 
-            echo "  ✅ prefix/$PREFIX_ARCH ready ($(find $PREFIX_DIR/lib -name '*.so' | wc -l) .so files)"
+            SO_COUNT=$(find "$USR_LOCAL/lib" -name '*.so' 2>/dev/null | wc -l)
+            echo "  ✅ prefix/$PREFIX_ARCH/usr/local/ ready ($SO_COUNT .so files)"
           done
-
-          echo ""
-          echo "🔧 Patching buildall.sh — commenting out FFmpeg & OpenSSL build steps..."
-          # Handles: ./build-ffmpeg.sh, source build-ffmpeg.sh, build_ffmpeg, etc.
-          sed -i -E '/[^#]*(build[-_]?(ffmpeg|openssl)|ffmpeg\.sh|openssl\.sh)/s|^|#[vcpkg-skip] |' \
-            buildall.sh || true
-          echo "Remaining ffmpeg/openssl lines after patch:"
-          grep -iE "ffmpeg|openssl" buildall.sh | grep -v "^#" || echo "  (none — patch successful)"
 
           export PATH="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
 
           echo ""
-          echo "🚀 Building mpv for arm64 (FFmpeg from vcpkg, not from source)..."
+          echo "🚀 Building mpv for arm64..."
           ./buildall.sh --arch arm64
 
-          # ── Copy libmpv.so ─────────────────────────────────────────
+          # ── Copy libmpv.so → jniLibs ───────────────────────────────────
           TARGET_DIR="$WS/app/src/main/jniLibs/arm64-v8a"
           mkdir -p "$TARGET_DIR"
 
@@ -198,12 +216,12 @@ jobs:
             cp "$MPV_SO" "$TARGET_DIR/"
             echo "✅ libmpv.so → jniLibs/arm64-v8a/"
           else
-            echo "❌ libmpv.so not found after build!"
+            echo "❌ libmpv.so not found!"
             find "$WS/mpv-android" -name "*.so" | head -20
             exit 1
           fi
 
-          # ── Copy vcpkg FFmpeg .so to jniLibs ──────────────────────
+          # ── Copy vcpkg FFmpeg .so → jniLibs ───────────────────────────
           echo "📦 Copying vcpkg FFmpeg libs → jniLibs/arm64-v8a/"
           for LIB in libavcodec libavdevice libavfilter libavformat \
                      libavutil libswresample libswscale; do
@@ -212,7 +230,7 @@ jobs:
               cp "$SO" "$TARGET_DIR/"
               echo "  ✅ ${LIB}.so"
             else
-              echo "  ⚠️  ${LIB}.so not found in vcpkg — check vcpkg features"
+              echo "  ⚠️  ${LIB}.so not found in vcpkg"
             fi
           done
 
@@ -220,7 +238,7 @@ jobs:
           echo "📋 jniLibs/arm64-v8a:"
           ls -lh "$TARGET_DIR/"
 
-          # ── MPV + FFmpeg headers ───────────────────────────────────
+          # ── MPV + FFmpeg headers ───────────────────────────────────────
           mkdir -p "$WS/app/src/main/cpp/include/mpv"
           for H in client render render_gl stream_cb; do
             curl -sL "https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/${H}.h" \
@@ -245,8 +263,6 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # assembleDebug now triggers cargoBuildDebug (arm64 only, no --release)
-      # instead of cargoBuildRelease (4 ABIs, lto+codegen=1 → OOM/timeout)
       - name: Build Debug APK
         env:
           TMDB_API_KEY:     ${{ secrets.TMDB_API_KEY }}

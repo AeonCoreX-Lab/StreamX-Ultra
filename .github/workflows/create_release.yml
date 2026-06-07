@@ -9,7 +9,7 @@ on:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
-    timeout-minutes: 240         # Release builds all 4 ABIs — needs more time
+    timeout-minutes: 240
     permissions:
       contents: write
       pull-requests: read
@@ -28,6 +28,10 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+
+      # ── cmake 4.x (vcpkg requires >= 4.3.2) ───────────────────────────
+      - name: Install cmake 4.x (required by vcpkg)
+        uses: lukka/get-cmake@latest
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
@@ -50,7 +54,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y meson ninja-build yasm nasm pkg-config python3-pip
-          pip3 install --quiet meson --upgrade
+          pip3 install --break-system-packages meson --upgrade
 
       # ── vcpkg binary cache (all 4 Android triplets) ────────────────────
       - name: Restore vcpkg binary cache
@@ -78,8 +82,7 @@ jobs:
           vcpkgGitCommitId: ${{ steps.vcpkg-git.outputs.commit_id }}
           doNotUpdateVcpkg: false
 
-      # ── Build FFmpeg via vcpkg for all 4 Android ABI triplets ──────────
-      # First run: ~40 min (4 × FFmpeg compile). Warm cache: ~2 min.
+      # ── Build FFmpeg via vcpkg (all 4 Android ABI triplets) ────────────
       - name: Build FFmpeg via vcpkg (all 4 Android ABIs)
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
@@ -117,12 +120,13 @@ jobs:
           path: |
             app/src/main/jniLibs
             app/src/main/cpp/include
-          key: ${{ runner.os }}-mpv-vcpkg-all-v1-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}-${{ steps.mpv-version.outputs.commit }}
+          key: ${{ runner.os }}-mpv-vcpkg-all-v2-${{ hashFiles('app/src/main/cpp/vcpkg.json') }}-${{ steps.mpv-version.outputs.commit }}
           restore-keys: |
-            ${{ runner.os }}-mpv-vcpkg-all-v1-
+            ${{ runner.os }}-mpv-vcpkg-all-v2-
 
-      # ── Build mpv for all 4 ABIs (FFmpeg from vcpkg, not from source) ──
-      - name: Build mpv (all ABIs, using vcpkg FFmpeg — skip FFmpeg compile)
+      # ── Build mpv for all 4 ABIs (FFmpeg from vcpkg) ───────────────────
+      # Same 3 fixes as android-build.yml applied to all 4 ABI loops
+      - name: Build mpv (all ABIs, using vcpkg FFmpeg — skip FFmpeg source build)
         if: steps.mpv-cache.outputs.cache-hit != 'true'
         env:
           ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_HOME }}
@@ -140,12 +144,30 @@ jobs:
           echo "📥 Downloading mpv sources..."
           ./download.sh
 
+          # ── Replace build-ffmpeg.sh + build-openssl.sh with no-ops ───
+          # FIX: Replace instead of sed-patching buildall.sh.
+          # Reliable across all mpv-android versions.
+          cat > build-ffmpeg.sh << 'NOOP'
+          #!/bin/bash
+          echo "✅ [vcpkg] FFmpeg source build skipped — using vcpkg FFmpeg"
+          exit 0
+          NOOP
+          chmod +x build-ffmpeg.sh
+
+          cat > build-openssl.sh << 'NOOP'
+          #!/bin/bash
+          echo "✅ [vcpkg] OpenSSL source build skipped — using vcpkg OpenSSL"
+          exit 0
+          NOOP
+          chmod +x build-openssl.sh
+
           export PATH="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
 
-          # ABI mapping: mpv-arch → android-ABI → vcpkg-triplet → prefix-dir-names
-          declare -A VCPKG_TRIPLET=( [arm64]=arm64-android [armv7l]=arm-android [x86_64]=x64-android [x86]=x86-android )
-          declare -A ABI_NAME=(      [arm64]=arm64-v8a      [armv7l]=armeabi-v7a  [x86_64]=x86_64      [x86]=x86 )
-          declare -A PREFIX_ALTS=(   [arm64]="arm64-v8a arm64" [armv7l]="armeabi-v7a arm" [x86_64]="x86_64 x86-64" [x86]="x86 x86_32" )
+          # ABI mapping: mpv-arch → android-ABI → vcpkg-triplet
+          declare -A VCPKG_TRIPLET=([arm64]=arm64-android [armv7l]=arm-android [x86_64]=x64-android [x86]=x86-android)
+          declare -A ABI_NAME=(     [arm64]=arm64-v8a     [armv7l]=armeabi-v7a  [x86_64]=x86_64      [x86]=x86)
+          # mpv-android uses BOTH naming conventions in different versions
+          declare -A PREFIX_ALTS=([arm64]="arm64-v8a arm64" [armv7l]="armeabi-v7a arm" [x86_64]="x86_64 x86-64" [x86]="x86 x86_32")
 
           for MPV_ARCH in arm64 armv7l x86_64 x86; do
             TRIPLET="${VCPKG_TRIPLET[$MPV_ARCH]}"
@@ -157,62 +179,63 @@ jobs:
             echo "🔧 Populating prefix for $MPV_ARCH (vcpkg: $TRIPLET)"
             echo "═══════════════════════════════════════"
 
-            # Populate both possible prefix dir name variants
+            # FIX: copy to prefix/{arch}/usr/local/ (correct mpv-android path)
             for PREFIX_ARCH in ${PREFIX_ALTS[$MPV_ARCH]}; do
-              PREFIX_DIR="$WS/mpv-android/buildscripts/prefix/$PREFIX_ARCH"
-              mkdir -p "$PREFIX_DIR/lib" "$PREFIX_DIR/include" "$PREFIX_DIR/lib/pkgconfig"
+              USR_LOCAL="$WS/mpv-android/buildscripts/prefix/$PREFIX_ARCH/usr/local"
+              mkdir -p "$USR_LOCAL/lib" "$USR_LOCAL/include" "$USR_LOCAL/lib/pkgconfig"
 
               find "$VCPKG_DIR/lib" -maxdepth 1 \
                 \( -name "libav*.so" -o -name "libsw*.so" \
                    -o -name "libssl.so" -o -name "libcrypto.so" \
                    -o -name "libav*.a"  -o -name "libsw*.a"  \
                    -o -name "libssl.a"  -o -name "libcrypto.a" \) \
-                -exec cp {} "$PREFIX_DIR/lib/" \; 2>/dev/null || true
+                -exec cp {} "$USR_LOCAL/lib/" \; 2>/dev/null || true
 
               for HDIR in libavcodec libavdevice libavfilter libavformat \
                           libavutil libswresample libswscale openssl; do
                 [ -d "$VCPKG_DIR/include/$HDIR" ] && \
-                  cp -r "$VCPKG_DIR/include/$HDIR" "$PREFIX_DIR/include/"
+                  cp -r "$VCPKG_DIR/include/$HDIR" "$USR_LOCAL/include/"
               done
 
               find "$VCPKG_DIR/lib/pkgconfig" \
                 \( -name "libav*.pc" -o -name "libsw*.pc" \
                    -o -name "libssl*.pc" -o -name "openssl*.pc" \) \
-                -exec cp {} "$PREFIX_DIR/lib/pkgconfig/" \; 2>/dev/null || true
+                -exec cp {} "$USR_LOCAL/lib/pkgconfig/" \; 2>/dev/null || true
 
-              find "$PREFIX_DIR/lib/pkgconfig" -name "*.pc" -exec \
+              find "$USR_LOCAL/lib/pkgconfig" -name "*.pc" -exec \
                 sed -i \
-                  -e "s|^prefix=.*|prefix=$PREFIX_DIR|" \
-                  -e "s|^exec_prefix=.*|exec_prefix=$PREFIX_DIR|" \
+                  -e "s|^prefix=.*|prefix=$USR_LOCAL|" \
+                  -e "s|^exec_prefix=.*|exec_prefix=$USR_LOCAL|" \
                 {} \;
 
-              echo "  ✅ prefix/$PREFIX_ARCH ($(find $PREFIX_DIR/lib -name '*.so' | wc -l) .so)"
+              SO_COUNT=$(find "$USR_LOCAL/lib" -name '*.so' 2>/dev/null | wc -l)
+              echo "  ✅ prefix/$PREFIX_ARCH/usr/local/ ready ($SO_COUNT .so)"
             done
           done
 
           echo ""
-          echo "🔧 Patching buildall.sh to skip FFmpeg & OpenSSL builds..."
-          sed -i -E '/[^#]*(build[-_]?(ffmpeg|openssl)|ffmpeg\.sh|openssl\.sh)/s|^|#[vcpkg-skip] |' \
-            buildall.sh || true
-          grep -iE "ffmpeg|openssl" buildall.sh | grep -v "^#" || \
-            echo "  (no unpatched ffmpeg/openssl lines remaining)"
-
-          echo ""
           echo "🚀 Building mpv for all 4 ABIs..."
           for MPV_ARCH in arm64 armv7l x86_64 x86; do
-            echo ""
-            echo "── Building $MPV_ARCH ──"
-            ./buildall.sh --arch "$MPV_ARCH"
-
             ABI="${ABI_NAME[$MPV_ARCH]}"
             TRIPLET="${VCPKG_TRIPLET[$MPV_ARCH]}"
             VCPKG_DIR="$INSTALL_ROOT/$TRIPLET"
             TARGET_DIR="$WS/app/src/main/jniLibs/$ABI"
             mkdir -p "$TARGET_DIR"
 
-            MPV_SO=$(find "$WS/mpv-android" -name "libmpv.so" | grep -i "$MPV_ARCH" | head -1)
-            [ -n "$MPV_SO" ] && cp "$MPV_SO" "$TARGET_DIR/" || \
-              { echo "❌ libmpv.so not found for $ABI"; exit 1; }
+            echo ""
+            echo "── Building $MPV_ARCH ──"
+            ./buildall.sh --arch "$MPV_ARCH"
+
+            MPV_SO=$(find "$WS/mpv-android" -name "libmpv.so" | grep -i "$MPV_ARCH\|$ABI" | head -1)
+            [ -z "$MPV_SO" ] && MPV_SO=$(find "$WS/mpv-android" -name "libmpv.so" | head -1)
+
+            if [ -n "$MPV_SO" ]; then
+              cp "$MPV_SO" "$TARGET_DIR/"
+              echo "  ✅ libmpv.so ($ABI)"
+            else
+              echo "  ❌ libmpv.so not found for $ABI"
+              exit 1
+            fi
 
             for LIB in libavcodec libavdevice libavfilter libavformat \
                        libavutil libswresample libswscale; do
@@ -224,7 +247,7 @@ jobs:
             echo "  📋 jniLibs/$ABI: $(ls $TARGET_DIR | wc -l) files"
           done
 
-          # ── Headers (only needed once — use arm64) ─────────────────
+          # ── Headers (from arm64 vcpkg — same for all ABIs) ────────────
           mkdir -p "$WS/app/src/main/cpp/include/mpv"
           for H in client render render_gl stream_cb; do
             curl -sL "https://raw.githubusercontent.com/mpv-player/mpv/master/include/mpv/${H}.h" \
