@@ -47,7 +47,6 @@ jobs:
           python3 -m pip install --upgrade pip
           pip3 install meson ninja
 
-      # Cache for C++ builds
       - name: Restore vcpkg artifacts
         uses: actions/cache@v3
         with:
@@ -74,7 +73,7 @@ jobs:
           vcpkgGitCommitId: ${{ steps.vcpkg-git.outputs.commit_id }}
           doNotUpdateVcpkg: false
           
-      - name: Build mpv-android (Universal Support)
+      - name: Build mpv-android (Debug Fast Track)
         run: |
           sudo apt update && sudo apt install -y meson ninja-build yasm nasm python3-pip pkg-config
           git clone https://github.com/mpv-android/mpv-android.git
@@ -89,7 +88,8 @@ jobs:
           echo "📥 Downloading sources..."
           ./download.sh
 
-          for arch in arm64 armv7l x86 x86_64; do
+          # Only executing arm64 for ultra-fast debug builds
+          for arch in arm64; do
             echo "----------------------------------------"
             echo "🚀 Building mpv for: $arch"
             echo "----------------------------------------"
@@ -144,10 +144,6 @@ jobs:
             exit 1
           fi
 
-          echo ""
-          echo "📋 include/ directory:"
-          ls -la ${{ github.workspace }}/app/src/main/cpp/include/
-
       - name: Create google-services.json
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
@@ -160,10 +156,8 @@ jobs:
       - name: Build Debug APK
         env:
           TMDB_API_KEY:          ${{ secrets.TMDB_API_KEY }}
-          # GEMINI_API_KEY removed — AI system removed from app
-          # AdMob removed — replaced by Start.io (no secret needed in build)
           STARTAPP_APP_ID:       ${{ secrets.STARTAPP_APP_ID }}
-          BACKEND_BASE_URL:   ${{ secrets.BACKEND_BASE_URL}}
+          BACKEND_BASE_URL:      ${{ secrets.BACKEND_BASE_URL}}
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload Debug APK
@@ -171,3 +165,4 @@ jobs:
         with:
           name: StreamX-Ultra-Debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+          

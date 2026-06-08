@@ -147,10 +147,6 @@ jobs:
             exit 1
           fi
 
-          echo ""
-          echo "📋 include/ directory:"
-          ls -la ${{ github.workspace }}/app/src/main/cpp/include/
-
       - name: Decode Keystore
         run: |
           echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > ${{ github.workspace }}/release.keystore
@@ -167,8 +163,7 @@ jobs:
       - name: Build Signed Release APK
         env:
           TMDB_API_KEY:              ${{ secrets.TMDB_API_KEY }}
-          BACKEND_BASE_URL:   ${{ secrets.BACKEND_BASE_URL}}
-          # GEMINI_API_KEY removed — AI system removed from app
+          BACKEND_BASE_URL:          ${{ secrets.BACKEND_BASE_URL}}
           STARTAPP_APP_ID:           ${{ secrets.STARTAPP_APP_ID }}
           RELEASE_KEYSTORE_FILE:     ${{ github.workspace }}/release.keystore
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
@@ -208,7 +203,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         with:
           files:    app/build/outputs/apk/release/*.apk
           name:     "StreamX Ultra ${{ github.ref_name }}"
@@ -216,3 +211,4 @@ jobs:
           body:     ${{ steps.build_changelog.outputs.changelog }}
         env:
           GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
+          

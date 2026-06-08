@@ -170,7 +170,7 @@ android {
 //
 //  Debug  task (cargoBuildDebug):
 //    • arm64-v8a only
-//    • `cargo ndk build`           ← no --release → uses debug profile
+//    • `cargo ndk build`        ← no --release → uses debug profile
 //    • No LTO, no codegen-units=1, no vendored-OpenSSL heavy pass
 //    • ~2-3 min vs ~10+ min in release mode
 //
@@ -184,13 +184,13 @@ abstract class CargoBuildTask @Inject constructor(
 
     @get:Input abstract val tmdbApiKey:    Property<String>
     @get:Input abstract val rustRootPath:  Property<String>
-    @get:Input abstract val isReleaseBuild: Property<Boolean>
+    @get:Input abstract val releaseBuild:  Property<Boolean>
     @get:OutputDirectory abstract val outputDir: DirectoryProperty
 
     @TaskAction
     fun build() {
         val rustRoot    = File(rustRootPath.get())
-        val release     = isReleaseBuild.get()
+        val release     = releaseBuild.get()
         val buildType   = if (release) "release" else "debug"
 
         val targets = if (release) {
@@ -211,7 +211,7 @@ abstract class CargoBuildTask @Inject constructor(
                 workingDir = rustRoot
                 environment("TMDB_API_KEY", tmdbApiKey.get())
                 commandLine(buildList {
-                    addAll(listOf("cargo", "ndk", "-t", abi, "-o", "$rustRoot/jniLibs", "build"))
+                    addAll(listOf("cargo", "ndk", "-t", abi, "-o", "$rustRoot/jniLibs", "build", "--jobs", "2"))
                     if (release) add("--release")
                 })
             }
@@ -235,7 +235,7 @@ val cargoBuildDebugTask = tasks.register<CargoBuildTask>("cargoBuildDebug") {
     description = "Rust JNI — debug profile, arm64-v8a only (fast)"
     tmdbApiKey.set(System.getenv("TMDB_API_KEY") ?: "api_key_not_found")
     rustRootPath.set(file("src/main/rust").absolutePath)
-    isReleaseBuild.set(false)
+    releaseBuild.set(false)
     outputDir.set(layout.buildDirectory.dir("rust/targets"))
 }
 
@@ -245,7 +245,7 @@ val cargoBuildReleaseTask = tasks.register<CargoBuildTask>("cargoBuildRelease") 
     description = "Rust JNI — release profile, all 4 ABIs"
     tmdbApiKey.set(System.getenv("TMDB_API_KEY") ?: "api_key_not_found")
     rustRootPath.set(file("src/main/rust").absolutePath)
-    isReleaseBuild.set(true)
+    releaseBuild.set(true)
     outputDir.set(layout.buildDirectory.dir("rust/targets"))
 }
 
@@ -271,7 +271,7 @@ configurations.all {
 dependencies {
     implementation(project(":premium-core"))
 
-    val media3Version     = "1.10.1"
+    val media3Version = "1.10.1"
     val lifecycleVersion  = "2.8.0"
     val protobufVersion   = "3.25.5"
 
