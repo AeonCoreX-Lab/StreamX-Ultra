@@ -195,10 +195,10 @@ abstract class CargoBuildTask @Inject constructor(
                   export VCPKG_ROOT=/path/to/your/vcpkg
 
                 Then install OpenSSL for Android:
-                  $VCPKG_ROOT/vcpkg install openssl:arm64-android
-                  $VCPKG_ROOT/vcpkg install openssl:arm-android
-                  $VCPKG_ROOT/vcpkg install openssl:x64-android
-                  $VCPKG_ROOT/vcpkg install openssl:x86-android
+                  ${'$'}VCPKG_ROOT/vcpkg install openssl:arm64-android
+                  ${'$'}VCPKG_ROOT/vcpkg install openssl:arm-android
+                  ${'$'}VCPKG_ROOT/vcpkg install openssl:x64-android
+                  ${'$'}VCPKG_ROOT/vcpkg install openssl:x86-android
 
                 For CI builds, this is handled automatically by the workflow.
             """.trimIndent())
@@ -289,7 +289,7 @@ val cargoBuildReleaseTask = tasks.register<CargoBuildTask>("cargoBuildRelease") 
 }
 
 // ── Wire cargo tasks to CMake build tasks by build type ───────────
-tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configureEach {
+tasks.withType<<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configureEach {
     val isRelease = this.name.contains("Release", ignoreCase = true)
     dependsOn(if (isRelease) cargoBuildReleaseTask else cargoBuildDebugTask)
 }
