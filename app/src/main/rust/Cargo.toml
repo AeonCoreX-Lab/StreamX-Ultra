@@ -21,10 +21,11 @@ once_cell    = "1.18"
 parking_lot  = "0.12"
 
 # Torrent engine - LATEST VERSION
-# NOTE: OpenSSL is provided by vcpkg. The build.gradle.kts CargoBuildTask
-# sets OPENSSL_DIR and OPENSSL_STATIC=0 environment variables.
-# Do NOT add "vendored" feature — that would compile OpenSSL from C source.
-librqbit     = { version = "9.0.0-rc.0", default-features = false, features = ["sha1-crypto-hash"] }
+# NOTE: OpenSSL is provided by vcpkg.
+librqbit     = { version = "9.0.0-rc.0", default-features = false }
+
+# Explicitly satisfy the SHA-1 crypto backend requirement for rqbit
+librqbit-sha1-wrapper = { version = "=9.0.0-rc.0", features = ["sha1-crypto-hash"] }
 
 # Local HTTP server
 hyper        = { version = "1", features = ["server", "http1"] }
