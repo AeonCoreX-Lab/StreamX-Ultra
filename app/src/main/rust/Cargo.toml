@@ -24,8 +24,7 @@ parking_lot  = "0.12"
 # NOTE: OpenSSL is provided by vcpkg. The build.gradle.kts CargoBuildTask
 # sets OPENSSL_DIR and OPENSSL_STATIC=0 environment variables.
 # Do NOT add "vendored" feature — that would compile OpenSSL from C source.
-librqbit     = { version = "9.0.0-rc.0", default-features = false,
-                 features = ["sha1"] }
+librqbit     = { version = "9.0.0-rc.0", default-features = false }
 
 # Local HTTP server
 hyper        = { version = "1", features = ["server", "http1"] }

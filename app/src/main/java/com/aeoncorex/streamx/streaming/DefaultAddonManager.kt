@@ -47,8 +47,8 @@ object DefaultAddonManager {
 
             // Ensure default source is configured
             if (AddonStorage.getSources().isEmpty()) {
-                AddonStorage.addSource("himanshu8443",
-                    "https://himanshu8443.github.io/providers/modflix")
+                AddonStorage.addSource("aeoncorex-lab",
+                    "https://aeoncorex-lab.github.io/streamx-addons/modflix")
                 Log.d(TAG, "Default source seeded")
             }
 
