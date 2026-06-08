@@ -1,18 +1,20 @@
 // app/src/main/rust/src/torrent/session.rs
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+// FIX: Added AtomicI64 — was missing from import, used by `speed` field
+use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
 use parking_lot::RwLock;
 use tokio::time::{sleep, Duration};
-use log::{info, warn, debug};
+use log::{info, warn};
+// FIX: Added AddTorrentResponse — needed to pattern-match the return of add_torrent()
 use librqbit::{
-    AddTorrent, AddTorrentOptions, Session, SessionOptions,
+    AddTorrent, AddTorrentOptions, AddTorrentResponse, Session, SessionOptions,
 };
 
 use super::piece_picker::PiecePicker;
 use super::{
-    BUFFER_AHEAD_PIECES, CRITICAL_AHEAD_PIECES, HEADER_PIECES,
-    MIN_READY_CRITICAL, TAIL_PIECES, TRACKERS,
+    CRITICAL_AHEAD_PIECES, HEADER_PIECES,
+    MIN_READY_CRITICAL, TAIL_PIECES,
 };
 
 // ── State codes (same as C++ TorrentSystem: 0-4) ─────────────────────────────
@@ -41,7 +43,7 @@ pub struct TorrentStatus {
 pub struct TorrentSession {
     state:         AtomicI32,
     progress:      AtomicI32,
-    speed:         AtomicI64,
+    speed:         AtomicI64,   // FIX: AtomicI64 now correctly imported
     seeds:         AtomicI32,
     peers:         AtomicI32,
     playhead_bits: AtomicU64,        // f64 stored as u64 bits
@@ -56,7 +58,7 @@ impl TorrentSession {
         Self {
             state:         AtomicI32::new(STATE_IDLE),
             progress:      AtomicI32::new(0),
-            speed:         AtomicI64::new(0),
+            speed:         AtomicI64::new(0),   // FIX: AtomicI64 now correctly imported
             seeds:         AtomicI32::new(0),
             peers:         AtomicI32::new(0),
             playhead_bits: AtomicU64::new(0),
@@ -80,13 +82,26 @@ impl TorrentSession {
         };
 
         // Add torrent
-        let mut opts     = AddTorrentOptions::default();
-        opts.trackers    = Some(TRACKERS.iter().map(|t| t.to_string()).collect());
-        opts.overwrite   = true;
+        // FIX: opts.trackers field was removed in librqbit v4 — trackers in magnet URL are
+        //      used automatically. Only keep fields that exist on AddTorrentOptions v4.
+        let mut opts   = AddTorrentOptions::default();
+        opts.overwrite = true;
 
-        let handle = match rq_session.add_torrent(AddTorrent::from_url(&magnet), Some(opts)).await {
-            Ok(h)  => h,
+        // FIX: add_torrent() returns AddTorrentResponse (an enum in librqbit v4).
+        //      Pattern-match to extract the actual torrent handle from the enum variant.
+        let add_response = match rq_session.add_torrent(AddTorrent::from_url(&magnet), Some(opts)).await {
+            Ok(r)  => r,
             Err(e) => { warn!("Add torrent: {}", e); self.state.store(STATE_ERROR, Ordering::Relaxed); return; }
+        };
+
+        // Extract inner ManagedTorrentHandle from the response enum
+        let handle = match add_response {
+            AddTorrentResponse::Added(_, h) | AddTorrentResponse::AlreadyManaged(_, h) => h,
+            AddTorrentResponse::ListOnly(_) => {
+                warn!("Torrent returned list-only response — cannot start playback");
+                self.state.store(STATE_ERROR, Ordering::Relaxed);
+                return;
+            }
         };
 
         let mut picker_opt:  Option<PiecePicker> = None;
@@ -132,7 +147,7 @@ impl TorrentSession {
                         let first_piece  = (file_offset / piece_len) as u32;
                         let last_piece   = ((file_offset + largest_size) / piece_len).min(total_pieces - 1) as u32;
 
-                        let mut picker = PiecePicker::new(total_pieces, first_piece, last_piece, piece_len);
+                        let picker = PiecePicker::new(total_pieces, first_piece, last_piece, piece_len);
 
                         // Prioritise header + tail immediately
                         for i in 0..HEADER_PIECES.min(last_piece - first_piece + 1) {
@@ -152,7 +167,11 @@ impl TorrentSession {
             let playhead_secs = f64::from_bits(self.playhead_bits.load(Ordering::Relaxed));
 
             if let Some(picker) = picker_opt.as_mut() {
-                picker.update_priorities(&handle, playhead_secs);
+                // FIX: update_priorities now takes a callback — avoids naming the
+                //      ManagedTorrentHandle type that isn't re-exported in librqbit v4.0.1 root
+                picker.update_priorities(playhead_secs, |p, prio| {
+                    let _ = handle.set_piece_priority(p, prio);
+                });
 
                 // Check ready gate (matches C++ logic exactly)
                 let header_ok = (picker.first_piece..picker.first_piece + HEADER_PIECES.min(picker.last_piece - picker.first_piece + 1))

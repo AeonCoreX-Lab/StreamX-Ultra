@@ -1,8 +1,7 @@
 // app/src/main/rust/src/torrent/piece_picker.rs
 
-use librqbit::ManagedTorrentHandle;
 use log::debug;
-use super::{CRITICAL_AHEAD_PIECES, HIGH_AHEAD_PIECES, HEADER_PIECES, TAIL_PIECES};
+use super::{HEADER_PIECES, TAIL_PIECES};
 
 // ── PiecePicker ───────────────────────────────────────────────────────────────
 // Priority zones (updated every 250 ms or on seek):
@@ -47,7 +46,13 @@ impl PiecePicker {
     }
 
     // ── Called every 250 ms ───────────────────────────────────────────────────
-    pub fn update_priorities(&mut self, handle: &ManagedTorrentHandle, playhead_secs: f64) {
+    // Uses a callback instead of a concrete handle type so we remain agnostic
+    // of the exact librqbit handle type exported in any given version.
+    // Call site: picker.update_priorities(playhead_secs, |p, prio| { handle.set_piece_priority(p, prio); })
+    pub fn update_priorities<F>(&mut self, playhead_secs: f64, mut set_prio: F)
+    where
+        F: FnMut(usize, u8),
+    {
         let playhead = self.secs_to_piece(playhead_secs);
 
         // Skip if playhead hasn't moved more than 2 pieces
@@ -60,15 +65,15 @@ impl PiecePicker {
         // Assign priorities across the whole file
         for piece in self.first_piece..=self.last_piece {
             let prio = self.priority_for(piece, playhead);
-            let _ = handle.set_piece_priority(piece as usize, prio);
+            set_prio(piece as usize, prio);
         }
 
-        // Always re-enforce header + tail at max
+        // Always re-enforce header + tail at max priority
         for i in 0..HEADER_PIECES.min(self.last_piece - self.first_piece + 1) {
-            let _ = handle.set_piece_priority((self.first_piece + i) as usize, 7);
+            set_prio((self.first_piece + i) as usize, 7);
         }
         for i in 0..TAIL_PIECES.min(self.last_piece - self.first_piece + 1) {
-            let _ = handle.set_piece_priority((self.last_piece - i) as usize, 6);
+            set_prio((self.last_piece - i) as usize, 6);
         }
     }
 
