@@ -23,7 +23,7 @@ use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode, Method};
 use hyper::header::*;
 use http_body_util::Full;
-use log::{info, warn, debug};
+use log::{info, warn};
 
 use super::session::{TorrentSession, STATE_READY};
 
@@ -84,10 +84,18 @@ async fn handle(
 
     // ── /stream ───────────────────────────────────────────────────────────────
     if path == "/stream" {
-        let video_path = {
+        // FIX: Extract all data from session while holding the lock, then drop the guard
+        // before any await points. This avoids the Send issue with parking_lot::RwLockReadGuard.
+        let (video_path, state) = {
             let g = session.read();
-            g.as_ref().map(|s| s.status().video_path).unwrap_or_default()
-        };
+            match g.as_ref() {
+                Some(s) => {
+                    let status = s.status();
+                    (status.video_path, status.state)
+                }
+                None => (String::new(), 0),
+            }
+        }; // g is dropped here before any await
 
         if video_path.is_empty() {
             return Ok(resp503("Torrent metadata not ready yet"));
@@ -99,15 +107,17 @@ async fn handle(
         }
 
         // Wait for READY state before serving (same as Kotlin Buffering check)
-        if let Some(sess) = session.read().as_ref() {
-            let _ = timeout(Duration::from_secs(15), async {
-                loop {
-                    let state = sess.status().state;
-                    if state == STATE_READY || state == 4 { break; }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            }).await;
-        }
+        // FIX: Re-acquire lock for each check, don't hold across await
+        let _ = timeout(Duration::from_secs(15), async {
+            loop {
+                let current_state = {
+                    let g = session.read();
+                    g.as_ref().map(|s| s.status().state).unwrap_or(0)
+                }; // lock dropped before await
+                if current_state == STATE_READY || current_state == 4 { break; }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }).await;
 
         let file_size = match tokio::fs::metadata(vpath).await {
             Ok(m)  => m.len(),
@@ -155,9 +165,10 @@ async fn handle(
     }
 
     // ── /sub/{filename} — subtitle files ──────────────────────────────────────
-    // Same as TorrentStreamServer.kt: serves .srt/.ass/.vtt from video directory
     if path.starts_with("/sub/") {
         let filename = &path[5..];
+
+        // FIX: Extract video path while holding lock, then drop guard
         let video_path = {
             let g = session.read();
             g.as_ref().map(|s| s.status().video_path).unwrap_or_default()

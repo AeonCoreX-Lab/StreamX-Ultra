@@ -46,13 +46,9 @@ impl PiecePicker {
     }
 
     // ── Called every 250 ms ───────────────────────────────────────────────────
-    // Uses a callback instead of a concrete handle type so we remain agnostic
-    // of the exact librqbit handle type exported in any given version.
-    // Call site: picker.update_priorities(playhead_secs, |p, prio| { handle.set_piece_priority(p, prio); })
-    pub fn update_priorities<F>(&mut self, playhead_secs: f64, mut set_prio: F)
-    where
-        F: FnMut(usize, u8),
-    {
+    // In v9, piece priority is handled automatically by librqbit's streaming system.
+    // This method now only tracks the playhead position for readiness checks.
+    pub fn update_priorities(&mut self, playhead_secs: f64) {
         let playhead = self.secs_to_piece(playhead_secs);
 
         // Skip if playhead hasn't moved more than 2 pieces
@@ -61,32 +57,6 @@ impl PiecePicker {
         }
         self.last_playhead = playhead;
         debug!("PiecePicker: playhead={:.1}s piece={}", playhead_secs, playhead);
-
-        // Assign priorities across the whole file
-        for piece in self.first_piece..=self.last_piece {
-            let prio = self.priority_for(piece, playhead);
-            set_prio(piece as usize, prio);
-        }
-
-        // Always re-enforce header + tail at max priority
-        for i in 0..HEADER_PIECES.min(self.last_piece - self.first_piece + 1) {
-            set_prio((self.first_piece + i) as usize, 7);
-        }
-        for i in 0..TAIL_PIECES.min(self.last_piece - self.first_piece + 1) {
-            set_prio((self.last_piece - i) as usize, 6);
-        }
-    }
-
-    // ── Priority table ────────────────────────────────────────────────────────
-    fn priority_for(&self, piece: u32, playhead: u32) -> u8 {
-        if piece < playhead.saturating_sub(5) { return 1; }
-        let ahead = piece.saturating_sub(playhead);
-        match ahead {
-            0..=29    => 7,
-            30..=89   => 5,
-            90..=199  => 3,
-            _         => 1,
-        }
     }
 
     // ── secs → piece index ────────────────────────────────────────────────────

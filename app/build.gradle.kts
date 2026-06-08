@@ -4,14 +4,10 @@ import org.gradle.process.ExecOperations
 // ═══════════════════════════════════════════════════════════════════
 //  StreamX Ultra — app/build.gradle.kts
 //
-//  KEY CHANGES (Rust migration + vcpkg FFmpeg):
-//    • TWO CargoBuild tasks:
-//        cargoBuildDebug   → arm64-v8a only, `cargo build` (no --release)
-//        cargoBuildRelease → all 4 ABIs,     `cargo build --release`
-//    • Debug buildType  → cmake abiFilters = arm64-v8a + RUST_BUILD_TYPE=debug
-//    • Release buildType→ cmake abiFilters = all 4 ABIs + RUST_BUILD_TYPE=release
-//    • REMOVED hardcoded -DANDROID_ABI=arm64-v8a (was wrong — set by NDK toolchain)
-//    • CMakeLists.txt reads RUST_BUILD_TYPE to pick debug/ or release/ .a path
+//  KEY CHANGES (Rust migration + vcpkg OpenSSL):
+//    • CargoBuild tasks now set OPENSSL_DIR for vcpkg integration
+//    • OPENSSL_STATIC=0 → shared linking (avoids duplicate symbols with CMake)
+//    • VCPKG_ROOT env var required (set by CI or local dev environment)
 // ═══════════════════════════════════════════════════════════════════
 val NDK_VERSION = "29.0.14206865"
 
@@ -49,10 +45,6 @@ android {
 
                 val rustBuildDir = layout.buildDirectory.dir("rust/targets").get().asFile.absolutePath
 
-                // ── Shared CMake args (ABI-agnostic) ──────────────────────
-                // -DANDROID_ABI is intentionally NOT set here:
-                //   the NDK toolchain injects it per-ABI automatically.
-                // -DRUST_BUILD_TYPE is set per buildType (see buildTypes below).
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
                     "-DANDROID_PLATFORM=android-28",
@@ -60,7 +52,6 @@ android {
                     "-DRUST_BUILD_DIR=$rustBuildDir",
                     "-DTMDB_API_KEY=$tmdbApiKey"
                 )
-                // abiFilters intentionally absent here — set per buildType below
             }
         }
     }
@@ -92,10 +83,6 @@ android {
     }
 
     buildTypes {
-        // ── DEBUG ─────────────────────────────────────────────────────
-        // arm64-v8a only → fast iteration, avoids the 4×release-cargo OOM
-        // Rust: `cargo build` (debug profile — no LTO, no vendored-OOM)
-        // CMakeLists.txt reads RUST_BUILD_TYPE=debug → target/.../debug/*.a
         debug {
             externalNativeBuild {
                 cmake {
@@ -105,8 +92,6 @@ android {
             }
         }
 
-        // ── RELEASE ───────────────────────────────────────────────────
-        // All 4 ABIs, full optimised Rust release build
         release {
             isMinifyEnabled   = true
             isShrinkResources = true
@@ -139,7 +124,8 @@ android {
                 "**/libavcodec.so",   "**/libavdevice.so",
                 "**/libavfilter.so",  "**/libavformat.so",
                 "**/libavutil.so",    "**/libswresample.so",
-                "**/libswscale.so"
+                "**/libswscale.so",
+                "**/libssl.so",       "**/libcrypto.so"   // ← vcpkg OpenSSL .so files
             )
         }
     }
@@ -166,17 +152,22 @@ android {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  Rust Build Task
+//  Rust Build Task (with vcpkg OpenSSL support)
 //
-//  Debug  task (cargoBuildDebug):
-//    • arm64-v8a only
-//    • `cargo ndk build`        ← no --release → uses debug profile
-//    • No LTO, no codegen-units=1, no vendored-OpenSSL heavy pass
-//    • ~2-3 min vs ~10+ min in release mode
+//  Environment variables required:
+//    • VCPKG_ROOT  → path to vcpkg installation (e.g. /home/user/vcpkg)
+//                    CI sets this automatically. For local builds:
+//                    export VCPKG_ROOT=/path/to/vcpkg
 //
-//  Release task (cargoBuildRelease):
-//    • All 4 ABIs
-//    • `cargo ndk build --release` ← full optimised (lto, strip, etc.)
+//  The task sets per-ABI:
+//    • OPENSSL_DIR     = $VCPKG_ROOT/installed/$triplet
+//    • OPENSSL_STATIC  = 0  (shared linking — avoids duplicate symbols with CMake)
+//
+//  vcpkg triplets:
+//    arm64-v8a    → arm64-android
+//    armeabi-v7a  → arm-android
+//    x86_64       → x64-android
+//    x86          → x86-android
 // ═══════════════════════════════════════════════════════════════════
 abstract class CargoBuildTask @Inject constructor(
     private val execOps: ExecOperations
@@ -193,6 +184,33 @@ abstract class CargoBuildTask @Inject constructor(
         val release     = releaseBuild.get()
         val buildType   = if (release) "release" else "debug"
 
+        // ── vcpkg setup ─────────────────────────────────────────────────────
+        val vcpkgRoot = System.getenv("VCPKG_ROOT")
+            ?: throw GradleException("""
+                ❌ VCPKG_ROOT environment variable not set!
+
+                vcpkg is required to provide OpenSSL for the Rust build.
+
+                For local builds:
+                  export VCPKG_ROOT=/path/to/your/vcpkg
+
+                Then install OpenSSL for Android:
+                  $VCPKG_ROOT/vcpkg install openssl:arm64-android
+                  $VCPKG_ROOT/vcpkg install openssl:arm-android
+                  $VCPKG_ROOT/vcpkg install openssl:x64-android
+                  $VCPKG_ROOT/vcpkg install openssl:x86-android
+
+                For CI builds, this is handled automatically by the workflow.
+            """.trimIndent())
+
+        // Map Android ABI → vcpkg triplet
+        val tripletMap = mapOf(
+            "arm64-v8a"   to "arm64-android",
+            "armeabi-v7a" to "arm-android",
+            "x86_64"      to "x64-android",
+            "x86"         to "x86-android"
+        )
+
         val targets = if (release) {
             listOf(
                 "arm64-v8a"   to "aarch64-linux-android",
@@ -201,20 +219,41 @@ abstract class CargoBuildTask @Inject constructor(
                 "x86"         to "i686-linux-android"
             )
         } else {
-            // Debug: arm64 only — matches cmake abiFilters("arm64-v8a") above
             listOf("arm64-v8a" to "aarch64-linux-android")
         }
 
         targets.forEach { (abi, triple) ->
+            val vcpkgTriplet = tripletMap[abi]
+                ?: throw GradleException("Unknown ABI: $abi")
+            val opensslDir = "$vcpkgRoot/installed/$vcpkgTriplet"
+
+            // Verify vcpkg OpenSSL is installed
+            val opensslLibDir = File(opensslDir, "lib")
+            if (!opensslLibDir.exists()) {
+                throw GradleException("""
+                    ❌ vcpkg OpenSSL not found for $abi (triplet: $vcpkgTriplet)
+                    Expected: $opensslDir/lib/
+
+                    Install it with:
+                      $vcpkgRoot/vcpkg install openssl:$vcpkgTriplet
+                """.trimIndent())
+            }
+
             println("🦀 cargo ndk [$buildType] → $abi")
+            println("   OPENSSL_DIR=$opensslDir")
+            println("   OPENSSL_STATIC=0 (shared linking)")
+
             execOps.exec {
                 workingDir = rustRoot
                 environment("TMDB_API_KEY", tmdbApiKey.get())
+                environment("OPENSSL_DIR", opensslDir)
+                environment("OPENSSL_STATIC", "0")  // ← SHARED: avoids duplicate symbols with CMake
                 commandLine(buildList {
                     addAll(listOf("cargo", "ndk", "-t", abi, "-o", "$rustRoot/jniLibs", "build", "--jobs", "2"))
                     if (release) add("--release")
                 })
             }
+
             // Copy the .a for CMakeLists.txt
             val src = File(rustRoot, "target/$triple/$buildType/libstreamx_core.a")
             val dst = File(outputDir.get().asFile, "$triple/$buildType")
@@ -232,7 +271,7 @@ abstract class CargoBuildTask @Inject constructor(
 // ── Register debug task (arm64, debug mode) ───────────────────────
 val cargoBuildDebugTask = tasks.register<CargoBuildTask>("cargoBuildDebug") {
     group       = "build"
-    description = "Rust JNI — debug profile, arm64-v8a only (fast)"
+    description = "Rust JNI — debug profile, arm64-v8a only (fast). Requires VCPKG_ROOT env var."
     tmdbApiKey.set(System.getenv("TMDB_API_KEY") ?: "api_key_not_found")
     rustRootPath.set(file("src/main/rust").absolutePath)
     releaseBuild.set(false)
@@ -242,7 +281,7 @@ val cargoBuildDebugTask = tasks.register<CargoBuildTask>("cargoBuildDebug") {
 // ── Register release task (all ABIs, release mode) ────────────────
 val cargoBuildReleaseTask = tasks.register<CargoBuildTask>("cargoBuildRelease") {
     group       = "build"
-    description = "Rust JNI — release profile, all 4 ABIs"
+    description = "Rust JNI — release profile, all 4 ABIs. Requires VCPKG_ROOT env var."
     tmdbApiKey.set(System.getenv("TMDB_API_KEY") ?: "api_key_not_found")
     rustRootPath.set(file("src/main/rust").absolutePath)
     releaseBuild.set(true)
@@ -250,8 +289,6 @@ val cargoBuildReleaseTask = tasks.register<CargoBuildTask>("cargoBuildRelease") 
 }
 
 // ── Wire cargo tasks to CMake build tasks by build type ───────────
-// ExternalNativeBuildTask names follow the pattern:
-//   buildCMakeDebug[arm64-v8a], buildCMakeRelease[arm64-v8a], etc.
 tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configureEach {
     val isRelease = this.name.contains("Release", ignoreCase = true)
     dependsOn(if (isRelease) cargoBuildReleaseTask else cargoBuildDebugTask)

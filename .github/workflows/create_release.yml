@@ -27,7 +27,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-      
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
 
@@ -43,7 +43,7 @@ jobs:
           rustup target add x86_64-linux-android
           rustup target add i686-linux-android
           cargo install cargo-ndk
-          
+
       - name: Install latest Meson & Ninja
         run: |
           sudo apt-get update
@@ -76,7 +76,21 @@ jobs:
           vcpkgGitURL: https://github.com/microsoft/vcpkg.git
           vcpkgGitCommitId: ${{ steps.vcpkg-git.outputs.commit_id }}
           doNotUpdateVcpkg: false
-        
+
+      # ── vcpkg OpenSSL for Android (needed by Gradle's CargoBuildTask) ──────
+      - name: Install vcpkg OpenSSL for Android
+        run: |
+          export VCPKG_ROOT=${{ github.workspace }}/vcpkg
+          echo "VCPKG_ROOT=$VCPKG_ROOT" >> $GITHUB_ENV
+
+          for triplet in arm64-android arm-android x64-android x86-android; do
+            echo "Installing OpenSSL for $triplet..."
+            $VCPKG_ROOT/vcpkg install openssl:$triplet || true
+          done
+
+          echo "Installed vcpkg packages:"
+          ls -la $VCPKG_ROOT/installed/
+
       - name: Build mpv-android (Universal Support)
         run: |
           sudo apt update && sudo apt install -y meson ninja-build yasm nasm python3-pip pkg-config
@@ -160,8 +174,11 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      # ── Gradle build: auto-triggers CargoBuildTask → cargo ndk ─────────────
+      # CargoBuildTask reads VCPKG_ROOT and sets OPENSSL_DIR automatically
       - name: Build Signed Release APK
         env:
+          VCPKG_ROOT:                ${{ github.workspace }}/vcpkg
           TMDB_API_KEY:              ${{ secrets.TMDB_API_KEY }}
           BACKEND_BASE_URL:          ${{ secrets.BACKEND_BASE_URL}}
           STARTAPP_APP_ID:           ${{ secrets.STARTAPP_APP_ID }}
@@ -211,4 +228,3 @@ jobs:
           body:     ${{ steps.build_changelog.outputs.changelog }}
         env:
           GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
-          

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use tokio::runtime::Runtime;
-use log::{info, warn};
+use log::info;
 
 use super::session::{TorrentSession, TorrentStatus};
 use super::http_server::TorrentHttpServer;
@@ -100,7 +100,7 @@ impl TorrentEngine {
     // ── Clear download cache ──────────────────────────────────────────────────
     pub fn clear_cache(save_dir: &str) {
         if let Err(e) = std::fs::remove_dir_all(save_dir) {
-            warn!("clear_cache: {}", e);
+            log::warn!("clear_cache: {}", e);
         }
     }
 }

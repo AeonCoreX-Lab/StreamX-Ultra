@@ -18,7 +18,7 @@ mod torrent;
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
 use jni::sys::{jstring, jdouble, jlongArray};
-use log::{info, warn};
+use log::info;
 use torrent::engine::TorrentEngineHandle;
 
 // ── One-time init ─────────────────────────────────────────────────────────────
@@ -31,7 +31,6 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_initNat
     #[cfg(target_os = "android")]
     android_logger::init_once(
         android_logger::Config::default()
-            .with_tag("SX-Rust")
             .with_max_level(log::LevelFilter::Debug),
     );
 
@@ -44,7 +43,7 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_initNat
 // Unchanged from previous lib.rs — StreamXCore.getTmdbKey() still works
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getTmdbKey<'a>(
-    mut env: JNIEnv<'a>,
+    env: JNIEnv<'a>,
     _class:  JClass<'a>,
 ) -> jstring {
     let key = option_env!("TMDB_API_KEY").unwrap_or("api_key_not_found");
@@ -170,7 +169,7 @@ async fn fetch_addon_streams(transport_url: &str, content_type: &str, id: &str) 
 
     let text = match client.get(&url).send().await {
         Ok(r)  => r.text().await.unwrap_or_default(),
-        Err(e) => { warn!("addon fetch error: {}", e); return "[]".to_string(); }
+        Err(e) => { log::warn!("addon fetch error: {}", e); return "[]".to_string(); }
     };
 
     // Parse { streams: [...] } → return array as JSON string
