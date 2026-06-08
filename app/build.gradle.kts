@@ -188,9 +188,7 @@ abstract class CargoBuildTask @Inject constructor(
         val vcpkgRoot = System.getenv("VCPKG_ROOT")
             ?: throw GradleException("""
                 ❌ VCPKG_ROOT environment variable not set!
-
                 vcpkg is required to provide OpenSSL for the Rust build.
-
                 For local builds:
                   export VCPKG_ROOT=/path/to/your/vcpkg
 
@@ -289,7 +287,7 @@ val cargoBuildReleaseTask = tasks.register<CargoBuildTask>("cargoBuildRelease") 
 }
 
 // ── Wire cargo tasks to CMake build tasks by build type ───────────
-tasks.withType<<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configureEach {
+tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configureEach {
     val isRelease = this.name.contains("Release", ignoreCase = true)
     dependsOn(if (isRelease) cargoBuildReleaseTask else cargoBuildDebugTask)
 }
