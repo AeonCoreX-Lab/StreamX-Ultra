@@ -54,15 +54,14 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getTmdbKe
 
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_startNative(
-    // FIX (Warning): jni 0.21 changed JNIEnv methods to &self (no longer &mut self).
-    // `mut env` is therefore unnecessary — `&env` suffices everywhere below.
-    env:      JNIEnv,
+    // JNIEnv marked as mut here so we can pass it as &mut env below
+    mut env:  JNIEnv,
     _obj:     JClass,
     j_magnet: JString,
     j_path:   JString,
 ) {
-    let magnet   = jstr(&env, j_magnet);
-    let save_dir = jstr(&env, j_path);
+    let magnet   = jstr(&mut env, j_magnet);
+    let save_dir = jstr(&mut env, j_path);
     TorrentEngineHandle::get().start(&magnet, &save_dir);
 }
 
@@ -97,7 +96,6 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getStat
 // Returns video file path string — TorrentEngine.getFilePath() unchanged
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getFilePathNative(
-    // FIX (Warning): jni 0.21 — new_string() is &self, so `mut` is not needed.
     env:  JNIEnv,
     _obj: JClass,
 ) -> jstring {
@@ -128,11 +126,11 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getLoca
 // Clear download cache directory
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_clearCacheNative(
-    env:   JNIEnv,
+    mut env: JNIEnv,
     _obj:  JClass,
     j_dir: JString,
 ) {
-    let dir = jstr(&env, j_dir);
+    let dir = jstr(&mut env, j_dir);
     torrent::engine::TorrentEngine::clear_cache(&dir);
 }
 
@@ -141,15 +139,15 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_clearCa
 // Returns JSON string: [{"url":"...","name":"...","description":"..."}, ...]
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_streaming_StreamXNative_nativeAddonFetchStreams(
-    env:             JNIEnv,
+    mut env:         JNIEnv,
     _cls:            JClass,
     j_transport_url: JString,
     j_type:          JString,
     j_id:            JString,
 ) -> jstring {
-    let transport_url = jstr(&env, j_transport_url);
-    let content_type  = jstr(&env, j_type);
-    let id            = jstr(&env, j_id);
+    let transport_url = jstr(&mut env, j_transport_url);
+    let content_type  = jstr(&mut env, j_type);
+    let id            = jstr(&mut env, j_id);
 
     let json = TorrentEngineHandle::get().rt.block_on(async {
         fetch_addon_streams(&transport_url, &content_type, &id).await
@@ -193,10 +191,7 @@ fn percent_encode(s: &str) -> String {
 }
 
 // ── JNI helper ────────────────────────────────────────────────────────────────
-// FIX (Warning): Changed from `env: &mut JNIEnv` to `env: &JNIEnv`.
-// jni 0.21 migrated JNIEnv methods (get_string, new_string, etc.) from
-// `&mut self` to `&self` using internal mutability. `&mut` is now unnecessary
-// here, and the callers above no longer need `mut env` parameter bindings.
-fn jstr(env: &JNIEnv, s: JString) -> String {
+// Fixed back to `&mut JNIEnv` since `get_string` requires a mutable reference.
+fn jstr(env: &mut JNIEnv, s: JString) -> String {
     env.get_string(&s).map(|js| js.into()).unwrap_or_default()
 }
