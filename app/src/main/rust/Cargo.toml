@@ -10,41 +10,54 @@ crate-type = ["staticlib"]
 
 [dependencies]
 # JNI bridge
-jni          = "0.21"
-log          = "0.4"
+jni            = "0.21"
+log            = "0.4"
 android_logger = "0.14"
-anyhow       = "1.0"
+anyhow         = "1.0"
 
 # Async runtime
-tokio        = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "macros", "fs"] }
-once_cell    = "1.18"
-parking_lot  = "0.12"
+tokio       = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "macros", "fs"] }
+once_cell   = "1.18"
+parking_lot = "0.12"
 
-# Torrent engine - LATEST VERSION
-# NOTE: OpenSSL is provided by vcpkg.
-librqbit     = { version = "9.0.0-rc.0", default-features = false }
+# ── Torrent engine ─────────────────────────────────────────────────────────────
+#
+# FIX (Bug #2): Remove features = ["sha1-crypto-hash"] — does NOT exist in v9
+#
+# WHY IT FAILED (v9 regression):
+#   librqbit 8.x exposed SHA-1 backend as optional features:
+#     sha1-ring         → SHA-1 via ring crate
+#     sha1-crypto-hash  → SHA-1 via crypto-hash/OpenSSL
+#   librqbit 9.0.0-rc.0 internalized SHA-1 (always compiled in).
+#   The feature was removed entirely. Cargo rejects any dep that requests
+#   a feature that does not exist in the resolved crate → lock file fails.
+#
+# CORRECT FIX for v9:
+#   Drop sha1-crypto-hash entirely (SHA-1 is now unconditional).
+#   Add rust-tls → pure-Rust TLS via rustls; no OpenSSL; required on Android NDK.
+#   Add disable-upload → streaming-only app; saves battery + bandwidth.
+#   Everything else (piece download, DHT, tracker, magnet parsing) is always on.
+#
+librqbit = { version = "9.0.0-rc.0", default-features = false, features = ["rust-tls", "disable-upload"] }
 
-# Explicitly satisfy the SHA-1 crypto backend requirement for rqbit
-librqbit-sha1-wrapper = { version = "=9.0.0-rc.0", features = ["sha1-crypto-hash"] }
-
-# Local HTTP server
-hyper        = { version = "1", features = ["server", "http1"] }
-hyper-util   = { version = "0.1", features = ["tokio"] }
+# ── Local HTTP server ──────────────────────────────────────────────────────────
+hyper          = { version = "1", features = ["server", "http1"] }
+hyper-util     = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
-bytes        = "1"
-tokio-util   = { version = "0.7", features = ["io"] }
+bytes          = "1"
+tokio-util     = { version = "0.7", features = ["io"] }
 
-# HTTP client (for addon transport)
-reqwest      = { version = "0.12", default-features = false,
-                 features = ["json", "rustls-tls"] }
+# ── HTTP client (addon transport) ──────────────────────────────────────────────
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
-serde        = { version = "1", features = ["derive"] }
-serde_json   = "1"
-futures      = "0.3"
-url          = "2"
-thiserror    = "1"
-uuid         = { version = "1", features = ["v4"] }
-lazy_static  = "1.4"
+# ── Utilities ──────────────────────────────────────────────────────────────────
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+futures     = "0.3"
+url         = "2"
+thiserror   = "1"
+uuid        = { version = "1", features = ["v4"] }
+lazy_static = "1.4"
 
 [profile.release]
 lto           = true

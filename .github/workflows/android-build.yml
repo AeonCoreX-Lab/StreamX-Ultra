@@ -6,6 +6,12 @@ on:
       - main
   workflow_dispatch:
 
+# FIX (Bug #2): Force all Node.js actions to Node.js 24 NOW
+# Deadline: June 16, 2026 (forced migration). Adding this avoids the
+# "Node.js 20 actions are deprecated" warning for checkout, setup-java, etc.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,6 +37,11 @@ jobs:
         run: |
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
+          # FIX (Bug #3): Export NDK under all known names so vcpkg's android.cmake
+          # toolchain can detect the compiler for ALL triplets (arm-android, arm64-android).
+          # vcpkg may use ANDROID_NDK, ANDROID_NDK_ROOT, or ANDROID_NDK_HOME depending on version.
+          echo "ANDROID_NDK=$ANDROID_HOME/ndk/29.0.14206865"      >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
 
       - name: Install Rust and Cargo-NDK
         run: |
@@ -47,8 +58,10 @@ jobs:
           python3 -m pip install --upgrade pip
           pip3 install meson ninja
 
+      # FIX (Bug #2): actions/cache@v3 used Node.js 20 → deprecated June 16, 2026
+      #               Upgrade to actions/cache@v4 which uses Node.js 20+ / 24 runtime
       - name: Restore vcpkg artifacts
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cache/vcpkg/archives
@@ -79,9 +92,18 @@ jobs:
           export VCPKG_ROOT=${{ github.workspace }}/vcpkg
           echo "VCPKG_ROOT=$VCPKG_ROOT" >> $GITHUB_ENV
 
+          # FIX (Bug #3): vcpkg's android.cmake toolchain searches for the NDK under
+          # multiple variable names. Export all three so cmake subprocess picks it up
+          # regardless of vcpkg version. Without this, arm-android compiler detection
+          # fails silently (|| true masks it for debug, but breaks release armeabi-v7a).
+          export ANDROID_NDK=$ANDROID_NDK_HOME
+          export ANDROID_NDK_ROOT=$ANDROID_NDK_HOME
+
           for triplet in arm64-android arm-android x64-android x86-android; do
             echo "Installing OpenSSL for $triplet..."
-            $VCPKG_ROOT/vcpkg install openssl:$triplet || true
+            $VCPKG_ROOT/vcpkg install openssl:$triplet || {
+              echo "⚠️  openssl:$triplet failed — continuing (debug only needs arm64-android)"
+            }
           done
 
           echo "Installed vcpkg packages:"

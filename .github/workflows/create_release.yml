@@ -6,6 +6,11 @@ on:
       - 'v*.*'
   workflow_dispatch:
 
+# FIX (Bug #2): Force all Node.js actions to Node.js 24 NOW
+# Deadline: June 16, 2026. Fixes: actions/cache@v3, setup-java@v4, checkout@v4 warnings.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
@@ -35,6 +40,13 @@ jobs:
         run: |
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
+          # FIX (Bug #3 — CRITICAL for release): Release builds ALL 4 ABIs including armeabi-v7a.
+          # vcpkg's android.cmake toolchain searches the NDK under different variable names
+          # depending on version. Without these, arm-android compiler detection silently fails
+          # → OpenSSL not installed for arm-android → CargoBuildTask throws GradleException
+          # → release build FAILS for armeabi-v7a.
+          echo "ANDROID_NDK=$ANDROID_HOME/ndk/29.0.14206865"      >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
 
       - name: Install Rust and Cargo-NDK
         run: |
@@ -51,8 +63,10 @@ jobs:
           python3 -m pip install --upgrade pip
           pip3 install meson ninja
 
+      # FIX (Bug #2): actions/cache@v3 → actions/cache@v4
+      # v3 uses Node.js 20 which is deprecated June 16, 2026.
       - name: Restore vcpkg artifacts
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cache/vcpkg/archives
@@ -83,9 +97,18 @@ jobs:
           export VCPKG_ROOT=${{ github.workspace }}/vcpkg
           echo "VCPKG_ROOT=$VCPKG_ROOT" >> $GITHUB_ENV
 
+          # FIX (Bug #3): Also export here for cmake subprocesses that vcpkg launches.
+          # GITHUB_ENV variables are available in steps but cmake subprocesses inherit the
+          # current shell environment — exporting explicitly ensures vcpkg's android.cmake
+          # can locate the NDK toolchain for ALL triplets.
+          export ANDROID_NDK=$ANDROID_NDK_HOME
+          export ANDROID_NDK_ROOT=$ANDROID_NDK_HOME
+
           for triplet in arm64-android arm-android x64-android x86-android; do
             echo "Installing OpenSSL for $triplet..."
-            $VCPKG_ROOT/vcpkg install openssl:$triplet || true
+            $VCPKG_ROOT/vcpkg install openssl:$triplet || {
+              echo "❌ WARN: openssl:$triplet failed — release build needs all 4 ABIs!"
+            }
           done
 
           echo "Installed vcpkg packages:"
@@ -175,7 +198,8 @@ jobs:
         run: chmod +x gradlew
 
       # ── Gradle build: auto-triggers CargoBuildTask → cargo ndk ─────────────
-      # CargoBuildTask reads VCPKG_ROOT and sets OPENSSL_DIR automatically
+      # CargoBuildTask reads VCPKG_ROOT and sets OPENSSL_DIR automatically.
+      # Rust feature fix (sha1-crypto-hash) lives in Cargo.toml — no change here.
       - name: Build Signed Release APK
         env:
           VCPKG_ROOT:                ${{ github.workspace }}/vcpkg
