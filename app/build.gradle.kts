@@ -8,6 +8,7 @@ import org.gradle.process.ExecOperations
 //    • CargoBuild tasks now set OPENSSL_DIR for vcpkg integration
 //    • OPENSSL_STATIC=0 → shared linking (avoids duplicate symbols with CMake)
 //    • VCPKG_ROOT env var required (set by CI or local dev environment)
+//    • FIX: CMake gets OPENSSL_ROOT_DIR per ABI so find_package works
 // ═══════════════════════════════════════════════════════════════════
 val NDK_VERSION = "29.0.14206865"
 
@@ -45,13 +46,34 @@ android {
 
                 val rustBuildDir = layout.buildDirectory.dir("rust/targets").get().asFile.absolutePath
 
+                // ═══════════════════════════════════════════════════════════════
+                //  FIX: Pass OPENSSL_ROOT_DIR per ABI to CMake so find_package
+                //  can locate vcpkg's OpenSSL. Without this, CMake fails with:
+                //  "Could NOT find OpenSSL (missing: OPENSSL_CRYPTO_LIBRARY)"
+                // ═══════════════════════════════════════════════════════════════
+                val vcpkgRoot = System.getenv("VCPKG_ROOT") ?: ""
+                val abiToTriplet = mapOf(
+                    "arm64-v8a"   to "arm64-android",
+                    "armeabi-v7a" to "arm-android",
+                    "x86_64"      to "x64-android",
+                    "x86"         to "x86-android"
+                )
+
+                val opensslRootArgs = if (vcpkgRoot.isNotEmpty()) {
+                    abiToTriplet.map { (abi, triplet) ->
+                        "-DOPENSSL_ROOT_DIR_$abi=$vcpkgRoot/installed/$triplet"
+                    }
+                } else {
+                    emptyList()
+                }
+
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
                     "-DANDROID_PLATFORM=android-28",
                     "-D_FORTIFY_SOURCE=0",
                     "-DRUST_BUILD_DIR=$rustBuildDir",
                     "-DTMDB_API_KEY=$tmdbApiKey"
-                )
+                ) + opensslRootArgs
             }
         }
     }

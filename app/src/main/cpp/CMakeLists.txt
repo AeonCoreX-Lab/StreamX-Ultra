@@ -77,10 +77,78 @@ foreach(LIB ${FFMPEG_LIBS})
     endif()
 endforeach()
 
+# ═══════════════════════════════════════════════════════════════════════
+#  FIX: vcpkg OpenSSL — CMake find_package fails on Android cross-build
+#  Reason: CMake's FindOpenSSL module can't auto-detect vcpkg's Android
+#  OpenSSL because CMAKE_SYSROOT prefixes paths and vcpkg uses custom
+#  triplets. We manually set OPENSSL_ROOT_DIR per ABI.
+# ═══════════════════════════════════════════════════════════════════════
+
+# Map Android ABI → vcpkg triplet
+set(VCPKG_TRIPLET "")
+if(${ANDROID_ABI} STREQUAL "arm64-v8a")
+    set(VCPKG_TRIPLET "arm64-android")
+elseif(${ANDROID_ABI} STREQUAL "armeabi-v7a")
+    set(VCPKG_TRIPLET "arm-android")
+elseif(${ANDROID_ABI} STREQUAL "x86_64")
+    set(VCPKG_TRIPLET "x64-android")
+elseif(${ANDROID_ABI} STREQUAL "x86")
+    set(VCPKG_TRIPLET "x86-android")
+endif()
+
+# Try to locate vcpkg OpenSSL
+set(VCPKG_OPENSSL_ROOT "")
+
+# Priority 1: VCPKG_ROOT env variable (set by CI or user)
+if(DEFINED ENV{VCPKG_ROOT} AND EXISTS "$ENV{VCPKG_ROOT}/installed/${VCPKG_TRIPLET}")
+    set(VCPKG_OPENSSL_ROOT "$ENV{VCPKG_ROOT}/installed/${VCPKG_TRIPLET}")
+    message(STATUS "🔑 vcpkg OpenSSL found via VCPKG_ROOT: ${VCPKG_OPENSSL_ROOT}")
+
+# Priority 2: Check common vcpkg locations
+elseif(EXISTS "${CMAKE_SOURCE_DIR}/../../../vcpkg/installed/${VCPKG_TRIPLET}")
+    set(VCPKG_OPENSSL_ROOT "${CMAKE_SOURCE_DIR}/../../../vcpkg/installed/${VCPKG_TRIPLET}")
+    message(STATUS "🔑 vcpkg OpenSSL found at project-relative vcpkg: ${VCPKG_OPENSSL_ROOT}")
+
+# Priority 3: Check if vcpkg toolchain already set it
+elseif(DEFINED VCPKG_INSTALLED_DIR AND EXISTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TRIPLET}")
+    set(VCPKG_OPENSSL_ROOT "${VCPKG_INSTALLED_DIR}/${VCPKG_TRIPLET}")
+    message(STATUS "🔑 vcpkg OpenSSL found via VCPKG_INSTALLED_DIR: ${VCPKG_OPENSSL_ROOT}")
+endif()
+
+# If found, manually configure OpenSSL paths (bypass find_package auto-detection)
+if(VCPKG_OPENSSL_ROOT AND EXISTS "${VCPKG_OPENSSL_ROOT}/lib/libssl.so")
+    set(OPENSSL_ROOT_DIR "${VCPKG_OPENSSL_ROOT}")
+    set(OPENSSL_INCLUDE_DIR "${VCPKG_OPENSSL_ROOT}/include")
+    set(OPENSSL_SSL_LIBRARY "${VCPKG_OPENSSL_ROOT}/lib/libssl.so")
+    set(OPENSSL_CRYPTO_LIBRARY "${VCPKG_OPENSSL_ROOT}/lib/libcrypto.so")
+    set(OPENSSL_LIBRARIES "${OPENSSL_SSL_LIBRARY}" "${OPENSSL_CRYPTO_LIBRARY}")
+
+    message(STATUS "✅ OpenSSL configured manually for ${ANDROID_ABI}")
+    message(STATUS "   OPENSSL_ROOT_DIR: ${OPENSSL_ROOT_DIR}")
+    message(STATUS "   OPENSSL_INCLUDE_DIR: ${OPENSSL_INCLUDE_DIR}")
+    message(STATUS "   OPENSSL_SSL_LIBRARY: ${OPENSSL_SSL_LIBRARY}")
+    message(STATUS "   OPENSSL_CRYPTO_LIBRARY: ${OPENSSL_CRYPTO_LIBRARY}")
+
+    # Add to search path so find_package can locate it
+    list(APPEND CMAKE_FIND_ROOT_PATH "${VCPKG_OPENSSL_ROOT}")
+
+    # Also add include path directly
+    include_directories(${OPENSSL_INCLUDE_DIR})
+
+    # Set found flag to bypass find_package requirement
+    set(OPENSSL_FOUND TRUE)
+else()
+    message(STATUS "⚠️  vcpkg OpenSSL not found for ${ANDROID_ABI}, falling back to find_package...")
+endif()
+
 # ── Dependencies ──────────────────────────────────────────────────────
-find_package(OpenSSL REQUIRED)
 find_library(log-lib log)
 find_library(android-lib android)
+
+# Only call find_package if not already manually configured
+if(NOT OPENSSL_FOUND)
+    find_package(OpenSSL REQUIRED)
+endif()
 
 # ── Link Configuration ────────────────────────────────────────────────
 target_link_libraries(
@@ -90,8 +158,7 @@ target_link_libraries(
         -Wl,--no-whole-archive
         libmpv
         ${FFMPEG_ALL_LIBS}
-        OpenSSL::SSL
-        OpenSSL::Crypto
+        ${OPENSSL_LIBRARIES}
         ${log-lib}
         ${android-lib}
 )
