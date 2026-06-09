@@ -84,9 +84,13 @@ async fn handle(
 
     // ── /stream ───────────────────────────────────────────────────────────────
     if path == "/stream" {
-        // FIX: Extract all data from session while holding the lock, then drop the guard
-        // before any await points. This avoids the Send issue with parking_lot::RwLockReadGuard.
-        let (video_path, state) = {
+        // Extract data from session while holding the lock, then drop the guard
+        // before any await points to avoid Send issues with parking_lot guards.
+        //
+        // FIX (Warning): `state` was extracted but never read after this point.
+        // Renamed to `_state` to suppress the unused-variable warning.
+        // The readiness gate below re-reads state inside the timeout loop.
+        let (video_path, _state) = {
             let g = session.read();
             match g.as_ref() {
                 Some(s) => {
@@ -95,7 +99,7 @@ async fn handle(
                 }
                 None => (String::new(), 0),
             }
-        }; // g is dropped here before any await
+        }; // guard dropped here before any await
 
         if video_path.is_empty() {
             return Ok(resp503("Torrent metadata not ready yet"));
@@ -106,8 +110,8 @@ async fn handle(
             return Ok(resp503("Video file not created yet"));
         }
 
-        // Wait for READY state before serving (same as Kotlin Buffering check)
-        // FIX: Re-acquire lock for each check, don't hold across await
+        // Wait for READY state before serving (same as Kotlin Buffering check).
+        // Re-acquire lock on every iteration — never hold across an await point.
         let _ = timeout(Duration::from_secs(15), async {
             loop {
                 let current_state = {
@@ -168,7 +172,7 @@ async fn handle(
     if path.starts_with("/sub/") {
         let filename = &path[5..];
 
-        // FIX: Extract video path while holding lock, then drop guard
+        // Extract video path while holding lock, then drop guard
         let video_path = {
             let g = session.read();
             g.as_ref().map(|s| s.status().video_path).unwrap_or_default()
@@ -219,10 +223,10 @@ async fn read_bytes(path: &std::path::Path, start: u64, length: u64) -> std::io:
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 fn parse_range(header: &str, size: u64) -> Option<(u64, u64)> {
-    let s     = header.strip_prefix("bytes=")?;
+    let s      = header.strip_prefix("bytes=")?;
     let (a, b) = s.split_once('-')?;
-    let start = a.parse::<u64>().ok()?;
-    let end   = if b.is_empty() { size - 1 } else { b.parse::<u64>().ok()?.min(size - 1) };
+    let start  = a.parse::<u64>().ok()?;
+    let end    = if b.is_empty() { size - 1 } else { b.parse::<u64>().ok()?.min(size - 1) };
     Some((start, end))
 }
 

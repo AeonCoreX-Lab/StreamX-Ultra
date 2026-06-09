@@ -1,7 +1,9 @@
 // app/src/main/rust/src/torrent/piece_picker.rs
 
 use log::debug;
-use super::{HEADER_PIECES, TAIL_PIECES};
+// FIX (Warning): HEADER_PIECES and TAIL_PIECES were imported but never used
+// in this file. Priority logic is now handled in session.rs via byte-progress.
+// Removed both to silence unused-imports warnings.
 
 // ── PiecePicker ───────────────────────────────────────────────────────────────
 // Priority zones (updated every 250 ms or on seek):

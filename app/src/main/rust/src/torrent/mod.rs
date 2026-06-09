@@ -5,8 +5,12 @@ pub mod session;
 pub mod piece_picker;
 pub mod http_server;
 
-pub use engine::{TorrentEngineHandle, TorrentEngine};
-pub use session::{TorrentSession, TorrentStatus};
+// FIX (Warning): These pub-use re-exports were flagged as unused because:
+//   • lib.rs imports TorrentEngineHandle directly via `use torrent::engine::TorrentEngineHandle`
+//   • http_server.rs imports TorrentSession via `use super::session::TorrentSession`
+//   • Nothing accesses these through the torrent:: re-export path
+// Removed to eliminate "unused imports" warnings. Internal modules still import
+// from each other via their direct paths (super::session, super::engine etc.).
 
 // ── Piece prioritisation constants ────────────────────────────────────────────
 pub const CRITICAL_AHEAD_PIECES: u32 = 30;    // highest priority zone

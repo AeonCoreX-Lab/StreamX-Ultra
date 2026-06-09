@@ -12,7 +12,8 @@ use librqbit::{
 use super::piece_picker::PiecePicker;
 use super::{
     CRITICAL_AHEAD_PIECES, HEADER_PIECES,
-    MIN_READY_CRITICAL, TAIL_PIECES,
+    MIN_READY_CRITICAL,
+    // FIX (Warning): TAIL_PIECES removed — imported but never used
 };
 
 // ── State codes (same as C++ TorrentSystem: 0-4) ─────────────────────────────
@@ -110,9 +111,14 @@ impl TorrentSession {
             } else { 0 };
             self.progress.store(pct, Ordering::Relaxed);
 
-            // v9 API: peer count from live stats snapshot
+            // FIX (E0599): AggregatePeerStats has no .len() method in v9.
+            // It exposes individual state counters; sum connecting + live for
+            // "active peer" count that Kotlin displays to the user.
             let peer_count = stats.live.as_ref()
-                .map(|l| l.snapshot.peer_stats.len() as i32)
+                .map(|l| {
+                    let ps = &l.snapshot.peer_stats;
+                    (ps.connecting + ps.live) as i32
+                })
                 .unwrap_or(0);
             self.peers.store(peer_count, Ordering::Relaxed);
 
@@ -147,7 +153,11 @@ impl TorrentSession {
                         let piece_len    = metadata.lengths().default_piece_length() as u64;
                         let file_offset: u64 = files[..largest_idx].iter().map(|f| f.len).sum();
                         let first_piece  = (file_offset / piece_len) as u32;
-                        let last_piece   = ((file_offset + largest_size) / piece_len).min(total_pieces - 1) as u32;
+
+                        // FIX (E0308): (file_offset + largest_size) / piece_len is u64,
+                        // but (total_pieces - 1) is u32. Cast to u64 so .min() types match.
+                        let last_piece = ((file_offset + largest_size) / piece_len)
+                            .min((total_pieces - 1) as u64) as u32;
 
                         let picker = PiecePicker::new(total_pieces, first_piece, last_piece, piece_len);
                         picker_opt = Some(picker);
@@ -160,28 +170,44 @@ impl TorrentSession {
             let playhead_secs = f64::from_bits(self.playhead_bits.load(Ordering::Relaxed));
 
             if let Some(ref mut picker) = picker_opt {
-                // v9 API: Check piece availability via with_chunk_tracker
-                let header_ok = {
-                    let header_range = picker.first_piece..picker.first_piece + HEADER_PIECES.min(picker.last_piece - picker.first_piece + 1);
-                    handle.with_chunk_tracker(|ct| {
-                        header_range.all(|p| {
-                            let idx = p as usize;
-                            idx < ct.get_have_pieces().as_slice().len() && ct.get_have_pieces().as_slice()[idx]
-                        })
-                    }).unwrap_or(false)
-                };
+                picker.update_priorities(playhead_secs);
 
                 let critical_start = picker.playhead_piece().max(picker.first_piece);
                 let critical_end   = (critical_start + CRITICAL_AHEAD_PIECES).min(picker.last_piece);
-                let critical_have  = {
-                    let range = critical_start..critical_end;
-                    handle.with_chunk_tracker(|ct| {
-                        let have = ct.get_have_pieces().as_slice();
-                        range.filter(|&p| {
-                            let idx = p as usize;
-                            idx < have.len() && have[idx]
-                        }).count() as u32
-                    }).unwrap_or(0)
+
+                // FIX (E0624 x2): with_chunk_tracker is pub(crate) in librqbit v9 —
+                // it cannot be called from outside the librqbit crate.
+                //
+                // Replacement strategy: derive piece-level readiness from byte progress.
+                // This is sound because librqbit v9 performs sequential downloading by
+                // default, so progress_bytes maps directly to contiguous piece completion
+                // from piece 0 onward — which is exactly what we need for streaming.
+                let progress_pieces = if picker.piece_len > 0 {
+                    (stats.progress_bytes / picker.piece_len) as u32
+                } else {
+                    0
+                };
+
+                // header_ok: all container-header pieces are downloaded
+                let header_ok = {
+                    let header_count = HEADER_PIECES.min(
+                        picker.last_piece.saturating_sub(picker.first_piece) + 1
+                    );
+                    let header_end = picker.first_piece + header_count;
+                    progress_pieces >= header_end
+                };
+
+                // critical_have: how many pieces in [critical_start, critical_end) are done
+                let critical_have: u32 = {
+                    if progress_pieces >= critical_end {
+                        // All critical pieces are downloaded
+                        critical_end - critical_start
+                    } else if progress_pieces > critical_start {
+                        // Partial — some critical pieces are ready
+                        progress_pieces - critical_start
+                    } else {
+                        0
+                    }
                 };
 
                 let progress_ok = pct >= 3;
