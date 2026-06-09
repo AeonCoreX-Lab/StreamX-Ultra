@@ -5,8 +5,30 @@ edition     = "2021"
 authors     = ["AeonCoreX Team"]
 publish     = false
 
+# ── crate-type: WHY BOTH cdylib AND staticlib ─────────────────────────────────
+#
+# The build system uses Rust in a two-stage link:
+#
+#   Stage 1 — cargo ndk (Gradle CargoBuildTask)
+#     cargo ndk -t arm64-v8a -o jniLibs build
+#     cargo-ndk REQUIRES at least one "cdylib" target to produce output.
+#     Without it → "No usable artifacts produced by cargo" (the exact error
+#     that broke CI). The resulting libstreamx_core.so goes to
+#     src/main/rust/jniLibs/ which is NOT declared as a jniLibs source set,
+#     so it is never packaged into the APK — it just satisfies cargo-ndk.
+#
+#   Stage 2 — CMake (ExternalNativeBuild)
+#     CMakeLists.txt imports libstreamx_core.a as STATIC IMPORTED and links
+#     it into libstreamx-native.so via -Wl,--whole-archive.  That shared lib
+#     is what the app loads via System.loadLibrary("streamx-native").
+#     The staticlib artifact is what CargoBuildTask copies to
+#     build/rust/targets/<triple>/<profile>/ for CMake to find.
+#
+# WRONG (old):  crate-type = ["staticlib"]   → no cdylib → cargo-ndk error
+# CORRECT:      crate-type = ["cdylib", "staticlib"]   → both artifacts produced
+#
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 # JNI bridge

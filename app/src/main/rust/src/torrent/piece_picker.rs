@@ -19,6 +19,12 @@ use log::debug;
 //  TAIL         │ last 10 pieces             │ 6 (always)
 
 pub struct PiecePicker {
+    // FIX (Warning): total_pieces is stored by new() but never read — librqbit
+    // v9 handles piece prioritisation internally; only first_piece / last_piece
+    // / piece_len are consumed by the readiness check in session.rs.
+    // Suppressed rather than removed so the field is available if a future
+    // librqbit API exposes per-piece control again.
+    #[allow(dead_code)]
     pub total_pieces:  u32,
     pub first_piece:   u32,
     pub last_piece:    u32,
@@ -39,6 +45,19 @@ impl PiecePicker {
         }
     }
 
+    // FIX (Warning): set_duration is never called from session.rs because
+    // librqbit v9 metadata does not expose the video duration directly —
+    // duration must come from the media demuxer (MPV) after playback starts.
+    // The Kotlin side updates playhead via TorrentEngine.updatePlaybackPosition()
+    // but does not push duration back to Rust.
+    //
+    // Consequence: duration_secs stays 0.0, so secs_to_piece() always returns
+    // first_piece (safe no-op — librqbit v9 sequential download means the
+    // playhead-relative priority logic is not needed anyway).
+    //
+    // Suppressed rather than removed; re-wire it when a future version of the
+    // Kotlin bridge calls setDurationNative() after MPV reports the duration.
+    #[allow(dead_code)]
     pub fn set_duration(&mut self, secs: f64) {
         self.duration_secs = secs;
     }
