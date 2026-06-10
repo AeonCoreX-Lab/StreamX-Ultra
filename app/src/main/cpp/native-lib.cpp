@@ -6,6 +6,10 @@
 #define TAG "StreamX_Native"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
+// Global JNI reference to the Android Surface passed from Kotlin.
+// Held so we can DeleteGlobalRef when the surface is replaced or cleared.
+static jobject g_surface_ref = nullptr;
+
 
 // ════════════════════════════════════════════════════════════
 //  MPV JNI BRIDGES
