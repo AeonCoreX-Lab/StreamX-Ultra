@@ -11,6 +11,11 @@ import java.util.concurrent.TimeUnit
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  HttpClient.kt — Shared HTTP helpers (OkHttp + Jsoup)
+//
+//  CHANGE LOG (bundle-addon fix):
+//    • Added FetchResult data class — body + status + response headers + final URL
+//    • Added fetchRaw()          — used by JsAxios / fetch polyfill in JS engine
+//    • All existing public API (getHtml, getJson, postJson, getFinalUrl) unchanged
 // ─────────────────────────────────────────────────────────────────────────────
 object HttpClient {
 
@@ -19,9 +24,10 @@ object HttpClient {
         .readTimeout(25, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
         .followRedirects(true)
+        .followSslRedirects(true)
         .build()
 
-    // No-redirect client (for manually following redirects to capture Location header)
+    /** Client that does NOT follow redirects — used for HEAD so we can capture Location */
     val noRedirect: OkHttpClient = okhttp.newBuilder()
         .followRedirects(false)
         .followSslRedirects(false)
@@ -46,7 +52,73 @@ object HttpClient {
         "Sec-Fetch-User"           to "?1",
     )
 
-    // ── GET HTML ─────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    //  FetchResult — carries body + status + all response headers + final URL
+    //  Used by JsAxios.get/head/post and the JS fetch() polyfill
+    // ─────────────────────────────────────────────────────────────────────────
+    data class FetchResult(
+        val body:            String                 = "",
+        val status:          Int,
+        val responseHeaders: Map<String, String>    = emptyMap(),
+        val finalUrl:        String                 = ""
+    )
+
+    /**
+     * Generic fetch — covers GET / POST / HEAD with optional redirect control.
+     * Returns a [FetchResult] including lower-cased response headers.
+     * The special key "x-final-url" is always present and holds the URL after
+     * any redirects (or the original URL for HEAD no-redirect calls).
+     */
+    fun fetchRaw(
+        url:             String,
+        method:          String                 = "GET",
+        extraHeaders:    Map<String, String>    = emptyMap(),
+        body:            String?                = null,
+        contentType:     String                 = "application/x-www-form-urlencoded",
+        followRedirects: Boolean                = true
+    ): FetchResult {
+        return try {
+            val client = if (followRedirects) okhttp else noRedirect
+
+            val hdrsBuilder = Headers.Builder().apply {
+                BASE_HEADERS.forEach { (k, v) -> add(k, v) }
+                extraHeaders.forEach  { (k, v) -> add(k, v) }
+            }
+
+            val reqBuilder = Request.Builder().url(url).headers(hdrsBuilder.build())
+
+            when (method.uppercase()) {
+                "POST" -> {
+                    val ct = extraHeaders["Content-Type"] ?: extraHeaders["content-type"] ?: contentType
+                    reqBuilder.post((body ?: "").toRequestBody(ct.toMediaType()))
+                }
+                "HEAD" -> reqBuilder.head()
+                else   -> reqBuilder.get()
+            }
+
+            client.newCall(reqBuilder.build()).execute().use { resp ->
+                val respHeaders = resp.headers.toMultimap()
+                    .entries.associate { (k, v) -> k.lowercase() to v.first() }
+                    .toMutableMap()
+                val finalUrl = resp.request.url.toString()
+                respHeaders["x-final-url"] = finalUrl
+                // Also expose Location as lower-case key for fetch polyfill
+                resp.header("Location")?.let { respHeaders["location"] = it }
+
+                FetchResult(
+                    body            = if (method.uppercase() == "HEAD") "" else (resp.body?.string() ?: ""),
+                    status          = resp.code,
+                    responseHeaders = respHeaders,
+                    finalUrl        = finalUrl
+                )
+            }
+        } catch (e: Exception) {
+            FetchResult(body = "", status = 0, responseHeaders = emptyMap(), finalUrl = url)
+        }
+    }
+
+    // ── Existing public helpers (unchanged) ───────────────────────────────────
+
     fun getHtml(url: String, headers: Map<String, String> = emptyMap()): String? {
         return try {
             val req = Request.Builder().url(url)
@@ -66,7 +138,6 @@ object HttpClient {
         return Jsoup.parse(html, url)
     }
 
-    // ── GET JSON ─────────────────────────────────────────────────────────────
     fun getJson(url: String, headers: Map<String, String> = emptyMap()): String? {
         return try {
             val req = Request.Builder().url(url)
@@ -82,7 +153,6 @@ object HttpClient {
         } catch (e: Exception) { null }
     }
 
-    // ── POST ─────────────────────────────────────────────────────────────────
     fun postJson(url: String, body: String, headers: Map<String, String> = emptyMap()): String? {
         return try {
             val req = Request.Builder().url(url)
@@ -99,7 +169,6 @@ object HttpClient {
         } catch (e: Exception) { null }
     }
 
-    // ── HEAD (follow redirects, return final URL) ─────────────────────────────
     fun getFinalUrl(url: String, referer: String = ""): String {
         return try {
             val req = Request.Builder().url(url)
@@ -109,7 +178,6 @@ object HttpClient {
                     if (referer.isNotEmpty()) add("Referer", referer)
                 }.build())
                 .build()
-            // Use okhttp (follows redirects) to get final URL
             okhttp.newCall(req).execute().use { it.request.url.toString() }
         } catch (e: Exception) { url }
     }
