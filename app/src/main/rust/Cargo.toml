@@ -70,7 +70,31 @@ bytes          = "1"
 tokio-util     = { version = "0.7", features = ["io"] }
 
 # ── HTTP client (addon transport) ──────────────────────────────────────────────
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+# ^ "blocking" added — required by jsengine/http.rs (synchronous HTTP calls
+#   from inside QuickJS native callbacks). reqwest::blocking runs its own
+#   internal tokio runtime, safe to call from any thread.
+
+
+# ── JS provider engine (QuickJS — replaces JVM-side Rhino) ──────────────────────
+#
+# rquickjs = Rust bindings for quickjs-ng. Provides FULL native Promise,
+# async/await, generators, optional chaining, nullish coalescing — the
+# bundled Vega-style stream.js modules (esbuild __async output) need real
+# generator semantics that Rhino 1.9.1 doesn't fully support.
+#
+#   "bindgen"    → builds quickjs-ng from C source via bindgen (same approach
+#                   ring/rustls use for their C deps under cargo-ndk)
+#   "loader"     → module loader hooks (harmless even though we eval as a
+#                   single script)
+#   "futures"    → enables async-friendly Promise/Value conversions used by
+#                   jsengine/mod.rs's resolve_promise()
+rquickjs = { version = "0.12", default-features = false, features = ["bindgen", "loader", "futures"] }
+
+# scraper = real CSS-selector HTML querying (html5ever) — backs
+# providerContext.cheerio via __native_cheerio. Strict upgrade over the old
+# Jsoup-via-Rhino JsCheerio.
+scraper = "0.20"
 
 # ── Utilities ──────────────────────────────────────────────────────────────────
 serde       = { version = "1", features = ["derive"] }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
 use parking_lot::RwLock;
 use tokio::time::{sleep, Duration};
-use log::{info, warn};
+use log::{info, warn, debug};
 use librqbit::{
     AddTorrent, AddTorrentOptions, AddTorrentResponse, Session,
 };
@@ -13,7 +13,6 @@ use super::piece_picker::PiecePicker;
 use super::{
     CRITICAL_AHEAD_PIECES, HEADER_PIECES,
     MIN_READY_CRITICAL,
-    // FIX (Warning): TAIL_PIECES removed — imported but never used
 };
 
 // ── State codes (same as C++ TorrentSystem: 0-4) ─────────────────────────────
@@ -96,12 +95,19 @@ impl TorrentSession {
         let mut metadata_ok  = false;
         let mut stop_rx      = self.stop_rx.clone();
 
+        // Diagnostic: log a one-time "added" message so logcat shows the
+        // session actually started (helps distinguish "magnet never added"
+        // from "added but 0 peers ever found").
+        info!("Torrent added, waiting for metadata + peers...");
+
         // ── Monitor loop (replaces C++ updateLoop) ────────────────────────────
+        let mut tick: u32 = 0;
         loop {
             tokio::select! {
                 _ = stop_rx.changed() => { if *stop_rx.borrow() { break; } }
                 _ = sleep(Duration::from_millis(250)) => {}
             }
+            tick += 1;
 
             let stats = handle.stats();
 
@@ -111,15 +117,41 @@ impl TorrentSession {
             } else { 0 };
             self.progress.store(pct, Ordering::Relaxed);
 
-            // FIX (E0599): AggregatePeerStats has no .len() method in v9.
-            // It exposes individual state counters; sum connecting + live for
-            // "active peer" count that Kotlin displays to the user.
-            let peer_count = stats.live.as_ref()
+            // ── FIX: "S: 0" stuck forever ─────────────────────────────────────
+            //
+            // ROOT CAUSE: `self.seeds` was initialized in `new()` but NEVER
+            // written anywhere in the loop below — so `status().seeds` always
+            // returned the constructor's initial 0, regardless of real peer
+            // activity. The UI's "S: 0" label was therefore always 0 by
+            // construction, not because of a torrent/network problem.
+            //
+            // librqbit v9's AggregatePeerStats does not separately classify
+            // peers as "seed" vs "leech" (that distinction would require
+            // inspecting each peer's reported bitfield). The closest useful
+            // proxies are:
+            //   ps.seen       — total distinct peers discovered via DHT/trackers
+            //                    since the torrent was added (cumulative)
+            //   ps.live        — peers currently connected and exchanging data
+            //   ps.connecting  — peers mid-handshake
+            //
+            // We surface `ps.seen` as "S:" (Sources seen) — this is the most
+            // useful diagnostic value for the user: if it stays 0, DHT/tracker
+            // discovery itself isn't working (network/UDP/permission issue,
+            // unrelated to librqbit's piece logic). If `seen` grows but `live`
+            // stays 0, peers are found but TCP connections are failing.
+            // Read seen/connecting/live directly (no .clone() — avoid relying
+            // on AggregatePeerStats implementing Clone in v9).
+            let (seen_count, peer_count) = stats.live.as_ref()
                 .map(|l| {
                     let ps = &l.snapshot.peer_stats;
-                    (ps.connecting + ps.live) as i32
+                    (ps.seen as i32, (ps.connecting + ps.live) as i32)
                 })
-                .unwrap_or(0);
+                .unwrap_or((0, 0));
+
+            self.seeds.store(seen_count, Ordering::Relaxed);
+
+            // FIX (E0599): AggregatePeerStats has no .len() method in v9.
+            // peers shown to the user = currently-connected (live) + mid-handshake.
             self.peers.store(peer_count, Ordering::Relaxed);
 
             // v9 API: speed from live stats
@@ -128,6 +160,35 @@ impl TorrentSession {
                 .unwrap_or(0);
             self.speed.store(speed, Ordering::Relaxed);
 
+            // ── Diagnostics for "stuck at 0 KB/s" ─────────────────────────────
+            // Every ~5s, log enough detail to pinpoint WHERE it's stuck:
+            //   live=None              → torrent never reached "live" stage
+            //                            (still resolving metadata, or session
+            //                            init failed silently)
+            //   seen=0                 → DHT/tracker discovery found NOTHING.
+            //                            Check: INTERNET permission, UDP not
+            //                            blocked by network/VPN, magnet has
+            //                            working trackers/DHT nodes.
+            //   seen>0, live=0         → peers discovered but TCP handshakes
+            //                            failing (firewall/NAT, or all peers
+            //                            actually dead/offline for this magnet)
+            //   live>0, speed=0        → connected peers but no piece transfer
+            //                            (peers may have 0% themselves, or
+            //                            choking — try a more popular torrent
+            //                            to confirm vs a code issue)
+            if tick % 20 == 0 {
+                match &stats.live {
+                    None => debug!("[torrent] not live yet (metadata_ok={})", metadata_ok),
+                    Some(l) => {
+                        let ps = &l.snapshot.peer_stats;
+                        debug!(
+                            "[torrent] pct={} speed={}B/s seen={} connecting={} live={} dead={} progress_bytes={} total_bytes={}",
+                            pct, speed, ps.seen, ps.connecting, ps.live, ps.dead,
+                            stats.progress_bytes, stats.total_bytes
+                        );
+                    }
+                }
+            }
             if !metadata_ok {
                 // Waiting for metadata (v9 API - use with_metadata)
                 self.state.store(STATE_METADATA, Ordering::Relaxed);

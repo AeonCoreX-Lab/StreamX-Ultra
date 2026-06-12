@@ -16,7 +16,7 @@ import org.json.JSONObject
 //    Streams   → 5 min   (fast-changing download links)
 //    Metadata  → 30 min  (post-page data)
 //    Episodes  → 15 min  (series episode lists)
-//    Base URLs → 60 min  (handled separately in ModflixConfig)
+//    Base URLs → 60 min  (handled separately — see app/src/main/rust/src/jsengine/modflix_config.rs)
 //
 //  Usage:
 //    val cached = StreamCache.getStreams(cacheKey)

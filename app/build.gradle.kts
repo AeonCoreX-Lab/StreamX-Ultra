@@ -384,7 +384,4 @@ dependencies {
 
     // Start.io Ads
     implementation("com.startapp:inapp-sdk:5.3.0")
-
-    // JS addon execution
-    implementation("org.mozilla:rhino:1.9.1")
 }

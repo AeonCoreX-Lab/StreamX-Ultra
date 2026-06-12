@@ -10,10 +10,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import org.mozilla.javascript.NativeArray
-import org.mozilla.javascript.NativeObject
-import org.mozilla.javascript.ScriptableObject
-import org.mozilla.javascript.UniqueTag
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  JsStreamProviderEngine.kt  —  Unified HTTP + Bundle addon engine
@@ -27,25 +23,29 @@ import org.mozilla.javascript.UniqueTag
 //
 //    Type B — Bundle JS Addon (Vega-style CJS stream.js)
 //             • From AddonStorage.getInstalled()
-//             • Executes stream.js via Rhino (JsEngine)
+//             • Executes stream.js via QuickJS (Rust/rquickjs, native engine)
 //
 //  Both produce List<StreamResult> → merged, deduped, sorted, capped at 20.
 //
 //  ── FULL FIX LOG ──────────────────────────────────────────────────────────
 //
-//  FIX 1 — No HTTP requests from bundle addons
-//    Root cause: Promise undefined in Rhino → every getStream() crash before
-//    any network call.
-//    Solution: JsEngine now injects SyncPromise + atob/btoa + fetch + process
-//    polyfills. See JsEngine.kt for details.
+//  FIX 1 — No HTTP requests from bundle addons (ROOT CAUSE FIX)
+//    Root cause: Rhino's `function*` generator implementation doesn't fully
+//    support the `__async` resolve/reject/step pattern these esbuild bundles
+//    use — every getStream() either threw deep inside Rhino's interpreter or
+//    silently produced a wrong value, before any HTTP request left the device.
+//    Polyfilling Promise/fetch/atob did NOT fix this — the engine itself was
+//    the wrong tool.
 //
-//  FIX 2 — Cross-context Rhino error (NativeObject from dead context)
-//    Root cause: old code called execModule() in context A, then Context.exit(),
-//    then called getStream() in a fresh context B. Objects from A are invalid in B.
-//    Solution: JsEngine.executeAndCallStream() does module execution AND
-//    getStream() call inside ONE Rhino context/scope lifetime.
-//    fetchFromBundleAddon() now calls executeAndCallStream() directly.
-//    callGetStream() is removed.
+//    Solution: Rhino is REMOVED entirely. Bundle addons now execute inside
+//    QuickJS (Rust/rquickjs) via StreamXNative.executeJsStream(), which has
+//    full native Promise/async/await/generator support — no polyfill hacks.
+//    See app/src/main/rust/src/jsengine/mod.rs.
+//
+//  FIX 2 — Cross-context errors / two-context execution
+//    No longer applicable — QuickJS runs module-eval + getStream() call +
+//    promise-resolution inside ONE Context, in ONE Rust function
+//    (run_provider_stream), called once via JNI per bundle addon.
 //
 //  FIX 3 — Wrong link format for bundle providers
 //    Root cause: old code passed Stremio-style "tt1234567" or "tmdb:123" as link.
@@ -53,18 +53,21 @@ import org.mozilla.javascript.UniqueTag
 //      {"tmdbId":123,"imdbId":"tt456","season":1,"episode":2,"type":"series"}
 //    Others (4khdhub, multi, world4u) need a website URL from the getMeta step
 //    (those providers will still return empty until getMeta flow is added).
-//    Solution: buildVegaLink() builds the JSON payload. autoEmbed/MultiStream
-//    parses it via JSON.parse(id) and extracts tmdbId/imdbId directly. ✓
+//    Solution: buildVegaLink() builds the JSON payload (unchanged from before).
+//    autoEmbed/MultiStream parse it via JSON.parse(id) and extract tmdbId/imdbId. ✓
 //
 //  FIX 4 — axios.get().data not parsed as JSON
 //    Root cause: providers do response.data.streams.forEach() expecting object.
-//    Solution: JsEngine's module wrapper wraps providerContext.axios with a
-//    smart proxy that auto-parses JSON and exposes response.headers.get(name).
+//    Solution: the QuickJS POLYFILLS' axios wrapper auto-parses JSON bodies and
+//    exposes response.headers.get(name) / response.request.responseURL,
+//    mirroring the old Rhino-side contract exactly.
 //
 //  FIX 5 — Promise result discarded
-//    Root cause: parseBundleResults received the Promise object, not its value.
-//    Solution: JsEngine.executeAndCallStream() calls resolvePromise() which reads
-//    ._state/_value from our SyncPromise before returning.
+//    Root cause: old code (Rhino) received the Promise object itself, not its
+//    resolved value.
+//    Solution: resolve_promise() in jsengine/mod.rs drains QuickJS's real job
+//    queue via execute_pending_job() until the Promise settles, THEN
+//    JSON.stringify()s the resolved array. Kotlin receives plain JSON.
 //
 //  FIX 6 — HTTP addons: try tmdb: prefix addons when no imdbId
 //    Root cause: supportsStream was too strict — if req.imdbId is null,
@@ -72,6 +75,13 @@ import org.mozilla.javascript.UniqueTag
 //    The REAL fix is populating imdbId via TMDB external-IDs API upstream.
 //    Interim fix here: if no IMDB ID available, we also try HTTP addons that
 //    accept "tmdb:" prefix (MediaFusion supports this).
+//
+//  FIX 7 — cheerio support for scraper-style providers (4khdhub/multi/world4u)
+//    Root cause: Rhino's JsCheerio (Jsoup-backed) worked but those providers
+//    are still blocked on FIX 3's getMeta/website-URL gap, not on cheerio itself.
+//    Solution: QuickJS POLYFILLS now back cheerio.load() with __native_cheerio,
+//    implemented via Rust's `scraper` crate (real CSS selectors, html5ever) —
+//    a strict upgrade over Jsoup-via-Rhino, ready once FIX 3's getMeta flow lands.
 // ═════════════════════════════════════════════════════════════════════════════
 object JsStreamProviderEngine {
 
@@ -192,12 +202,13 @@ object JsStreamProviderEngine {
         transport.streams(type, id).mapNotNull { it.toStreamResult(desc.manifest.name) }
     }
 
-    // ── Type B: execute stream.js via Rhino ───────────────────────────────────
+    // ── Type B: execute stream.js via QuickJS (native, Rust/rquickjs) ──────────
     //
-    // CRITICAL CHANGE: we now call JsEngine.executeAndCallStream() which keeps
-    // module execution and getStream() call inside ONE Rhino Context lifetime.
-    // The old pattern (execModule → Context.exit → callGetStream → Context.enter)
-    // caused cross-context NativeObject failures.
+    // Replaces the entire Rhino pipeline. StreamXNative.executeJsStream():
+    //   1. JNI → run_provider_stream(code, link, isSeries) in jsengine/mod.rs
+    //   2. QuickJS evals POLYFILLS + the bundle, calls getStream(arg)
+    //   3. Drains the real Promise job queue, JSON.stringify()s the result
+    //   4. Returns a JSON array string, parsed here into StreamResult directly
     //
     // Link format: JSON payload so direct providers (autoEmbed/MultiStream) can
     // extract tmdbId + imdbId + season + episode. Scraped providers that need a
@@ -219,9 +230,7 @@ object JsStreamProviderEngine {
         val link = buildVegaLink(req)
         Log.d(TAG, "${addon.displayName}: link=$link")
 
-        val ctx    = JsProviderContext(addon.value)
-        val rawResult = JsEngine.executeAndCallStream(code, ctx, link, req.isSeries)
-        parseBundleResults(rawResult, addon.displayName)
+        StreamXNative.executeJsStream(code, link, req.isSeries, addon.displayName)
     }
 
     // ── Vega link builder ─────────────────────────────────────────────────────
@@ -248,73 +257,6 @@ object JsStreamProviderEngine {
             obj.put("type", "movie")
         }
         return obj.toString()
-    }
-
-    // ── parseBundleResults ────────────────────────────────────────────────────
-    //
-    // Iterates a NativeArray of JS objects returned by getStream().
-    // Each element looks like:
-    //   { link: "https://...", type: "mp4", quality: "1080p", server: "Name" }
-
-    private fun parseBundleResults(raw: Any?, source: String): List<StreamResult> {
-        if (raw == null) return emptyList()
-        val results = mutableListOf<StreamResult>()
-
-        fun prop(o: NativeObject, k: String): String? {
-            val v = ScriptableObject.getProperty(o, k)
-            return if (v == null || v === UniqueTag.NOT_FOUND || v.toString() == "undefined") null
-            else v.toString().trim().takeIf { it.isNotEmpty() }
-        }
-
-        fun parseOne(obj: Any?) {
-            val o = obj as? NativeObject ?: return
-            // providers use "link" (Vega) or "url" (Stremio) for the stream URL
-            val url = prop(o, "link") ?: prop(o, "url") ?: return
-            if (!url.startsWith("http")) return
-
-            val quality = prop(o, "quality") ?: "Unknown"
-            val server  = prop(o, "server")  ?: source
-            val typeStr = prop(o, "type")    ?: "mp4"
-            val lang    = prop(o, "language") ?: prop(o, "lang") ?: "Unknown"
-
-            val streamType = when {
-                typeStr.contains("m3u", ignoreCase = true) ||
-                typeStr.contains("hls", ignoreCase = true)  -> StreamType.HLS
-                typeStr.contains("dash", ignoreCase = true) -> StreamType.DASH
-                typeStr.contains("mkv",  ignoreCase = true) -> StreamType.MKV
-                else                                        -> StreamType.MP4
-            }
-
-            // Parse headers if provider supplies them (for DRM / Referer)
-            val headers = mutableMapOf<String, String>()
-            (ScriptableObject.getProperty(o, "headers") as? NativeObject)?.let { h ->
-                h.ids.forEach { id ->
-                    headers[id.toString()] = h.get(id.toString(), h)?.toString() ?: ""
-                }
-            }
-
-            results.add(StreamResult(
-                url      = url,
-                quality  = quality,
-                type     = streamType,
-                source   = server,
-                language = lang,
-                label    = buildString {
-                    append(quality)
-                    if (server.isNotEmpty()) append(" • $server")
-                },
-                headers  = headers
-            ))
-        }
-
-        when (raw) {
-            is NativeArray -> (0 until raw.length).forEach { parseOne(raw[it]) }
-            is NativeObject -> parseOne(raw)
-            else -> Log.w(TAG, "parseBundleResults: unexpected type ${raw.javaClass.simpleName}")
-        }
-
-        Log.d(TAG, "$source → ${results.size} streams parsed")
-        return results
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

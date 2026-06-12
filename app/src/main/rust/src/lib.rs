@@ -8,16 +8,18 @@
 //  Functions provided:
 //    ① TMDB key (already existed)
 //    ② Torrent JNI  → replaces C++ TorrentSystem / torrent-engine.cpp
-//    ③ Addon HTTP transport → nativeAddonFetchStreams (NEW)
+//    ③ Addon HTTP transport → nativeAddonFetchStreams
+//    ④ JS provider engine (QuickJS) → nativeExecuteJsStream (NEW)
 // ═══════════════════════════════════════════════════════════════════════
 
 #![allow(non_snake_case, clippy::missing_safety_doc)]
 
 mod torrent;
+mod jsengine;
 
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
-use jni::sys::{jstring, jdouble, jlongArray};
+use jni::sys::{jstring, jdouble, jlongArray, jboolean};
 use log::info;
 use torrent::engine::TorrentEngineHandle;
 
@@ -194,4 +196,39 @@ fn percent_encode(s: &str) -> String {
 // Fixed back to `&mut JNIEnv` since `get_string` requires a mutable reference.
 fn jstr(env: &mut JNIEnv, s: JString) -> String {
     env.get_string(&s).map(|js| js.into()).unwrap_or_default()
+}
+
+// ── ④ JS Provider Engine (QuickJS) ──────────────────────────────────────────
+// Called from JsStreamProviderEngine (via StreamXNative.executeJsStream) to
+// execute a Vega-style CJS stream.js bundle and return resolved streams.
+//
+// Replaces the entire Rhino-based JsEngine.kt / JsProviderContext.kt pipeline.
+// See src/jsengine/mod.rs for the full QuickJS implementation.
+//
+// Runs on its own thread (not TorrentEngineHandle's tokio runtime) because:
+//   • run_provider_stream() is fully synchronous (reqwest::blocking handles
+//     its own internal runtime — no need to be inside a tokio context)
+//   • rquickjs::Runtime/Context are !Send — must be created and dropped on
+//     the same OS thread, which a fresh spawned thread guarantees cleanly
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_StreamXNative_nativeExecuteJsStream(
+    mut env:    JNIEnv,
+    _cls:       JClass,
+    j_code:     JString,
+    j_link:     JString,
+    is_series:  jboolean,
+) -> jstring {
+    let code = jstr(&mut env, j_code);
+    let link = jstr(&mut env, j_link);
+
+    let json = std::thread::Builder::new()
+        .stack_size(4 * 1024 * 1024)
+        .spawn(move || jsengine::run_provider_stream(&code, &link, is_series != 0))
+        .map(|h| h.join().unwrap_or_else(|_| "[]".to_string()))
+        .unwrap_or_else(|e| {
+            log::error!("[jsengine] thread spawn failed: {e}");
+            "[]".to_string()
+        });
+
+    env.new_string(json).expect("JNI string").into_raw()
 }
