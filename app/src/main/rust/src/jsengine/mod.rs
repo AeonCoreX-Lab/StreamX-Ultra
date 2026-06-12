@@ -57,7 +57,7 @@ mod cheerio;
 mod modflix_config;
 
 use rquickjs::{
-    Context, Ctx, Function, Object, Promise, PromiseState, Runtime, Value,
+    Context, Ctx, Function, Object, Promise, Runtime, Value,
     function::Func,
 };
 use std::time::{Duration, Instant};
@@ -331,7 +331,7 @@ fn register_natives(ctx: &Ctx) -> rquickjs::Result<()> {
     let globals = ctx.globals();
     globals.set("__native_http", Func::from(http::native_http))?;
     globals.set("__native_cheerio", Func::from(cheerio::native_cheerio))?;
-    globals.set("__native_get_base_url", Func::from(modflix_config::get_base_url))?;
+    globals.set("__native_get_base_url", Func::from(|key: String| modflix_config::get_base_url(&key)))?;
     Ok(())
 }
 
@@ -356,8 +356,10 @@ fn resolve_promise<'js>(rt: &Runtime, val: Value<'js>) -> Result<Value<'js>, Str
 
     let start = Instant::now();
     loop {
-        match promise.state() {
-            PromiseState::Pending => {
+        // Under rquickjs 0.12, .result() yields None when pending,
+        // Some(Ok(val)) when resolved, and Some(Err(err)) when rejected.
+        match promise.result::<Value<'js>>() {
+            None => {
                 if start.elapsed() > EXEC_TIMEOUT {
                     return Err("timed out waiting for provider Promise to settle".to_string());
                 }
@@ -367,13 +369,11 @@ fn resolve_promise<'js>(rt: &Runtime, val: Value<'js>) -> Result<Value<'js>, Str
                     Err(e)    => return Err(format!("job execution error: {e:?}")),
                 }
             }
-            PromiseState::Resolved => {
-                return promise.result::<Value>().map_err(|e| format!("promise result: {e:?}"));
+            Some(Ok(res_val)) => {
+                return Ok(res_val);
             }
-            PromiseState::Rejected => {
-                let err: Result<Value, _> = promise.result();
-                let msg = err.map(|v| format!("{v:?}")).unwrap_or_else(|e| format!("{e:?}"));
-                return Err(format!("provider Promise rejected: {msg}"));
+            Some(Err(e)) => {
+                return Err(format!("provider Promise rejected: {e:?}"));
             }
         }
     }
