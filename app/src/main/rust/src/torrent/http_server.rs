@@ -9,23 +9,100 @@
 //
 //  Port: 8088 (same as before — MPV/ExoPlayer URL unchanged)
 // ═══════════════════════════════════════════════════════════════════════
+//
+//  ═══════════════════════════════════════════════════════════════════════
+//  ROOT-CAUSE FIX — "torrent movie doesn't play" (Content-Length mismatch)
+//  ═══════════════════════════════════════════════════════════════════════
+//
+//  THE BUG (previous version):
+//
+//      let (start, end) = range.unwrap_or((0, file_size - 1));
+//      let length       = end - start + 1;
+//      ...
+//      match read_bytes(vpath, start, length).await {
+//          Ok(data) => {
+//              ... .header(CONTENT_LENGTH, length) ...
+//              Ok(b.body(Full::new(data)).unwrap())
+//          }
+//      }
+//
+//  and `read_bytes` did:
+//
+//      let to_read = length.min(4 * 1024 * 1024) as usize;   // <-- caps at 4MB!
+//
+//  For the FIRST request a player makes (no Range header), `length ==
+//  file_size` — for any real movie that's hundreds of MB to several GB.
+//  The response declares `Content-Length: <file_size>` but the body
+//  (`Full::new(data)`) contains AT MOST 4MB. ExoPlayer/MPV read those 4MB,
+//  then the connection closes while ~(file_size - 4MB) bytes are still
+//  "promised" by Content-Length → the HTTP client throws
+//  "Premature end of Content-Length delimited message body" and playback
+//  never starts. This reproduces on EVERY torrent, regardless of seeds/
+//  speed/state — which matches "same problem" after the seeds-tracking fix
+//  (that fix was real but addressed a different, cosmetic bug).
+//
+//  THE FIX:
+//
+//  Replace the fixed `Full<Bytes>` body for `/stream` with a STREAMING body
+//  (`http_body_util::StreamBody` over `tokio_util::io::ReaderStream`), so
+//  the full requested range (up to several GB) is sent as a sequence of
+//  chunks instead of one eagerly-allocated buffer. `Content-Length` now
+//  always matches exactly what will be written to the socket.
+//
+//  Both response types (`Full` for 404/500/503/HEAD and `StreamBody` for
+//  the actual video data) are unified via `BoxBody<Bytes, io::Error>` so
+//  `handle()` keeps a single return type.
+// ═══════════════════════════════════════════════════════════════════════
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::convert::Infallible;
 use tokio::runtime::Runtime;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 use tokio::time::{timeout, Duration};
+use tokio_util::io::ReaderStream;
+use futures::StreamExt;
 use parking_lot::RwLock;
 use bytes::Bytes;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode, Method};
 use hyper::header::*;
-use http_body_util::Full;
+use hyper::body::Frame;
+use http_body_util::{Full, StreamBody, BodyExt};
+use http_body_util::combinators::BoxBody;
 use log::{info, warn};
 
 use super::session::{TorrentSession, STATE_READY};
+
+// ── Unified response body type ────────────────────────────────────────────────
+//
+// /stream (GET, large) → StreamBody (chunked, bounded read)
+// /stream (HEAD), /sub, 404/500/503 → Full (small, eagerly-built)
+// Both boxed into the same type so `handle()` has one return type.
+type RespBody = BoxBody<Bytes, std::io::Error>;
+
+fn full_body(b: Bytes) -> RespBody {
+    Full::new(b).map_err(|e: Infallible| match e {}).boxed()
+}
+
+/// Streams exactly `length` bytes starting at `start` from `path`, as a
+/// chunked HTTP body. `Content-Length` (set by the caller to `length`) will
+/// always match the number of bytes actually written, because the stream
+/// is bounded by `.take(length)` — no 4MB cap, no truncation.
+async fn streamed_body(path: &std::path::Path, start: u64, length: u64) -> std::io::Result<RespBody> {
+    let mut file = File::open(path).await?;
+    file.seek(SeekFrom::Start(start)).await?;
+
+    // 256KB chunks — large enough for good throughput, small enough to
+    // start playback quickly without buffering huge chunks in memory.
+    let limited = file.take(length);
+    let reader_stream = ReaderStream::with_capacity(limited, 256 * 1024);
+    let mapped = reader_stream.map(|chunk| chunk.map(Frame::data));
+
+    Ok(StreamBody::new(mapped).boxed())
+}
 
 // ── TorrentHttpServer ─────────────────────────────────────────────────────────
 pub struct TorrentHttpServer {
@@ -79,17 +156,13 @@ impl TorrentHttpServer {
 async fn handle(
     req:     Request<hyper::body::Incoming>,
     session: Arc<RwLock<Option<Arc<TorrentSession>>>>,
-) -> Result<Response<Full<Bytes>>, hyper::Error> {
+) -> Result<Response<RespBody>, hyper::Error> {
     let path = req.uri().path();
 
     // ── /stream ───────────────────────────────────────────────────────────────
     if path == "/stream" {
         // Extract data from session while holding the lock, then drop the guard
         // before any await points to avoid Send issues with parking_lot guards.
-        //
-        // FIX (Warning): `state` was extracted but never read after this point.
-        // Renamed to `_state` to suppress the unused-variable warning.
-        // The readiness gate below re-reads state inside the timeout loop.
         let (video_path, _state) = {
             let g = session.read();
             match g.as_ref() {
@@ -139,7 +212,7 @@ async fn handle(
                 .header(CONTENT_LENGTH,   file_size)
                 .header(CONTENT_TYPE,     mime)
                 .header(ACCEPT_RANGES,    "bytes")
-                .body(Full::new(Bytes::new()))
+                .body(full_body(Bytes::new()))
                 .unwrap()),
 
             &Method::GET => {
@@ -147,8 +220,11 @@ async fn handle(
                 let length       = end - start + 1;
                 let is_range     = range.is_some();
 
-                match read_bytes(vpath, start, length).await {
-                    Ok(data) => {
+                // FIX: stream `length` bytes (up to whole-file, GBs) instead of
+                // eagerly reading into a Bytes buffer capped at 4MB. This is
+                // the root-cause fix — see module-level comment.
+                match streamed_body(vpath, start, length).await {
+                    Ok(body) => {
                         let status = if is_range { StatusCode::PARTIAL_CONTENT } else { StatusCode::OK };
                         let mut b = Response::builder()
                             .status(status)
@@ -159,9 +235,12 @@ async fn handle(
                         if is_range {
                             b = b.header(CONTENT_RANGE, format!("bytes {}-{}/{}", start, end, file_size));
                         }
-                        Ok(b.body(Full::new(data)).unwrap())
+                        Ok(b.body(body).unwrap())
                     }
-                    Err(_) => Ok(resp500()),
+                    Err(e) => {
+                        warn!("[http_server] stream open error: {}", e);
+                        Ok(resp500())
+                    }
                 }
             }
             _ => Ok(resp404()),
@@ -187,7 +266,10 @@ async fn handle(
 
         if !sub_path.exists() { return Ok(resp404()); }
 
-        let data = match read_bytes(&sub_path, 0, sub_path.metadata().map(|m| m.len()).unwrap_or(0)).await {
+        // Subtitles are small (KB-range) — eager full-read is fine here,
+        // unlike /stream which can be GB-sized.
+        let size = sub_path.metadata().map(|m| m.len()).unwrap_or(0);
+        let data = match read_small_file(&sub_path, size).await {
             Ok(d) => d,
             Err(_) => return Ok(resp404()),
         };
@@ -203,21 +285,18 @@ async fn handle(
             .status(StatusCode::OK)
             .header(CONTENT_TYPE,   mime)
             .header(CACHE_CONTROL,  "no-cache")
-            .body(Full::new(data))
+            .body(full_body(data))
             .unwrap());
     }
 
     Ok(resp404())
 }
 
-// ── File read ─────────────────────────────────────────────────────────────────
-async fn read_bytes(path: &std::path::Path, start: u64, length: u64) -> std::io::Result<Bytes> {
+// ── Small-file read (subtitles only — NOT used for /stream) ──────────────────
+async fn read_small_file(path: &std::path::Path, size: u64) -> std::io::Result<Bytes> {
     let mut file = File::open(path).await?;
-    file.seek(SeekFrom::Start(start)).await?;
-    let to_read = length.min(4 * 1024 * 1024) as usize;
-    let mut buf = vec![0u8; to_read];
-    let n = file.read(&mut buf).await?;
-    buf.truncate(n);
+    let mut buf = vec![0u8; size as usize];
+    file.read_exact(&mut buf).await?;
     Ok(Bytes::from(buf))
 }
 
@@ -242,12 +321,12 @@ fn mime_for(p: &std::path::Path) -> &'static str {
     }
 }
 
-fn resp404() -> Response<Full<Bytes>> {
-    Response::builder().status(404).body(Full::new(Bytes::from("Not Found"))).unwrap()
+fn resp404() -> Response<RespBody> {
+    Response::builder().status(404).body(full_body(Bytes::from("Not Found"))).unwrap()
 }
-fn resp500() -> Response<Full<Bytes>> {
-    Response::builder().status(500).body(Full::new(Bytes::new())).unwrap()
+fn resp500() -> Response<RespBody> {
+    Response::builder().status(500).body(full_body(Bytes::new())).unwrap()
 }
-fn resp503(msg: &str) -> Response<Full<Bytes>> {
-    Response::builder().status(503).body(Full::new(Bytes::from(msg.to_owned()))).unwrap()
+fn resp503(msg: &str) -> Response<RespBody> {
+    Response::builder().status(503).body(full_body(Bytes::from(msg.to_owned()))).unwrap()
 }

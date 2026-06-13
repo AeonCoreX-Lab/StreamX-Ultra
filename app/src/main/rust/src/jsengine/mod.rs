@@ -57,7 +57,7 @@ mod cheerio;
 mod modflix_config;
 
 use rquickjs::{
-    Context, Ctx, Function, Object, Promise, Runtime, Value,
+    Context, Ctx, Function, Object, Promise, PromiseState, Runtime, Value,
     function::Func,
 };
 use std::time::{Duration, Instant};
@@ -244,9 +244,13 @@ pub fn run_provider_stream(code: &str, link: &str, is_series: bool) -> String {
         Ok(rt) => rt,
         Err(e) => { log::error!("[jsengine] Runtime::new failed: {e}"); return "[]".to_string(); }
     };
-    // Cap memory so a pathological provider can't OOM the app (8 MB is generous
-    // for these small bundles + JSON responses).
-    rt.set_memory_limit(8 * 1024 * 1024);
+    // Cap memory so a pathological provider can't OOM the app. 32MB (was 8MB)
+    // — cheerio-backed scraper providers (multi/world4u/4khdhub) fetch full
+    // HTML pages (can be several hundred KB) which get round-tripped through
+    // __native_http (JSON-encoded) and __native_cheerio (JSON array of
+    // matched elements); 8MB risked spurious "out of memory" aborts for
+    // those providers even though autoEmbed-style JSON-API providers were fine.
+    rt.set_memory_limit(32 * 1024 * 1024);
 
     let context = match Context::full(&rt) {
         Ok(c) => c,
@@ -356,10 +360,16 @@ fn resolve_promise<'js>(rt: &Runtime, val: Value<'js>) -> Result<Value<'js>, Str
 
     let start = Instant::now();
     loop {
-        // Under rquickjs 0.12, .result() yields None when pending,
-        // Some(Ok(val)) when resolved, and Some(Err(err)) when rejected.
-        match promise.result::<Value<'js>>() {
-            None => {
+        // rquickjs::Promise::result<T>() returns Result<T, Error> — it reads
+        // the promise's internal result slot regardless of state (undefined
+        // while pending). Pendingness must be checked separately via
+        // Promise::state() -> PromiseState::{Pending, Resolved, Rejected}.
+        // (The previous `match promise.result() { None => .., Some(Ok)=>.., }`
+        // pattern does not compile: Result has no None/Some variants — this
+        // was the reason the whole jsengine module, and therefore the whole
+        // native .so, failed to build.)
+        match promise.state() {
+            PromiseState::Pending => {
                 if start.elapsed() > EXEC_TIMEOUT {
                     return Err("timed out waiting for provider Promise to settle".to_string());
                 }
@@ -369,11 +379,13 @@ fn resolve_promise<'js>(rt: &Runtime, val: Value<'js>) -> Result<Value<'js>, Str
                     Err(e)    => return Err(format!("job execution error: {e:?}")),
                 }
             }
-            Some(Ok(res_val)) => {
-                return Ok(res_val);
+            PromiseState::Resolved => {
+                return promise.result::<Value>().map_err(|e| format!("promise result: {e:?}"));
             }
-            Some(Err(e)) => {
-                return Err(format!("provider Promise rejected: {e:?}"));
+            PromiseState::Rejected => {
+                // result() on a rejected promise yields the rejection reason.
+                let reason = promise.result::<Value>().ok();
+                return Err(format!("provider Promise rejected: {reason:?}"));
             }
         }
     }
