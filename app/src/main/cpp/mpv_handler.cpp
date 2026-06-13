@@ -154,6 +154,12 @@ void init_mpv_engine(JNIEnv* env, jobject appctx) {
     mpv_set_option_string(mpv_ctx, "demuxer-max-bytes",      "128MiB");
     mpv_set_option_string(mpv_ctx, "demuxer-readahead-secs", "8");
     mpv_set_option_string(mpv_ctx, "demuxer-max-back-bytes", "32MiB");
+    // FIX (00:00): Use MPV's in-memory cache for backward seeks instead of
+    // issuing new HTTP Range requests.  Without this, seeks (including MPV's
+    // internal moov-atom probe) that land within already-buffered data still
+    // open a new TCP connection — wasting bandwidth and potentially blocked
+    // when those bytes aren't downloaded yet, producing a 503 stall.
+    mpv_set_option_string(mpv_ctx, "demuxer-seekable-cache", "yes");
     mpv_set_option_string(mpv_ctx, "stream-buffer-size",     "4MiB");
 
     // ── Network ───────────────────────────────────────────────────

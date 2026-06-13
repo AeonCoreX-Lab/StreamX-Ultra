@@ -461,18 +461,32 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         try { StreamXCore.playMpvVideo(path) } catch (e: Exception) {}
     }
 
-    // ── Time sync ─────────────────────────────────────────────────
-    LaunchedEffect(isPlaying) {
-        while (isPlaying) {
+    // ── Time sync — always-running, 250 ms poll ───────────────────────────
+    //
+    // BUG (old): LaunchedEffect(isPlaying) restarts when isPlaying flips.
+    // During the restart gap the poll is dead.  Worse, while(isPlaying)
+    // means polling STOPS when paused — slider freezes, currentTime stale.
+    //
+    // FIX: LaunchedEffect(Unit) lives for the full composition lifetime.
+    // getMpvTime() is accurate even when paused, so the slider always shows
+    // the correct position.  Playhead is also fed back to Rust piece-picker.
+    LaunchedEffect(Unit) {
+        while (true) {
             if (!isSeeking) {
                 withContext(Dispatchers.IO) {
                     try {
-                        val t = StreamXCore.getMpvTime(); val d = StreamXCore.getMpvDuration()
-                        withContext(Dispatchers.Main) { currentTime = t; if (d > 0) totalDuration = d }
-                    } catch (e: Exception) {}
+                        val t = StreamXCore.getMpvTime()
+                        val d = StreamXCore.getMpvDuration()
+                        withContext(Dispatchers.Main) {
+                            if (t >= 0.0) currentTime = t
+                            if (d > 0.0)  totalDuration = d
+                        }
+                        // Feed playhead to Rust piece-picker (no-op for direct URLs)
+                        if (t > 0.0) TorrentEngine.updatePlaybackPosition(t)
+                    } catch (e: Exception) { /* MPV not ready — ignore */ }
                 }
             }
-            delay(500)
+            delay(250) // 250 ms → smooth slider; was 500 ms
         }
     }
 

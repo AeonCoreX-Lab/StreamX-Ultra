@@ -163,14 +163,14 @@ async fn handle(
     if path == "/stream" {
         // Extract data from session while holding the lock, then drop the guard
         // before any await points to avoid Send issues with parking_lot guards.
-        let (video_path, _state) = {
+        let (video_path, _state, progress_bytes) = {
             let g = session.read();
             match g.as_ref() {
                 Some(s) => {
                     let status = s.status();
-                    (status.video_path, status.state)
+                    (status.video_path, status.state, status.progress_bytes)
                 }
-                None => (String::new(), 0),
+                None => (String::new(), 0, 0u64),
             }
         }; // guard dropped here before any await
 
@@ -219,6 +219,47 @@ async fn handle(
                 let (start, end) = range.unwrap_or((0, file_size - 1));
                 let length       = end - start + 1;
                 let is_range     = range.is_some();
+
+                // ── ROOT-CAUSE FIX: 503 guard for undownloaded regions ────────────
+                //
+                // PROBLEM:
+                //   librqbit preallocates the full video file as a sparse file
+                //   (full declared size, undownloaded regions = zeros on disk).
+                //   When MPV opens an MP4 via HTTP it makes a Range request to the
+                //   END of the file to locate the moov atom.  Our server would seek
+                //   to e.g. byte 1,490,000,000 of a 1.5 GB file that's only 5%
+                //   downloaded → reads zeros → sends zeros with correct Content-Length
+                //   → MPV tries to parse zeros as moov → FAILS TO OPEN THE FILE →
+                //   time-pos and duration both return 0 → UI shows "00:00 / 00:00".
+                //   (MKV files are unaffected because their duration lives in the
+                //   header at the start of the file, which is always downloaded.)
+                //
+                // FIX:
+                //   When a Range request starts at or beyond progress_bytes (the
+                //   furthest byte that has actually been written to disk), return
+                //   503 Retry-After: 1 instead of serving zeros.
+                //
+                //   MPV's HTTP client handles 503 gracefully:
+                //     • Retries the Range seek after 1 second (up to its timeout).
+                //     • If all retries fail, MPV falls back to sequential-only play
+                //       without a moov seek — video plays, time-pos advances, only
+                //       the total-duration field stays 00:00 until a retry succeeds.
+                //
+                //   This is strictly better than the previous behaviour (zeros →
+                //   MPV aborts the file open entirely → both sides show 00:00).
+                //
+                if is_range && progress_bytes > 0 && start >= progress_bytes {
+                    warn!(
+                        "[http_server] Range {}-{} beyond downloaded {} bytes — returning 503",
+                        start, end, progress_bytes
+                    );
+                    return Ok(Response::builder()
+                        .status(StatusCode::SERVICE_UNAVAILABLE)
+                        .header("Retry-After", "1")
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(full_body(Bytes::from("Range not yet downloaded")))
+                        .unwrap());
+                }
 
                 // FIX: stream `length` bytes (up to whole-file, GBs) instead of
                 // eagerly reading into a Bytes buffer capped at 4MB. This is

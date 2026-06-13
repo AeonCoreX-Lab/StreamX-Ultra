@@ -62,38 +62,46 @@ pub const STATE_ERROR:     i32 = 4;
 // ── TorrentStatus — returned to Kotlin via JNI ────────────────────────────────
 #[derive(Debug, Clone, Default)]
 pub struct TorrentStatus {
-    pub progress:   i32,
-    pub speed_bps:  i64,
-    pub seeds:      i32,    // "sources seen" = total distinct DHT/tracker peers discovered
-    pub peers:      i32,    // currently connected (live + connecting)
-    pub state:      i32,
-    pub video_path: String,
+    pub progress:       i32,
+    pub speed_bps:      i64,
+    pub seeds:          i32,
+    pub peers:          i32,
+    pub state:          i32,
+    pub video_path:     String,
+    /// Bytes downloaded so far (sequential from file start).
+    /// Used by the HTTP server to guard Range requests that go beyond
+    /// the downloaded region — prevents MPV from reading sparse-file
+    /// zeros when seeking for moov atom, which caused file-open failure
+    /// and persistent 00:00 display.
+    pub progress_bytes: u64,
 }
 
 // ── TorrentSession ────────────────────────────────────────────────────────────
 pub struct TorrentSession {
-    state:         AtomicI32,
-    progress:      AtomicI32,
-    speed:         AtomicI64,
-    seeds:         AtomicI32,
-    peers:         AtomicI32,
-    playhead_bits: AtomicU64,
-    video_path:    RwLock<String>,
-    stop_tx:       tokio::sync::watch::Sender<bool>,
-    stop_rx:       tokio::sync::watch::Receiver<bool>,
+    state:          AtomicI32,
+    progress:       AtomicI32,
+    speed:          AtomicI64,
+    seeds:          AtomicI32,
+    peers:          AtomicI32,
+    playhead_bits:  AtomicU64,
+    progress_bytes: AtomicU64,   // bytes downloaded so far (exposed to HTTP server)
+    video_path:     RwLock<String>,
+    stop_tx:        tokio::sync::watch::Sender<bool>,
+    stop_rx:        tokio::sync::watch::Receiver<bool>,
 }
 
 impl TorrentSession {
     pub fn new() -> Self {
         let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
         Self {
-            state:         AtomicI32::new(STATE_IDLE),
-            progress:      AtomicI32::new(0),
-            speed:         AtomicI64::new(0),
-            seeds:         AtomicI32::new(0),
-            peers:         AtomicI32::new(0),
-            playhead_bits: AtomicU64::new(0),
-            video_path:    RwLock::new(String::new()),
+            state:          AtomicI32::new(STATE_IDLE),
+            progress:       AtomicI32::new(0),
+            speed:          AtomicI64::new(0),
+            seeds:          AtomicI32::new(0),
+            peers:          AtomicI32::new(0),
+            playhead_bits:  AtomicU64::new(0),
+            progress_bytes: AtomicU64::new(0),
+            video_path:     RwLock::new(String::new()),
             stop_tx,
             stop_rx,
         }
@@ -207,6 +215,9 @@ impl TorrentSession {
                 (stats.progress_bytes as f64 / stats.total_bytes as f64 * 100.0) as i32
             } else { 0 };
             self.progress.store(pct, Ordering::Relaxed);
+            // Store raw progress_bytes so the HTTP server can guard Range
+            // requests that go beyond the downloaded region.
+            self.progress_bytes.store(stats.progress_bytes, Ordering::Relaxed);
 
             // ── Diagnostics every ~5 s ────────────────────────────────────────
             if tick % 20 == 0 {
@@ -319,12 +330,13 @@ impl TorrentSession {
 
     pub fn status(&self) -> TorrentStatus {
         TorrentStatus {
-            progress:   self.progress.load(Ordering::Relaxed),
-            speed_bps:  self.speed.load(Ordering::Relaxed),
-            seeds:      self.seeds.load(Ordering::Relaxed),
-            peers:      self.peers.load(Ordering::Relaxed),
-            state:      self.state.load(Ordering::Relaxed),
-            video_path: self.video_path.read().clone(),
+            progress:       self.progress.load(Ordering::Relaxed),
+            speed_bps:      self.speed.load(Ordering::Relaxed),
+            seeds:          self.seeds.load(Ordering::Relaxed),
+            peers:          self.peers.load(Ordering::Relaxed),
+            state:          self.state.load(Ordering::Relaxed),
+            video_path:     self.video_path.read().clone(),
+            progress_bytes: self.progress_bytes.load(Ordering::Relaxed),
         }
     }
 
