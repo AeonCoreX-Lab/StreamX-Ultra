@@ -1,6 +1,6 @@
 // app/src/main/rust/src/torrent/session.rs
 //
-// FIXED v2
+// FIXED v3
 //
 // FIX 1 — Torrent black screen / S:0 stuck:
 //   Root cause: Session::new(path) uses SessionOptions::default() which
@@ -9,10 +9,11 @@
 //   outbound connects. On networks with strict NAT (typical Android
 //   carrier networks) this means 0 live peers even if DHT discovers them.
 //
-//   Fix: use Session::new_with_opts() with explicit listen_port_range so
-//   librqbit opens a real TCP listener, enabling inbound connections.
-//   Also set peers_per_torrent higher to aggressively connect during
-//   buffering.
+//   Fix: use Session::new_with_opts() with a ListenerOptions (v9 API).
+//   librqbit v9 replaced listen_port_range with a listen: Option<ListenerOptions>
+//   field in SessionOptions.  ListenerOptions.listen_addr sets the bind
+//   address + port; ipv4_only=true avoids IPv6 on Android.
+//   Also raise peer_limit in SessionOptions for faster initial buffering.
 //
 // FIX 2 — S:0 display misleading during METADATA phase:
 //   stats.live is None (and therefore seen=0) while the torrent is still
@@ -36,6 +37,7 @@
 //   retries cleanly instead of locking onto 0-byte data.
 //   (session.rs exposes STATE_READY as pub so http_server can import it.)
 
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
 use parking_lot::RwLock;
@@ -44,6 +46,7 @@ use log::{info, warn, debug};
 use librqbit::{
     AddTorrent, AddTorrentOptions, AddTorrentResponse, Session, SessionOptions,
 };
+use librqbit::listen::ListenerOptions;
 
 use super::piece_picker::PiecePicker;
 use super::{
@@ -101,16 +104,24 @@ impl TorrentSession {
     pub async fn run(self: &Arc<Self>, magnet: String, save_dir: String) {
         self.state.store(STATE_METADATA, Ordering::Relaxed);
 
-        // FIX 1: explicit SessionOptions with peer listener port range.
-        // Without a listening port, peers discovered via DHT cannot connect
-        // back to us. Port range 16880-16890 is arbitrary but avoids common
-        // conflicts. disable_upload is already compiled away by the
-        // "disable-upload" Cargo feature; we do not need the field here.
+        // FIX 1 (v9 API): librqbit v9 removed `listen_port_range` from
+        // SessionOptions.  The replacement is `listen: Option<ListenerOptions>`.
+        //
+        // ListenerOptions.listen_addr is a SocketAddr that sets BOTH the bind
+        // IP and port for the BT-TCP listener.  We pick port 16880 (fixed,
+        // avoids common conflicts).  ipv4_only=true prevents the default
+        // IPv6 bind that may fail on some Android carriers.
+        //
+        // peer_limit raises the per-session peer cap (new v9 field) so we
+        // connect aggressively during buffering on well-seeded torrents.
+        let listen_opts = ListenerOptions {
+            listen_addr: SocketAddr::from((Ipv4Addr::UNSPECIFIED, 16880u16)),
+            ipv4_only: true,
+            ..ListenerOptions::default()
+        };
         let session_opts = SessionOptions {
-            listen_port_range: Some(16880..16890),
-            // Allow more peers per torrent to speed up initial buffering.
-            // librqbit v9 caps concurrent connections; raising this improves
-            // throughput on well-seeded torrents without wasting resources.
+            listen: Some(listen_opts),
+            peer_limit: Some(50),
             ..SessionOptions::default()
         };
 
