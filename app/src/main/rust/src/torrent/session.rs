@@ -44,9 +44,8 @@ use parking_lot::RwLock;
 use tokio::time::{sleep, Duration};
 use log::{info, warn, debug};
 use librqbit::{
-    AddTorrent, AddTorrentOptions, AddTorrentResponse, Session, SessionOptions,
+    AddTorrent, AddTorrentOptions, AddTorrentResponse, ListenerOptions, Session, SessionOptions,
 };
-use librqbit::listen::ListenerOptions;
 
 use super::piece_picker::PiecePicker;
 use super::{
