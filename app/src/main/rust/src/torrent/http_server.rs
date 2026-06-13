@@ -101,7 +101,7 @@ async fn streamed_body(path: &std::path::Path, start: u64, length: u64) -> std::
     let reader_stream = ReaderStream::with_capacity(limited, 256 * 1024);
     let mapped = reader_stream.map(|chunk| chunk.map(Frame::data));
 
-    Ok(StreamBody::new(mapped).boxed())
+    Ok(BodyExt::boxed(StreamBody::new(mapped)))
 }
 
 // ── TorrentHttpServer ─────────────────────────────────────────────────────────

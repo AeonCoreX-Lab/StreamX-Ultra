@@ -57,8 +57,9 @@ mod cheerio;
 mod modflix_config;
 
 use rquickjs::{
-    Context, Ctx, Function, Object, Promise, PromiseState, Runtime, Value,
+    Context, Ctx, Function, Object, Runtime, Value,
     function::Func,
+    promise::PromiseState,
 };
 use std::time::{Duration, Instant};
 
@@ -380,12 +381,22 @@ fn resolve_promise<'js>(rt: &Runtime, val: Value<'js>) -> Result<Value<'js>, Str
                 }
             }
             PromiseState::Resolved => {
-                return promise.result::<Value>().map_err(|e| format!("promise result: {e:?}"));
+                // result() returns Option<Result<T,E>>: None=pending, Some(Ok)=resolved, Some(Err)=rejected.
+                // We are in the Resolved branch so None is unexpected but handled gracefully.
+                return promise.result::<Value>()
+                    .ok_or_else(|| "promise state=Resolved but result() returned None".to_string())?
+                    .map_err(|e| format!("promise result: {e:?}"));
             }
             PromiseState::Rejected => {
-                // result() on a rejected promise yields the rejection reason.
-                let reason = promise.result::<Value>().ok();
-                return Err(format!("provider Promise rejected: {reason:?}"));
+                // result() returns Some(Err(rquickjs::Error::Exception)) for a rejected promise.
+                // The actual JS rejection value is the thrown exception accessible via ctx.catch().
+                // Format whatever we can from the Option<Result<..>> for the log message.
+                let reason_str = match promise.result::<Value>() {
+                    Some(Err(e)) => format!("{e:?}"),
+                    Some(Ok(_))  => "unexpected Ok in rejected state".to_string(),
+                    None         => "no result available".to_string(),
+                };
+                return Err(format!("provider Promise rejected: {reason_str}"));
             }
         }
     }
