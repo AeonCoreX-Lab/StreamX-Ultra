@@ -6,8 +6,8 @@
     "icon":         "",
     "type":         "global",
     "disabled":     false,
-    "sourceAuthor": "himanshu8443",
-    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+    "sourceAuthor": "aeoncorex-lab",
+    "sourceUrl":    "https://aeoncorex-lab.github.io/streamx-addons/modflix"
   },
   {
     "value":        "vega",
@@ -16,8 +16,8 @@
     "icon":         "",
     "type":         "global",
     "disabled":     false,
-    "sourceAuthor": "himanshu8443",
-    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+    "sourceAuthor": "aeoncorex-lab",
+    "sourceUrl":    "https://aeoncorex-lab.github.io/streamx-addons/modflix"
   },
   {
     "value":        "drive",
@@ -26,8 +26,8 @@
     "icon":         "",
     "type":         "global",
     "disabled":     false,
-    "sourceAuthor": "himanshu8443",
-    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+    "sourceAuthor": "aeoncorex-lab",
+    "sourceUrl":    "https://aeoncorex-lab.github.io/streamx-addons/modflix"
   },
   {
     "value":        "hdhub4u",
@@ -36,8 +36,8 @@
     "icon":         "",
     "type":         "india",
     "disabled":     false,
-    "sourceAuthor": "himanshu8443",
-    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+    "sourceAuthor": "aeoncorex-lab",
+    "sourceUrl":    "https://aeoncorex-lab.github.io/streamx-addons/modflix"
   },
   {
     "value":        "filmyfly",
@@ -46,8 +46,8 @@
     "icon":         "",
     "type":         "india",
     "disabled":     false,
-    "sourceAuthor": "himanshu8443",
-    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+    "sourceAuthor": "aeoncorex-lab",
+    "sourceUrl":    "https://aeoncorex-lab.github.io/streamx-addons/modflix"
   },
   {
     "value":        "topmovies",
@@ -56,8 +56,8 @@
     "icon":         "",
     "type":         "india",
     "disabled":     false,
-    "sourceAuthor": "himanshu8443",
-    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+    "sourceAuthor": "aeoncorex-lab",
+    "sourceUrl":    "https://aeoncorex-lab.github.io/streamx-addons/modflix"
   },
   {
     "value":        "hiAnime",
@@ -66,8 +66,8 @@
     "icon":         "",
     "type":         "anime",
     "disabled":     false,
-    "sourceAuthor": "himanshu8443",
-    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+    "sourceAuthor": "aeoncorex-lab",
+    "sourceUrl":    "https://aeoncorex-lab.github.io/streamx-addons/modflix"
   },
   {
     "value":        "kissKh",
@@ -76,7 +76,7 @@
     "icon":         "",
     "type":         "drama",
     "disabled":     false,
-    "sourceAuthor": "himanshu8443",
-    "sourceUrl":    "https://himanshu8443.github.io/providers/modflix"
+    "sourceAuthor": "aeoncorex-lab",
+    "sourceUrl":    "https://aeoncorex-lab.github.io/streamx-addons/modflix"
   }
 ]
