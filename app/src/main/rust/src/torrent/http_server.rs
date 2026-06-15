@@ -39,17 +39,17 @@
 //!   No zeros, no 503, no 416, no wait_for_bytes needed.
 
 use std::sync::Arc;
-use std::convert::Infallible;
 
 use bytes::Bytes;
-use http::{Method, StatusCode};
-use http::header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, RANGE};
+use hyper::http::{Method, StatusCode};
+use hyper::http::header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, RANGE};
 use http_body_util::{BodyExt, Full, StreamBody, combinators::BoxBody};
 use hyper::{Request, Response, body::Frame};
 use parking_lot::RwLock;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
-use tracing::{info, warn};
+use futures_util::StreamExt;
+use log::{info, warn};
 
 use crate::torrent::session::TorrentSession;
 use tokio::time::Duration;
@@ -58,8 +58,9 @@ type RespBody = BoxBody<Bytes, std::io::Error>;
 
 fn full_body(b: Bytes) -> RespBody {
     Full::new(b)
-        .map_err(|e: Infallible| match e {})
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        .map_err(|_: std::convert::Infallible| {
+            std::io::Error::new(std::io::ErrorKind::Other, "infallible")
+        })
         .boxed()
 }
 

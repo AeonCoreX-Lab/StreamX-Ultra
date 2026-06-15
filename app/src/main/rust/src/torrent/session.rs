@@ -95,9 +95,9 @@ pub struct TorrentSession {
     //   • Prioritizes the piece being read via iter_next_pieces() → moov first
     //   • Wakes via wake_streams_on_piece_completed()             → no polling
     // This replaces ALL of: disk I/O, wait_for_bytes, 503/416, progress_bytes guard.
-    torrent_handle:  RwLock<Option<Arc<ManagedTorrent>>>,
-    video_file_id:   AtomicI32,    // index in torrent file list; -1 = not set
-    video_file_size: AtomicU64,    // total bytes of video file (from metadata)
+    torrent_handle:      RwLock<Option<Arc<ManagedTorrent>>>,
+    video_file_id:       AtomicI32,    // index in torrent file list; -1 = not set
+    pub video_file_size: AtomicU64,    // total bytes of video file (from metadata)
 
     stop_tx:        tokio::sync::watch::Sender<bool>,
     stop_rx:        tokio::sync::watch::Receiver<bool>,

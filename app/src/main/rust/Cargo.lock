@@ -2990,6 +2990,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "futures",
+ "futures-util",
  "http-body-util",
  "hyper",
  "hyper-util",
