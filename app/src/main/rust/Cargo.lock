@@ -380,9 +380,9 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "cc"
-version = "1.2.63"
+version = "1.2.64"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "556e016178bb5662a08681bbe0f00f8e17631781a4dfc8c45e466e4b185ec27f"
+checksum = "dad887fd958be91b5098c0248def011f4523ab786cd411be668777e55063501f"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -1467,9 +1467,9 @@ dependencies = [
 
 [[package]]
 name = "js-sys"
-version = "0.3.100"
+version = "0.3.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2025f20d7a4fa7785846e7b63d10a76d3f1cee98ee5cb79ea59703f95e42162"
+checksum = "03d04c30968dffe80775bd4d7fb676131cd04a1fb46d2686dbffbaec2d9dfd31"
 dependencies = [
  "cfg-if",
  "futures-util",
@@ -1527,8 +1527,7 @@ dependencies = [
 [[package]]
 name = "librqbit"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9451def41c18d1b8e7b68c097bcb0c9a0579cdc9b779803368a65b86cae03d2"
+source = "git+https://github.com/ikatson/rqbit?branch=main#1e59a1f84186f846fb639c741e4a00beb2587ca8"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1592,8 +1591,7 @@ dependencies = [
 [[package]]
 name = "librqbit-bencode"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97490fb9b35fb575f498cc1e804b23be6bbf3603d5a2358733e5b867d1ee52e8"
+source = "git+https://github.com/ikatson/rqbit?branch=main#1e59a1f84186f846fb639c741e4a00beb2587ca8"
 dependencies = [
  "anyhow",
  "arrayvec",
@@ -1609,8 +1607,7 @@ dependencies = [
 [[package]]
 name = "librqbit-buffers"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e845dbd14174712471c3430c958d5c25e391561c2dd31f39f895bb60f63c46f0"
+source = "git+https://github.com/ikatson/rqbit?branch=main#1e59a1f84186f846fb639c741e4a00beb2587ca8"
 dependencies = [
  "bytes",
  "librqbit-clone-to-owned",
@@ -1621,8 +1618,7 @@ dependencies = [
 [[package]]
 name = "librqbit-clone-to-owned"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76ef698eb8d7745f425f2b9a93e6a9d946bcb8bf84a559303e0fc3f01e8ad07c"
+source = "git+https://github.com/ikatson/rqbit?branch=main#1e59a1f84186f846fb639c741e4a00beb2587ca8"
 dependencies = [
  "bytes",
 ]
@@ -1630,8 +1626,7 @@ dependencies = [
 [[package]]
 name = "librqbit-core"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a38e805aad201d96024849649174015d48a575348b35bbd927d99b47464e665e"
+source = "git+https://github.com/ikatson/rqbit?branch=main#1e59a1f84186f846fb639c741e4a00beb2587ca8"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1660,8 +1655,7 @@ dependencies = [
 [[package]]
 name = "librqbit-dht"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d59a9374b33a52a065171641ae518db97969d3db849a57824c72c53d2109918b"
+source = "git+https://github.com/ikatson/rqbit?branch=main#1e59a1f84186f846fb639c741e4a00beb2587ca8"
 dependencies = [
  "anyhow",
  "backon",
@@ -1708,8 +1702,7 @@ dependencies = [
 [[package]]
 name = "librqbit-lsd"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e65ddc3b64392a71378944712c9830aac8ef98f860b180419dd42b4596e7faa"
+source = "git+https://github.com/ikatson/rqbit?branch=main#1e59a1f84186f846fb639c741e4a00beb2587ca8"
 dependencies = [
  "anyhow",
  "atoi",
@@ -1728,8 +1721,7 @@ dependencies = [
 [[package]]
 name = "librqbit-peer-protocol"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76ade1bbea8cf3e7eb51978b32a549787d17bbf872f3f0ed47d7c85e7377705a"
+source = "git+https://github.com/ikatson/rqbit?branch=main#1e59a1f84186f846fb639c741e4a00beb2587ca8"
 dependencies = [
  "anyhow",
  "bitvec",
@@ -1749,8 +1741,7 @@ dependencies = [
 [[package]]
 name = "librqbit-sha1-wrapper"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eeb119e5c05f1aa4011cf2e4dc19f83403064d2210804e2f35f06abac4e5b710"
+source = "git+https://github.com/ikatson/rqbit?branch=main#1e59a1f84186f846fb639c741e4a00beb2587ca8"
 dependencies = [
  "assert_cfg",
  "aws-lc-rs",
@@ -1759,8 +1750,7 @@ dependencies = [
 [[package]]
 name = "librqbit-tracker-comms"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ae0c520cc5f028fb50d746eaa6ba2aa082228db96c2baf1a312f9cacfceeb58"
+source = "git+https://github.com/ikatson/rqbit?branch=main#1e59a1f84186f846fb639c741e4a00beb2587ca8"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -1788,8 +1778,7 @@ dependencies = [
 [[package]]
 name = "librqbit-upnp"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "058af0d5e2a99c567b73369455e3852c48addcf751836f08cfc25ca89dd16cc3"
+source = "git+https://github.com/ikatson/rqbit?branch=main#1e59a1f84186f846fb639c741e4a00beb2587ca8"
 dependencies = [
  "anyhow",
  "bstr",
@@ -3149,9 +3138,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.48"
+version = "0.3.49"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc1aa89044e7786ffb2ec017acb22cb7de5b0be46d0f21aea2b224b8561e5db2"
+checksum = "711a53c2d47bbd818258c498c8dbfe186a2526c631495cfe7e078567f86b8469"
 dependencies = [
  "deranged",
  "num-conv",
@@ -3169,9 +3158,9 @@ checksum = "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
 
 [[package]]
 name = "time-macros"
-version = "0.2.28"
+version = "0.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d3bfe86347f0cc659f586f01e26303ccd32418f26f30c7b0309b3ca3a07d695"
+checksum = "71c652a3727a9cbb9a02f707f530b618ce00d0ccd762009c8c23bd191df3c17d"
 dependencies = [
  "num-conv",
  "time-core",
@@ -3528,9 +3517,9 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasip2"
-version = "1.0.3+wasi-0.2.9"
+version = "1.0.4+wasi-0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20064672db26d7cdc89c7798c48a0fdfac8213434a1186e5ef29fd560ae223d6"
+checksum = "b67efb37e106e55ce722a510d6b5f9c17f083e5fc79afc2badeb12cc313d9487"
 dependencies = [
  "wit-bindgen 0.57.1",
 ]
@@ -3546,9 +3535,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.123"
+version = "0.2.125"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a254a4b10c19a76f09a27640e7ffbf9bc30bf67e16a3bf28aaefa4920fe81563"
+checksum = "8ddb3f79143bced6de84270411622a2699cee572fc0875aeaf1e7867cf9fca1a"
 dependencies = [
  "cfg-if",
  "once_cell",
@@ -3559,9 +3548,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-futures"
-version = "0.4.73"
+version = "0.4.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54568702fabf5d4849ce2b90fadfa64168a097eaf4b351ce9df8b687a0086aaf"
+checksum = "503b14d284f2c8dac03b819967e155ea753f573586193b2b2c95990cb5d69280"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
@@ -3569,9 +3558,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.123"
+version = "0.2.125"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24a40fc75b0ec6f3746ceb10d36f53a93dcd68a93b11b6445983945d79eba0dc"
+checksum = "4e21a184b13fb19e157296e2c46056aec9092264fab83e4ba59e68c61b323c3d"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -3579,9 +3568,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.123"
+version = "0.2.125"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "908f34bd9b9ce3d4caf07b72dfab63d61504d156856c6bd3cd87fa350cf3985b"
+checksum = "fecefd9c35bd935a20fc3fc344b5f29138961e4f47fb03297d88f2587afb5ebd"
 dependencies = [
  "bumpalo",
  "proc-macro2",
@@ -3592,9 +3581,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.123"
+version = "0.2.125"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7acbf7616c27b194bbb550bf77ed0c2c3e5b7fd1260a93082b95fb7f47959b92"
+checksum = "23939e44bb9a5d7576fa2b563dc2e136628f1224e88a8deed09e04858b77871f"
 dependencies = [
  "unicode-ident",
 ]
@@ -3648,9 +3637,9 @@ dependencies = [
 
 [[package]]
 name = "web-sys"
-version = "0.3.100"
+version = "0.3.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e0871acf327f283dc6da28a1696cdc64fb355ba9f935d052021fa77f35cce69"
+checksum = "a6430a72df5eb332242960fe84b3002a241163998241eb596d4f739b9757061d"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
@@ -4222,9 +4211,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.8.2"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
+checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 
 [[package]]
 name = "zerotrie"

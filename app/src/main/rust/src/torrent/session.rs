@@ -44,7 +44,8 @@ use parking_lot::RwLock;
 use tokio::time::{sleep, Duration};
 use log::{info, warn, debug};
 use librqbit::{
-    AddTorrent, AddTorrentOptions, AddTorrentResponse, ListenerOptions, Session, SessionOptions,
+    AddTorrent, AddTorrentOptions, AddTorrentResponse, ListenerOptions,
+    ManagedTorrent, Session, SessionOptions,
 };
 
 use super::piece_picker::PiecePicker;
@@ -84,8 +85,20 @@ pub struct TorrentSession {
     seeds:          AtomicI32,
     peers:          AtomicI32,
     playhead_bits:  AtomicU64,
-    progress_bytes: AtomicU64,   // bytes downloaded so far (exposed to HTTP server)
+    progress_bytes: AtomicU64,
     video_path:     RwLock<String>,
+
+    // ── FileStream support ─────────────────────────────────────────────────
+    // Stores the ManagedTorrentHandle so http_server can call
+    // handle.clone().stream(file_id) → FileStream, which:
+    //   • Blocks (Poll::Pending) until the piece is available     → no zeros
+    //   • Prioritizes the piece being read via iter_next_pieces() → moov first
+    //   • Wakes via wake_streams_on_piece_completed()             → no polling
+    // This replaces ALL of: disk I/O, wait_for_bytes, 503/416, progress_bytes guard.
+    torrent_handle:  RwLock<Option<Arc<ManagedTorrent>>>,
+    video_file_id:   AtomicI32,    // index in torrent file list; -1 = not set
+    video_file_size: AtomicU64,    // total bytes of video file (from metadata)
+
     stop_tx:        tokio::sync::watch::Sender<bool>,
     stop_rx:        tokio::sync::watch::Receiver<bool>,
 }
@@ -94,14 +107,17 @@ impl TorrentSession {
     pub fn new() -> Self {
         let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
         Self {
-            state:          AtomicI32::new(STATE_IDLE),
-            progress:       AtomicI32::new(0),
-            speed:          AtomicI64::new(0),
-            seeds:          AtomicI32::new(0),
-            peers:          AtomicI32::new(0),
-            playhead_bits:  AtomicU64::new(0),
-            progress_bytes: AtomicU64::new(0),
-            video_path:     RwLock::new(String::new()),
+            state:           AtomicI32::new(STATE_IDLE),
+            progress:        AtomicI32::new(0),
+            speed:           AtomicI64::new(0),
+            seeds:           AtomicI32::new(0),
+            peers:           AtomicI32::new(0),
+            playhead_bits:   AtomicU64::new(0),
+            progress_bytes:  AtomicU64::new(0),
+            video_path:      RwLock::new(String::new()),
+            torrent_handle:  RwLock::new(None),
+            video_file_id:   AtomicI32::new(-1),
+            video_file_size: AtomicU64::new(0),
             stop_tx,
             stop_rx,
         }
@@ -173,6 +189,14 @@ impl TorrentSession {
                 return;
             }
         };
+
+        // Store handle immediately so http_server can call handle.stream(file_id)
+        // once file_id is known (set below when metadata arrives).
+        // FileStream created from this handle:
+        //   - blocks until pieces are available (Poll::Pending)  → no zeros
+        //   - feeds read position into piece picker priority      → moov downloaded first
+        //   - woken by wake_streams_on_piece_completed()          → zero overhead
+        *self.torrent_handle.write() = Some(handle.clone());
 
         info!("[torrent] Torrent added OK — waiting for metadata + peers");
 
@@ -259,7 +283,12 @@ impl TorrentSession {
                             files[largest_idx].relative_filename.display()
                         );
                         *self.video_path.write() = path.clone();
-                        info!("[torrent] Video file: {} ({} bytes)", path, largest_size);
+                        // Expose file_id + size so http_server can open a FileStream.
+                        // Once video_file_id >= 0, stream_info() returns Some(handle, id).
+                        self.video_file_id  .store(largest_idx as i32, Ordering::Relaxed);
+                        self.video_file_size.store(largest_size,        Ordering::Relaxed);
+                        info!("[torrent] Video file: {} ({} bytes, file_id={})",
+                              path, largest_size, largest_idx);
 
                         let total_pieces = metadata.lengths().total_pieces() as u32;
                         let piece_len    = metadata.lengths().default_piece_length() as u64;
@@ -326,6 +355,18 @@ impl TorrentSession {
     pub async fn stop(&self) {
         let _ = self.stop_tx.send(true);
         self.state.store(STATE_IDLE, Ordering::Relaxed);
+        // Clear handle so http_server stops creating new FileStreams
+        *self.torrent_handle.write() = None;
+        self.video_file_id.store(-1, Ordering::Relaxed);
+    }
+
+    /// Returns (handle, file_id) when the torrent is ready to stream.
+    /// http_server calls handle.clone().stream(file_id) → FileStream.
+    pub fn stream_info(&self) -> Option<(Arc<ManagedTorrent>, usize)> {
+        let id = self.video_file_id.load(Ordering::Relaxed);
+        if id < 0 { return None; }
+        let h = self.torrent_handle.read().clone()?;
+        Some((h, id as usize))
     }
 
     pub fn status(&self) -> TorrentStatus {

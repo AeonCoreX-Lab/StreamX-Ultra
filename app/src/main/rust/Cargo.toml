@@ -60,7 +60,7 @@ parking_lot = "0.12"
 #   Add disable-upload → streaming-only app; saves battery + bandwidth.
 #   Everything else (piece download, DHT, tracker, magnet parsing) is always on.
 #
-librqbit = { version = "9.0.0-rc.0", default-features = false, features = ["rust-tls", "disable-upload"] }
+librqbit = { git = "https://github.com/ikatson/rqbit", branch = "main", default-features = false, features = ["rust-tls", "disable-upload"] }
 
 # ── Local HTTP server ──────────────────────────────────────────────────────────
 hyper          = { version = "1", features = ["server", "http1"] }
