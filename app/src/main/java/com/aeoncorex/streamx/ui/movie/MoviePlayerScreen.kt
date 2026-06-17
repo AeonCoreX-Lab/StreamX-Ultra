@@ -351,6 +351,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var seeds              by remember { mutableIntStateOf(0) }
     var torrentProgress    by remember { mutableIntStateOf(0) }
     var isSurfaceReady     by remember { mutableStateOf(false) }
+    // Tracks which URL playMpvVideo() was last called for.
+    // Prevents stale MPV state (from a previous video) from prematurely
+    // hiding the loading overlay before the new file is actually ready.
+    var mpvPath            by remember { mutableStateOf<String?>(null) }
     var surfaceW           by remember { mutableIntStateOf(0) }
     var surfaceH           by remember { mutableIntStateOf(0) }
     var isControlsVisible  by remember { mutableStateOf(true) }
@@ -430,13 +434,15 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         }
                         TorrentEngine.State.BUFFERING -> { isPreBuffering = true; torrentProgress = status.progress; statusMsg = "Buffering ${status.progress}%"; downloadSpeed = "${status.speedBps / 1000} KB/s"; seeds = status.seeds; metadataTimeout = 0 }
                         TorrentEngine.State.READY  -> {
-                            // Keep pre-buffer overlay visible until MPV actually loads.
-                            // isPreBuffering is cleared by the time-sync LaunchedEffect
-                            // only when getMpvDuration() > 0 or getMpvTime() > 0.5 s.
-                            // This prevents the "00:00 / 00:00" flash that occurred when
-                            // videoPath became non-null before MPV had parsed the file.
                             videoPath = status.streamUrl
-                            statusMsg = "Opening video…"
+                            // DO NOT set isPreBuffering = false here.
+                            // The overlay stays visible until the time-sync
+                            // loop confirms MPV has actually loaded the file
+                            // (duration > 0 or playback has started).
+                            // Without this, the player would flash "00:00/00:00"
+                            // while MPV is still fetching the moov atom or
+                            // filling its initial cache.
+                            statusMsg = "Opening video\u2026"
                             completed = true
                         }
                         TorrentEngine.State.ERROR  -> { statusMsg = "Error: Torrent engine failed"; isPreBuffering = false; completed = true }
@@ -446,13 +452,23 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 }
                 if (completed) break; retryCount++; delay(2000)
             } else {
-                    videoPath = decodedUrl
-                    statusMsg = "Opening video…"
-                    // isPreBuffering cleared by time-sync when MPV loads
-                    break
-                }
+                // Direct stream URL (not magnet) — overlay still stays until
+                // MPV confirms it has loaded (handled in time-sync below).
+                videoPath = decodedUrl
+                statusMsg = "Opening video\u2026"
+                break
+            }
         }
         if (retryCount == maxRetries) statusMsg = "Failed after $maxRetries retries."
+    }
+
+    // Reset stale tracking whenever videoPath changes (new torrent / new URL).
+    // This prevents old MPV duration/time values from prematurely dismissing
+    // the loading overlay before the new file has actually been opened.
+    LaunchedEffect(videoPath) {
+        mpvPath       = null
+        currentTime   = 0.0
+        totalDuration = 0.0
     }
 
     // ── Start playback ────────────────────────────────────────────
@@ -460,6 +476,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         val path = videoPath ?: return@LaunchedEffect
         if (!isSurfaceReady) return@LaunchedEffect
         try { StreamXCore.playMpvVideo(path) } catch (e: Exception) { Log.e("MPV", "playMpvVideo: ${e.message}"); return@LaunchedEffect }
+        // Record that playMpvVideo was called for `path`. The time-sync loop
+        // only clears the loading overlay once mpvPath == videoPath, ensuring
+        // we never dismiss the overlay on stale values from a previous video.
+        withContext(Dispatchers.Main) { mpvPath = path }
         delay(200)
         if (surfaceW > 0 && surfaceH > 0) try { StreamXCore.setMpvSurfaceSize(surfaceW, surfaceH) } catch (e: Exception) {}
 
@@ -481,9 +501,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     // During the restart gap the poll is dead.  Worse, while(isPlaying)
     // means polling STOPS when paused — slider freezes, currentTime stale.
     //
-    // FIX: LaunchedEffect(Unit) lives for the full composition lifetime.
-    // getMpvTime() is accurate even when paused, so the slider always shows
-    // the correct position.  Playhead is also fed back to Rust piece-picker.
+    // ── Time sync — always-running, 250 ms poll ───────────────────
+    // LaunchedEffect(Unit) lives for the full composition lifetime.
+    // getMpvTime() is accurate even when paused, so the slider always
+    // shows the correct position. Playhead fed back to Rust piece-picker.
     LaunchedEffect(Unit) {
         while (true) {
             if (!isSeeking) {
@@ -495,16 +516,22 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             if (t >= 0.0) currentTime = t
                             if (d > 0.0)  totalDuration = d
 
-                            // ── KEY FIX: Hide pre-buffer overlay when MPV has loaded ──
-                            // isPreBuffering is NOT cleared at STATE_READY anymore.
-                            // It is cleared HERE, only when MPV confirms it has data:
-                            //   d > 0  → container header parsed, duration known
-                            //             (MKV: immediate; MP4 moov: after priority download)
-                            //   t > 0.5 → playback has started even without duration
-                            //             (e.g. live TS stream, or fallback after moov timeout)
-                            // Until one of these fires, the pre-buffer overlay stays visible
-                            // with "Opening video…" — user never sees "00:00 / 00:00".
-                            if (isPreBuffering && (d > 0.0 || t > 0.5)) {
+                            // ── Loading overlay dismiss gate ────────────────
+                            // Only clear isPreBuffering when ALL of:
+                            //  1. mpvPath == videoPath  → playMpvVideo() was
+                            //     called for THIS path, not a previous video.
+                            //     Without this check, stale MPV duration/time
+                            //     from a previous session would immediately
+                            //     dismiss the overlay before the new file loads.
+                            //  2. d > 0.0  → container header parsed, duration
+                            //     known (MKV: ~instant; MP4 moov: after
+                            //     FileStream priority-downloads tail pieces).
+                            //  3. OR t > 0.5  → playback started even without
+                            //     duration (live TS, fallback after moov timeout)
+                            if (isPreBuffering
+                                    && mpvPath != null
+                                    && mpvPath == videoPath
+                                    && (d > 0.0 || t > 0.5)) {
                                 isPreBuffering = false
                                 statusMsg      = ""
                             }
@@ -631,11 +658,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         if (forwardAnimAlpha > 0) Box(Modifier.align(Alignment.CenterEnd).padding(50.dp).alpha(forwardAnimAlpha).background(Color.Black.copy(0.5f), CircleShape).padding(16.dp)) { Icon(Icons.Rounded.FastForward, null, tint = Color.White, modifier = Modifier.size(40.dp)) }
 
         // Pre-buffer overlay
-        // FIX: was "isPreBuffering && videoPath == null" — but videoPath becomes
-        // non-null at STATE_READY, BEFORE MPV has loaded the file. This caused
-        // the overlay to hide prematurely, showing "00:00/00:00" to the user.
-        // Now: overlay stays visible until isPreBuffering is explicitly cleared
-        // by the time-sync loop once MPV reports duration > 0 or time > 0.5 s.
+        // FIX: was 'isPreBuffering && videoPath == null' which hid the overlay
+        // the moment STATE_READY set videoPath, before MPV loaded anything.
+        // Now: overlay stays until time-sync confirms d>0 or t>0.5.
         if (isPreBuffering) {
             Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
@@ -699,8 +724,11 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         }
 
         // ── Player controls ───────────────────────────────────────
-        // FIX: was "!isPreBuffering || videoPath != null" — showed controls as soon
-        // as videoPath was set (STATE_READY), even while MPV was still loading.
+        // FIX: was '!isPreBuffering || videoPath != null' — showed controls
+        // immediately when videoPath became non-null (STATE_READY), even
+        // before MPV had loaded the file. Player showed "00:00 / 00:00".
+        // Now: controls only shown when isPreBuffering is explicitly cleared
+        // by the time-sync loop (mpvPath==videoPath AND duration/time > 0).
         if (!isPreBuffering) {
             AnimatedVisibility(
                 visible = isControlsVisible && !showSettingsMenu,
