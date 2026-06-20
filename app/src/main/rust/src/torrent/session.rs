@@ -158,13 +158,13 @@ impl TorrentSession {
         };
 
         let rq_session = match Session::new_with_opts(save_dir.clone().into(), session_opts).await {
-            Ok(s)  => Arc::new(s),
+            Ok(s)  => s,   // Session::new_with_opts returns Arc<Session> directly
             Err(e) => {
                 warn!("[torrent] Session::new_with_opts failed: {}", e);
                 // Fallback: try without custom opts (older librqbit v9 builds
                 // where SessionOptions fields differ)
                 match Session::new(save_dir.clone().into()).await {
-                    Ok(s)  => { warn!("[torrent] Using default session opts (fallback)"); Arc::new(s) }
+                    Ok(s)  => { warn!("[torrent] Using default session opts (fallback)"); s }
                     Err(e2) => {
                         warn!("[torrent] Session fallback also failed: {}", e2);
                         self.state.store(STATE_ERROR, Ordering::Relaxed);
@@ -175,6 +175,7 @@ impl TorrentSession {
         };
 
         // Store librqbit session so http_server can use Api::api_stream
+        // rq_session is Arc<Session> — store as-is, no extra Arc wrap.
         *self.rq_session.write() = Some(rq_session.clone());
 
         // Add torrent

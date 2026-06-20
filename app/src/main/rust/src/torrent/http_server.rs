@@ -21,18 +21,18 @@
 //!   Result: MPV always receives correct bytes, duration is detected for all
 //!   formats, "00:00" never appears.
 
-use std::{net::SocketAddr, sync::Arc, convert::Infallible};
+use std::{net::SocketAddr, sync::Arc};
 
 use bytes::Bytes;
 use futures::StreamExt;          // needed for .map() on ReaderStream → StreamBody
-use http::{Method, StatusCode};
-use http::header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, RANGE};
+use hyper::http::{Method, StatusCode};
+use hyper::http::header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, RANGE};
 use http_body_util::{BodyExt, Full, StreamBody, combinators::BoxBody};
 use hyper::{Request, Response, body::Frame};
 use parking_lot::RwLock;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
-use tracing::{info, warn};
+use log::{info, warn};
 
 use librqbit::api::{Api, TorrentIdOrHash};
 use crate::torrent::session::TorrentSession;
@@ -42,8 +42,7 @@ type RespBody = BoxBody<Bytes, std::io::Error>;
 
 fn full_body(b: Bytes) -> RespBody {
     Full::new(b)
-        .map_err(|e: Infallible| match e {})
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::Other))
         .boxed()
 }
 
