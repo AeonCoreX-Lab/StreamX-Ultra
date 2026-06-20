@@ -96,8 +96,15 @@ pub struct TorrentSession {
     //   • Wakes via wake_streams_on_piece_completed()             → no polling
     // This replaces ALL of: disk I/O, wait_for_bytes, 503/416, progress_bytes guard.
     torrent_handle:      RwLock<Option<Arc<ManagedTorrent>>>,
-    video_file_id:       AtomicI32,    // index in torrent file list; -1 = not set
-    pub video_file_size: AtomicU64,    // total bytes of video file (from metadata)
+    video_file_id:       AtomicI32,
+    pub video_file_size: AtomicU64,
+
+    // librqbit Session + TorrentId: used by http_server to call
+    // Api::new(rq_session).api_stream(torrent_id, file_id)
+    // This is librqbit's own streaming which handles piece priority
+    // and blocking correctly — no custom disk reading needed.
+    rq_session:     RwLock<Option<Arc<Session>>>,
+    torrent_id_val: AtomicI32,   // TorrentId (usize) from AddTorrentResponse; -1 = unset
 
     stop_tx:        tokio::sync::watch::Sender<bool>,
     stop_rx:        tokio::sync::watch::Receiver<bool>,
@@ -118,6 +125,8 @@ impl TorrentSession {
             torrent_handle:  RwLock::new(None),
             video_file_id:   AtomicI32::new(-1),
             video_file_size: AtomicU64::new(0),
+            rq_session:      RwLock::new(None),
+            torrent_id_val:  AtomicI32::new(-1),
             stop_tx,
             stop_rx,
         }
@@ -165,6 +174,9 @@ impl TorrentSession {
             }
         };
 
+        // Store librqbit session so http_server can use Api::api_stream
+        *self.rq_session.write() = Some(rq_session.clone());
+
         // Add torrent
         let mut opts   = AddTorrentOptions::default();
         opts.overwrite = true;
@@ -181,14 +193,17 @@ impl TorrentSession {
             }
         };
 
-        let handle = match add_response {
-            AddTorrentResponse::Added(_, h) | AddTorrentResponse::AlreadyManaged(_, h) => h,
+        let (torrent_id, handle) = match add_response {
+            AddTorrentResponse::Added(id, h)         => (id, h),
+            AddTorrentResponse::AlreadyManaged(id, h) => (id, h),
             AddTorrentResponse::ListOnly(_) => {
                 warn!("[torrent] List-only response — cannot stream");
                 self.state.store(STATE_ERROR, Ordering::Relaxed);
                 return;
             }
         };
+        // Store torrent_id so http_server can call api_stream(torrent_id, file_id)
+        self.torrent_id_val.store(torrent_id as i32, Ordering::Relaxed);
 
         // Store handle immediately so http_server can call handle.stream(file_id)
         // once file_id is known (set below when metadata arrives).
@@ -355,18 +370,29 @@ impl TorrentSession {
     pub async fn stop(&self) {
         let _ = self.stop_tx.send(true);
         self.state.store(STATE_IDLE, Ordering::Relaxed);
-        // Clear handle so http_server stops creating new FileStreams
         *self.torrent_handle.write() = None;
-        self.video_file_id.store(-1, Ordering::Relaxed);
+        *self.rq_session.write()     = None;
+        self.video_file_id.store(-1,  Ordering::Relaxed);
+        self.torrent_id_val.store(-1, Ordering::Relaxed);
     }
 
     /// Returns (handle, file_id) when the torrent is ready to stream.
-    /// http_server calls handle.clone().stream(file_id) → FileStream.
     pub fn stream_info(&self) -> Option<(Arc<ManagedTorrent>, usize)> {
         let id = self.video_file_id.load(Ordering::Relaxed);
         if id < 0 { return None; }
         let h = self.torrent_handle.read().clone()?;
         Some((h, id as usize))
+    }
+
+    /// Returns (rq_session, torrent_id, file_id) for use with
+    /// Api::new(session).api_stream(torrent_id, file_id).
+    /// This uses librqbit's own streaming (piece priority + blocking).
+    pub fn api_stream_info(&self) -> Option<(Arc<Session>, usize, usize)> {
+        let tid = self.torrent_id_val.load(Ordering::Relaxed);
+        let fid = self.video_file_id.load(Ordering::Relaxed);
+        if tid < 0 || fid < 0 { return None; }
+        let sess = self.rq_session.read().clone()?;
+        Some((sess, tid as usize, fid as usize))
     }
 
     pub fn status(&self) -> TorrentStatus {

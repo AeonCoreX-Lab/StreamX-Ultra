@@ -163,7 +163,9 @@ void init_mpv_engine(JNIEnv* env, jobject appctx) {
     mpv_set_option_string(mpv_ctx, "stream-buffer-size",     "4MiB");
 
     // ── Network ───────────────────────────────────────────────────
-    mpv_set_option_string(mpv_ctx, "network-timeout",       "30");
+    // Raised from 30→120 s: FileStream long-polls until pieces download.
+    // MPV must not timeout during that wait or the moov/cues seek fails.
+    mpv_set_option_string(mpv_ctx, "network-timeout",       "120");
     mpv_set_option_string(mpv_ctx, "network-timeout-delay", "3");
 
     // ── Subtitles ─────────────────────────────────────────────────
