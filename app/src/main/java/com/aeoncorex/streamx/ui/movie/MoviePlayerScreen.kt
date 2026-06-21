@@ -470,7 +470,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         val path = videoPath ?: return@LaunchedEffect
         if (!isSurfaceReady) return@LaunchedEffect
         try { StreamXCore.playMpvVideo(path) } catch (e: Exception) {
-            Log.e("MPV", "playMpvVideo: $\{e.message\}")
+            Log.e("MPV", "playMpvVideo: ${e.message}")
             return@LaunchedEffect
         }
         // Record that playMpvVideo was called for `path`.
