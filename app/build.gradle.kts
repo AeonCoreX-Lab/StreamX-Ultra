@@ -319,8 +319,8 @@ tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configu
 // ═══════════════════════════════════════════════════════════════════
 configurations.all {
     resolutionStrategy {
-        force("com.google.protobuf:protobuf-javalite:3.25.5")
-        force("com.google.protobuf:protobuf-kotlin:3.25.5")
+        force("com.google.protobuf:protobuf-javalite:4.35.1")
+        force("com.google.protobuf:protobuf-kotlin:4.35.1")
     }
     exclude(group = "com.google.protobuf", module = "protobuf-lite")
 }
@@ -330,7 +330,7 @@ dependencies {
 
     val media3Version = "1.10.1"
     val lifecycleVersion  = "2.8.0"
-    val protobufVersion   = "3.25.5"
+    val protobufVersion   = "4.35.1"
 
     // Core & Compose
     implementation("androidx.core:core-ktx:1.15.0")
@@ -352,7 +352,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
 
     // NewPipeExtractor
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.1") {
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.3") {
         exclude(group = "com.github.TeamNewPipe", module = "nanojson")
     }
     implementation("com.grack:nanojson:1.10")
