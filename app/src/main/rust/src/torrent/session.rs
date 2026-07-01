@@ -87,6 +87,9 @@ pub struct TorrentSession {
     playhead_bits:  AtomicU64,
     progress_bytes: AtomicU64,
     video_path:     RwLock<String>,
+    // Captures the actual error text whenever STATE_ERROR is set, so
+    // /debug can show WHY it failed without needing logcat.
+    last_error:     RwLock<String>,
 
     // ── FileStream support ─────────────────────────────────────────────────
     // Stores the ManagedTorrentHandle so http_server can call
@@ -122,6 +125,7 @@ impl TorrentSession {
             playhead_bits:   AtomicU64::new(0),
             progress_bytes:  AtomicU64::new(0),
             video_path:      RwLock::new(String::new()),
+            last_error:      RwLock::new(String::new()),
             torrent_handle:  RwLock::new(None),
             video_file_id:   AtomicI32::new(-1),
             video_file_size: AtomicU64::new(0),
@@ -167,6 +171,9 @@ impl TorrentSession {
                     Ok(s)  => { warn!("[torrent] Using default session opts (fallback)"); s }
                     Err(e2) => {
                         warn!("[torrent] Session fallback also failed: {}", e2);
+                        *self.last_error.write() = format!(
+                            "Session::new_with_opts failed: {e:#}\nSession::new fallback also failed: {e2:#}\nsave_dir={save_dir}"
+                        );
                         self.state.store(STATE_ERROR, Ordering::Relaxed);
                         return;
                     }
@@ -189,6 +196,7 @@ impl TorrentSession {
             Ok(r)  => r,
             Err(e) => {
                 warn!("[torrent] add_torrent failed: {}", e);
+                *self.last_error.write() = format!("add_torrent failed: {e:#}\nmagnet={magnet}");
                 self.state.store(STATE_ERROR, Ordering::Relaxed);
                 return;
             }
@@ -199,6 +207,7 @@ impl TorrentSession {
             AddTorrentResponse::AlreadyManaged(id, h) => (id, h),
             AddTorrentResponse::ListOnly(_) => {
                 warn!("[torrent] List-only response — cannot stream");
+                *self.last_error.write() = "AddTorrentResponse::ListOnly — magnet resolved to list-only, cannot stream".to_string();
                 self.state.store(STATE_ERROR, Ordering::Relaxed);
                 return;
             }
@@ -373,6 +382,7 @@ impl TorrentSession {
         self.state.store(STATE_IDLE, Ordering::Relaxed);
         *self.torrent_handle.write() = None;
         *self.rq_session.write()     = None;
+        *self.last_error.write()     = String::new();
         self.video_file_id.store(-1,  Ordering::Relaxed);
         self.torrent_id_val.store(-1, Ordering::Relaxed);
     }
@@ -420,12 +430,14 @@ impl TorrentSession {
         let fid   = self.video_file_id.load(Ordering::Relaxed);
         let has_s = self.rq_session.read().is_some();
         let has_h = self.torrent_handle.read().is_some();
+        let err   = self.last_error.read().clone();
         format!(
             "state={}\nprogress={}%\nspeed_bps={}\nseeds={}\npeers={}\n\
              video_path={:?}\nvideo_file_size={}\nprogress_bytes={}\n\
              torrent_id_val={}\nvideo_file_id={}\n\
              rq_session_set={}\ntorrent_handle_set={}\n\
-             api_stream_info_ready={}\n",
+             api_stream_info_ready={}\n\
+             last_error={}\n",
             self.state.load(Ordering::Relaxed),
             self.progress.load(Ordering::Relaxed),
             self.speed.load(Ordering::Relaxed),
@@ -436,6 +448,7 @@ impl TorrentSession {
             self.progress_bytes.load(Ordering::Relaxed),
             tid, fid, has_s, has_h,
             tid >= 0 && fid >= 0 && has_s,
+            if err.is_empty() { "(none)" } else { &err },
         )
     }
 }
