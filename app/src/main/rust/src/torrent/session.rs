@@ -44,9 +44,10 @@ use parking_lot::RwLock;
 use tokio::time::{sleep, Duration};
 use log::{info, warn, debug};
 use librqbit::{
-    AddTorrent, AddTorrentOptions, AddTorrentResponse, ListenerOptions,
+    AddTorrent, AddTorrentOptions, AddTorrentResponse, DhtSessionConfig, ListenerOptions,
     ManagedTorrent, Session, SessionOptions,
 };
+use librqbit::dht::DhtPersistenceConfig;
 
 use super::piece_picker::PiecePicker;
 use super::{
@@ -150,6 +151,30 @@ impl TorrentSession {
         //
         // peer_limit raises the per-session peer cap (new v9 field) so we
         // connect aggressively during buffering on well-seeded torrents.
+        // ── FIX (ROOT CAUSE): DHT persistence path ──────────────────────
+        // librqbit's DHT persistence defaults to `config_filename: None`,
+        // which triggers `directories::ProjectDirs::from("com","rqbit","dht")`
+        // to auto-detect an OS config directory via HOME/XDG env vars.
+        // Android apps are sandboxed and have no such env vars, so this
+        // call fails IMMEDIATELY — before any torrent/peer/socket logic
+        // ever runs. Session::new_with_opts() returns Err, and (until this
+        // fix) so did the fallback Session::new(), leaving state=ERROR
+        // with peers=0, seeds=0, rq_session_set=false — exactly matching
+        // what /debug showed.
+        //
+        // Fix: point DHT persistence at an explicit path inside save_dir,
+        // which we already know is writable (video files download there).
+        // This keeps persistence enabled (faster peer discovery across
+        // app restarts) while skipping OS-directory auto-detection.
+        let dht_json_path = std::path::PathBuf::from(&save_dir).join(".dht_state.json");
+        let dht_config = DhtSessionConfig {
+            persistence: Some(DhtPersistenceConfig {
+                config_filename: Some(dht_json_path),
+                ..DhtPersistenceConfig::default()
+            }),
+            ..DhtSessionConfig::default()
+        };
+
         let listen_opts = ListenerOptions {
             listen_addr: SocketAddr::from((Ipv4Addr::UNSPECIFIED, 16880u16)),
             ipv4_only: true,
@@ -158,6 +183,7 @@ impl TorrentSession {
         let session_opts = SessionOptions {
             listen: Some(listen_opts),
             peer_limit: Some(50),
+            dht: Some(dht_config),
             ..SessionOptions::default()
         };
 
@@ -165,10 +191,24 @@ impl TorrentSession {
             Ok(s)  => s,   // Session::new_with_opts returns Arc<Session> directly
             Err(e) => {
                 warn!("[torrent] Session::new_with_opts failed: {}", e);
-                // Fallback: try without custom opts (older librqbit v9 builds
-                // where SessionOptions fields differ)
-                match Session::new(save_dir.clone().into()).await {
-                    Ok(s)  => { warn!("[torrent] Using default session opts (fallback)"); s }
+                // Fallback: retry with minimal options, but KEEP the explicit
+                // DHT path fix — bare Session::new() also defaults to DHT
+                // persistence with auto-detected OS dirs, which would hit
+                // the exact same Android crash this fix addresses.
+                let fallback_opts = SessionOptions {
+                    dht: Some(DhtSessionConfig {
+                        persistence: Some(DhtPersistenceConfig {
+                            config_filename: Some(
+                                std::path::PathBuf::from(&save_dir).join(".dht_state.json")
+                            ),
+                            ..DhtPersistenceConfig::default()
+                        }),
+                        ..DhtSessionConfig::default()
+                    }),
+                    ..SessionOptions::default()
+                };
+                match Session::new_with_opts(save_dir.clone().into(), fallback_opts).await {
+                    Ok(s)  => { warn!("[torrent] Using minimal session opts (fallback)"); s }
                     Err(e2) => {
                         warn!("[torrent] Session fallback also failed: {}", e2);
                         *self.last_error.write() = format!(
