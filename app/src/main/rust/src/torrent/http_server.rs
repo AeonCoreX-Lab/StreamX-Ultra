@@ -72,6 +72,26 @@ pub async fn handle(
     session: Arc<RwLock<Option<Arc<TorrentSession>>>>,
 ) -> Result<Response<RespBody>, hyper::Error> {
 
+    // ── /debug ────────────────────────────────────────────────────────────
+    // curl http://127.0.0.1:8088/debug — dumps internal session state
+    // immediately (no 10 s wait). Use this to see exactly which field is
+    // unset when /stream returns 503, without needing logcat.
+    if req.uri().path() == "/debug" {
+        let dump = {
+            let g = session.read();
+            match g.as_ref() {
+                Some(s) => s.debug_dump(),
+                None    => "session=NONE (TorrentSession not created yet — \
+                            engine.start() was never called or already stopped)\n".to_string(),
+            }
+        };
+        return Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, "text/plain")
+            .body(full_body(Bytes::from(dump)))
+            .unwrap());
+    }
+
     if req.uri().path() != "/stream" {
         return Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)

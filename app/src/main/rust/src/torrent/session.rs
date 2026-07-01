@@ -411,4 +411,31 @@ impl TorrentSession {
     pub fn set_playhead(&self, secs: f64) {
         self.playhead_bits.store(secs.to_bits(), Ordering::Relaxed);
     }
+
+    /// Dumps every relevant internal field as a human-readable string.
+    /// Used by the /debug HTTP endpoint so we can `curl` the exact state
+    /// of the torrent session without needing logcat.
+    pub fn debug_dump(&self) -> String {
+        let tid   = self.torrent_id_val.load(Ordering::Relaxed);
+        let fid   = self.video_file_id.load(Ordering::Relaxed);
+        let has_s = self.rq_session.read().is_some();
+        let has_h = self.torrent_handle.read().is_some();
+        format!(
+            "state={}\nprogress={}%\nspeed_bps={}\nseeds={}\npeers={}\n\
+             video_path={:?}\nvideo_file_size={}\nprogress_bytes={}\n\
+             torrent_id_val={}\nvideo_file_id={}\n\
+             rq_session_set={}\ntorrent_handle_set={}\n\
+             api_stream_info_ready={}\n",
+            self.state.load(Ordering::Relaxed),
+            self.progress.load(Ordering::Relaxed),
+            self.speed.load(Ordering::Relaxed),
+            self.seeds.load(Ordering::Relaxed),
+            self.peers.load(Ordering::Relaxed),
+            self.video_path.read().clone(),
+            self.video_file_size.load(Ordering::Relaxed),
+            self.progress_bytes.load(Ordering::Relaxed),
+            tid, fid, has_s, has_h,
+            tid >= 0 && fid >= 0 && has_s,
+        )
+    }
 }
