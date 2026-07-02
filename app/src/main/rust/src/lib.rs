@@ -16,6 +16,7 @@
 
 mod torrent;
 mod jsengine;
+mod indexer;
 
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
@@ -192,7 +193,108 @@ fn percent_encode(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }
 
-// ── JNI helper ────────────────────────────────────────────────────────────────
+// ── ⑤ Indexer — Jackett-style multi-site torrent search ──────────────────────
+//
+// Called from IndexerNative.kt (new, mirrors StreamXNative.kt's pattern).
+// Searches 1337x, TorrentGalaxy, KickassTorrents, TorrentDownload in parallel
+// for dubbed/dual-audio releases and returns them as a JSON array.
+//
+// IMPORTANT: this function ONLY searches and returns magnet URIs — it does
+// NOT start playback. Kotlin takes the chosen result's `magnet` field and
+// passes it to the EXISTING TorrentEngine.startNative(magnet, saveDir) call,
+// exactly like it already does for YTS results. No torrent/session.rs or
+// http_server.rs changes were needed for this to work.
+//
+// Reuses TorrentEngineHandle's tokio runtime (same as nativeAddonFetchStreams)
+// rather than spinning up a second one.
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_nativeSearchDubbed(
+    mut env:     JNIEnv,
+    _cls:        JClass,
+    j_query:     JString,
+    j_imdb_id:   JString, // pass empty string "" if unavailable
+) -> jstring {
+    let query   = jstr(&mut env, j_query);
+    let imdb_id = jstr(&mut env, j_imdb_id);
+    let imdb_opt: Option<&str> = if imdb_id.is_empty() { None } else { Some(&imdb_id) };
+
+    let json = TorrentEngineHandle::get().rt.block_on(async {
+        indexer::engine::search_dubbed_json(&query, imdb_opt).await
+    });
+
+    env.new_string(json).expect("JNI string").into_raw()
+}
+
+// Plain keyword search, no dub filtering — used for the English/original
+// language path in TorrentRepository.kt (replaces the old broken
+// fetch1337x(englishQuery) call).
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_nativeSearchAll(
+    mut env:  JNIEnv,
+    _cls:     JClass,
+    j_query:  JString,
+) -> jstring {
+    let query = jstr(&mut env, j_query);
+
+    let json = TorrentEngineHandle::get().rt.block_on(async {
+        indexer::engine::search_all_json(&query).await
+    });
+
+    env.new_string(json).expect("JNI string").into_raw()
+}
+
+// ── Drama (K-drama / C-drama / Turkish drama) ─────────────────────────────────
+// Returns BOTH original-voice and dubbed releases together; Kotlin filters
+// by result.audioTags client-side for "Original" vs "English Dub" chips —
+// same pattern as searchDubbed()/searchAll() above.
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_nativeSearchDrama(
+    mut env:  JNIEnv,
+    _cls:     JClass,
+    j_query:  JString,
+) -> jstring {
+    let query = jstr(&mut env, j_query);
+
+    let json = TorrentEngineHandle::get().rt.block_on(async {
+        indexer::engine::search_drama_json(&query).await
+    });
+
+    env.new_string(json).expect("JNI string").into_raw()
+}
+
+// ── Anime — English dub/sub ────────────────────────────────────────────────
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_nativeSearchAnimeEnglish(
+    mut env:  JNIEnv,
+    _cls:     JClass,
+    j_query:  JString,
+) -> jstring {
+    let query = jstr(&mut env, j_query);
+
+    let json = TorrentEngineHandle::get().rt.block_on(async {
+        indexer::engine::search_anime_english_json(&query).await
+    });
+
+    env.new_string(json).expect("JNI string").into_raw()
+}
+
+// ── Anime — non-English dub/sub (Nyaa's "Non-English-translated" cat) ────────
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_nativeSearchAnimeOtherDub(
+    mut env:  JNIEnv,
+    _cls:     JClass,
+    j_query:  JString,
+) -> jstring {
+    let query = jstr(&mut env, j_query);
+
+    let json = TorrentEngineHandle::get().rt.block_on(async {
+        indexer::engine::search_anime_other_dub_json(&query).await
+    });
+
+    env.new_string(json).expect("JNI string").into_raw()
+}
+
+
 // Fixed back to `&mut JNIEnv` since `get_string` requires a mutable reference.
 fn jstr(env: &mut JNIEnv, s: JString) -> String {
     env.get_string(&s).map(|js| js.into()).unwrap_or_default()

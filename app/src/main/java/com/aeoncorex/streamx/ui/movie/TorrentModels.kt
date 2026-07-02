@@ -95,6 +95,27 @@ sealed class DubLanguage {
         override val torrentTerms   = listOf("1080p", "720p", "")
     }
 
+    object Korean : DubLanguage() {
+        override val label          = "Korean"
+        override val isNativeLang   = false
+        override val searchKeywords = listOf("Korean", "K-Drama", "KDrama")
+        override val torrentTerms   = listOf("1080p", "720p", "")
+    }
+
+    object Chinese : DubLanguage() {
+        override val label          = "Chinese"
+        override val isNativeLang   = false
+        override val searchKeywords = listOf("Chinese", "C-Drama", "CDrama", "Mandarin")
+        override val torrentTerms   = listOf("1080p", "720p", "")
+    }
+
+    object Turkish : DubLanguage() {
+        override val label          = "Turkish"
+        override val isNativeLang   = false
+        override val searchKeywords = listOf("Turkish", "Dizi", "Turkce")
+        override val torrentTerms   = listOf("1080p", "720p", "")
+    }
+
     object DualAudio : DubLanguage() {
         override val label          = "Dual Audio"
         override val isNativeLang   = false
@@ -111,6 +132,9 @@ sealed class DubLanguage {
             "kn", "kan", "kannada"   -> Kannada
             "ml", "mal", "malayalam" -> Malayalam
             "ja", "jpn", "japanese"  -> Japanese
+            "ko", "kor", "korean"    -> Korean
+            "zh", "chi", "chinese"   -> Chinese
+            "tr", "tur", "turkish"   -> Turkish
             "dual"                   -> DualAudio
             else                     -> English
         }

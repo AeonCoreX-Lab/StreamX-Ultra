@@ -35,9 +35,15 @@ interface YtsApi {
 //  TorrentRepository — Aggregates all torrent sources
 //  ──────────────────────────────────────────────────────────────────
 //  [dubLang] DubLanguage.English ছাড়া অন্য কিছু হলে:
-//    → TorrentProviders.fetchDubbed() call হয় যা Hindi/Tamil/etc.
-//      specific queries দিয়ে 1337x + TPB + TorrentGalaxy search করে।
-//    → YTS থেকেও আলাদা dubbed query চেষ্টা করা হয়।
+//    → IndexerNative.searchDubbed() (Rust) call হয়, যেটা 1337x + TGx +
+//      KAT + TorrentDownload সবকটা একসাথে parallel search করে এবং
+//      title-এ Hindi/Tamil/Dual Audio ইত্যাদি tag থাকা result গুলোই
+//      ফিরিয়ে দেয়।
+//    → TorrentCSV, SolidTorrents, TPB, EZTV/NYAA ও একই সাথে parallel
+//      ভাবে চলে dubbed queries দিয়ে (DubQueryBuilder থেকে আসা)।
+//    → পুরনো TorrentProviders.fetchDubbed()/fetch1337x()/
+//      fetchTorrentGalaxy()/fetchKAT() সরিয়ে ফেলা হয়েছে (dead/broken
+//      code — stale URL ও selector, verified against Jackett source)।
 // ═══════════════════════════════════════════════════════════════════
 
 object TorrentRepository {
@@ -137,36 +143,38 @@ object TorrentRepository {
                     withTimeoutOrNull(12_000) { TorrentProviders.fetchSolidTorrents(q1) } ?: emptyList()
                 })
 
-                // TorrentGalaxy — best for Hindi/South Indian dubs
-                // Two query variants in parallel (different keyword combos)
+                // ── Rust indexer (replaces broken Kotlin scrapers) ──────
+                // FIX: TorrentProviders.fetch1337x() / fetchTorrentGalaxy() /
+                // fetchKAT() used stale URLs and dead CSS selectors — none
+                // of the three ever returned results (only YTS worked).
+                // Root cause verified against Jackett's current indexer
+                // definitions: 1337x moved to sort-search/{q}/seeders/desc/,
+                // TorrentGalaxy moved to get-posts/keywords:{q}, and the KAT
+                // mirrors used here were dead/blocking. The Rust indexer
+                // (app/src/main/rust/src/indexer/) ports Jackett's verified
+                // selectors 1:1 and additionally covers TorrentDownload.
+                // One JNI call replaces the three broken jobs below.
                 jobs.add(async {
-                    withTimeoutOrNull(15_000) { TorrentProviders.fetchTorrentGalaxy(q1) } ?: emptyList()
+                    withTimeoutOrNull(25_000) {
+                        IndexerNative.searchDubbed(q1, imdbId).map { it.toStreamLink() }
+                    } ?: emptyList()
                 })
-                jobs.add(async {
-                    if (q2 != q1)
-                        withTimeoutOrNull(15_000) { TorrentProviders.fetchTorrentGalaxy(q2) } ?: emptyList()
-                    else emptyList()
-                })
+                if (q2 != q1) {
+                    jobs.add(async {
+                        withTimeoutOrNull(25_000) {
+                            IndexerNative.searchDubbed(q2, imdbId).map { it.toStreamLink() }
+                        } ?: emptyList()
+                    })
+                }
 
-                // TPB via apibay JSON — fast, great for Dual Audio
-                jobs.add(async {
-                    withTimeoutOrNull(12_000) { TorrentProviders.fetchTPB(q1) } ?: emptyList()
-                })
-                jobs.add(async {
-                    if (q2 != q1)
-                        withTimeoutOrNull(12_000) { TorrentProviders.fetchTPB(q2) } ?: emptyList()
-                    else emptyList()
-                })
-
-                // 1337x — each result needs a detail page fetch; allow more time
-                jobs.add(async {
-                    withTimeoutOrNull(25_000) { TorrentProviders.fetch1337x(q1) } ?: emptyList()
-                })
-
-                // KAT — good for South Asian dubs
-                jobs.add(async {
-                    withTimeoutOrNull(15_000) { TorrentProviders.fetchKAT(q1) } ?: emptyList()
-                })
+                // TPB REMOVED from here — now handled inside
+                // IndexerNative.searchDubbed() via Rust's tpb.rs
+                // (Jackett-verified apibay.org JSON API, same endpoint
+                // this Kotlin version used, but with proper IMDB-field
+                // filtering and CJK/apostrophe query cleanup that
+                // TorrentProviders.fetchTPB() didn't do). No separate
+                // Kotlin call needed — it's already part of the single
+                // IndexerNative.searchDubbed(q1, imdbId) call above.
 
                 // BitSearch — general fallback
                 jobs.add(async {
@@ -183,6 +191,10 @@ object TorrentRepository {
                 }
 
                 // NYAA + AnimeTosho for Japanese / Dual Audio
+                // Rust indexer's Nyaa module added alongside — its own
+                // category split (English-translated vs Non-English) is a
+                // stronger dub signal than the Kotlin fetchAnime()'s title
+                // parsing alone, so both run together and results merge.
                 if (dubLang is DubLanguage.Japanese || dubLang is DubLanguage.DualAudio) {
                     jobs.add(async {
                         withTimeoutOrNull(12_000) { TorrentProviders.fetchAnime(title, episode) } ?: emptyList()
@@ -190,6 +202,35 @@ object TorrentRepository {
                     jobs.add(async {
                         withTimeoutOrNull(12_000) { TorrentProviders.fetchAnimeTosho(title, episode) } ?: emptyList()
                     })
+                    jobs.add(async {
+                        withTimeoutOrNull(15_000) {
+                            IndexerNative.searchAnimeEnglish(title).map { it.toStreamLink() }
+                        } ?: emptyList()
+                    })
+                }
+
+                // ── K-drama / C-drama / Turkish drama ────────────────
+                // These three don't fit the South-Asian "dubbed" model —
+                // most releases are original-voice-with-subs or explicitly
+                // English-dubbed, found via IndexerNative.searchDrama()
+                // (TorrentQQ/Torrentsome for Korean + general sites for
+                // Chinese/Turkish, filtered by title tags — see
+                // indexer/sites/kdrama.rs and indexer/types.rs).
+                if (dubLang is DubLanguage.Korean ||
+                    dubLang is DubLanguage.Chinese ||
+                    dubLang is DubLanguage.Turkish) {
+                    jobs.add(async {
+                        withTimeoutOrNull(20_000) {
+                            IndexerNative.searchDrama(q1).map { it.toStreamLink() }
+                        } ?: emptyList()
+                    })
+                    if (q2 != q1) {
+                        jobs.add(async {
+                            withTimeoutOrNull(20_000) {
+                                IndexerNative.searchDrama(q2).map { it.toStreamLink() }
+                            } ?: emptyList()
+                        })
+                    }
                 }
 
             } else {
@@ -202,6 +243,12 @@ object TorrentRepository {
                     })
                     jobs.add(async {
                         try { TorrentProviders.fetchAnimeTosho(title, episode) }
+                        catch (e: Exception) { emptyList() }
+                    })
+                    // Rust Nyaa source — English-translated category,
+                    // stronger dub/sub signal than title-only parsing.
+                    jobs.add(async {
+                        try { IndexerNative.searchAnimeEnglish(title).map { it.toStreamLink() } }
                         catch (e: Exception) { emptyList() }
                     })
                 }
@@ -223,9 +270,13 @@ object TorrentRepository {
                     else -> title
                 }
 
+                // FIX: same broken fetch1337x() as the dubbed path above —
+                // stale URL/selectors, never returned results. Uses the
+                // Rust indexer's plain search (no dub-tag filtering) here.
                 jobs.add(async {
-                    try { TorrentProviders.fetch1337x(englishQuery) }
-                    catch (e: Exception) { emptyList() }
+                    try {
+                        IndexerNative.searchAll(englishQuery).map { it.toStreamLink() }
+                    } catch (e: Exception) { emptyList() }
                 })
                 jobs.add(async {
                     try { TorrentProviders.fetchBitSearch(englishQuery) }
