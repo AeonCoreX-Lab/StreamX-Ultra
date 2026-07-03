@@ -27,7 +27,7 @@ use anyhow::Result;
 use scraper::{Html, Selector};
 use crate::indexer::types::TorrentResult;
 
-const MIRRORS: &[&str] = &[
+const MIRRORS_FALLBACK: &[&str] = &[
     "https://nyaa.si",
     "https://nyaa.land",
 ];
@@ -39,27 +39,28 @@ const CAT_ALL_ANIME: &str = "1_0";
 
 /// Search anime with English dub/sub — Nyaa's own "English-translated"
 /// category, sorted by seeders so healthy swarms surface first.
-pub async fn search_english(client: &reqwest::Client, query: &str) -> Vec<TorrentResult> {
-    fetch_category(client, query, CAT_ENGLISH_TRANSLATED, "English").await
+pub async fn search_english(client: &reqwest::Client, mirrors: &[String], query: &str) -> Vec<TorrentResult> {
+    fetch_category(client, mirrors, query, CAT_ENGLISH_TRANSLATED, "English").await
 }
 
 /// Search anime dubbed/subbed into a non-English language (Nyaa doesn't
 /// split further than this — individual language is parsed from title
 /// afterwards via TorrentResult::parse_tags, e.g. "Spanish", "German").
-pub async fn search_other_dub(client: &reqwest::Client, query: &str) -> Vec<TorrentResult> {
-    fetch_category(client, query, CAT_NON_ENGLISH_TRANSLATED, "Other").await
+pub async fn search_other_dub(client: &reqwest::Client, mirrors: &[String], query: &str) -> Vec<TorrentResult> {
+    fetch_category(client, mirrors, query, CAT_NON_ENGLISH_TRANSLATED, "Other").await
 }
 
 /// Plain search across all anime categories, no translation filter —
 /// used when the caller wants raw + subbed + dubbed all together.
-pub async fn search(client: &reqwest::Client, query: &str) -> Vec<TorrentResult> {
-    fetch_category(client, query, CAT_ALL_ANIME, "").await
+pub async fn search(client: &reqwest::Client, mirrors: &[String], query: &str) -> Vec<TorrentResult> {
+    fetch_category(client, mirrors, query, CAT_ALL_ANIME, "").await
 }
 
 // ── Internal ─────────────────────────────────────────────────────────────────
 
 async fn fetch_category(
     client:    &reqwest::Client,
+    mirrors:   &[String],
     query:     &str,
     cat:       &str,
     tag_hint:  &str,
@@ -68,17 +69,24 @@ async fn fetch_category(
     // s=seeders&o=desc → sort by seeders descending (healthiest swarms first)
     let path = format!("/?q={q}&c={cat}&f=0&s=seeders&o=desc");
 
-    let mut results = fetch_results(client, &path, tag_hint).await.unwrap_or_default();
+    let effective_mirrors = if mirrors.is_empty() {
+        MIRRORS_FALLBACK.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+    } else {
+        mirrors.to_vec()
+    };
+
+    let mut results = fetch_results(client, &effective_mirrors, &path, tag_hint).await.unwrap_or_default();
     results.sort_by(|a, b| b.seeds.cmp(&a.seeds));
     results
 }
 
 async fn fetch_results(
     client:    &reqwest::Client,
+    mirrors:   &[String],
     path:      &str,
     tag_hint:  &str,
 ) -> Result<Vec<TorrentResult>> {
-    let html = get_html_with_fallback(client, path).await?;
+    let html = get_html_with_fallback(client, mirrors, path).await?;
     let doc  = Html::parse_document(&html);
 
     // Jackett: rows = tr.default, tr.danger, tr.success
@@ -160,8 +168,8 @@ async fn get_html(client: &reqwest::Client, url: &str) -> Result<String> {
     Ok(resp.text().await?)
 }
 
-async fn get_html_with_fallback(client: &reqwest::Client, path: &str) -> Result<String> {
-    for mirror in MIRRORS {
+async fn get_html_with_fallback(client: &reqwest::Client, mirrors: &[String], path: &str) -> Result<String> {
+    for mirror in mirrors {
         let url = format!("{mirror}{path}");
         match get_html(client, &url).await {
             Ok(html) => return Ok(html),

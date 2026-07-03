@@ -104,6 +104,11 @@ object StreamXCore {
     @JvmStatic external fun getMpvCachePercent(): Int
     @JvmStatic external fun isMpvPausedForCache(): Boolean
     @JvmStatic external fun getTrackListNative(type: String): String
+    @JvmStatic external fun checkDecodeCompat()
+    @JvmStatic external fun getDecodeModeLabel(): String
+    @JvmStatic external fun getDecodeDiagInfo(): String
+    @JvmStatic external fun setForceSwDecode(force: Boolean)
+    @JvmStatic external fun getForceSwDecode(): Boolean
 
     fun cycleSubtitles()                 = commandNative(arrayOf("cycle", "sub"))
     fun cycleAudio()                     = commandNative(arrayOf("cycle", "audio"))
@@ -213,6 +218,7 @@ fun openLiveCaptionSettings(context: Context) {
 
 private const val PREFS_NAME   = "streamx_prefs"
 private const val PREF_SUB_LANG = "sub_lang_code"
+private const val PREF_FORCE_SW_DECODE = "force_sw_decode"
 
 fun getSavedSubLang(context: Context): SubtitleLanguage {
     val code = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(PREF_SUB_LANG, "eng") ?: "eng"
@@ -221,6 +227,21 @@ fun getSavedSubLang(context: Context): SubtitleLanguage {
 
 fun saveSubLang(context: Context, lang: SubtitleLanguage) {
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putString(PREF_SUB_LANG, lang.code).apply()
+}
+
+// ── Force-SW-decode persistence ─────────────────────────────────
+// Manual, per-device override for the residual class of broken HW
+// decoders that produce a black frame even on ordinary 8-bit content
+// — undetectable via pixel format or resolution heuristics. Once the
+// user enables this in Settings, EVERY future video on this device
+// starts in software decode mode automatically, with no re-detection
+// needed. This is read at player startup (see LaunchedEffect(Unit) in
+// MoviePlayerScreen) and applied via StreamXCore.setForceSwDecode().
+fun getSavedForceSwDecode(context: Context): Boolean =
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(PREF_FORCE_SW_DECODE, false)
+
+fun saveForceSwDecode(context: Context, force: Boolean) {
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putBoolean(PREF_FORCE_SW_DECODE, force).apply()
 }
 
 fun autoSubtitle(title: String, context: Context, onStatus: (String) -> Unit) {
@@ -355,6 +376,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     // Used to guard against stale MPV duration/time from a previous video
     // prematurely dismissing the loading overlay before the new file loads.
     var mpvPath            by remember { mutableStateOf<String?>(null) }
+    // Real-time HW/SW decode mode label for the settings UI.
+    // Updated from the same 250ms poll loop that already tracks time/duration.
+    var decodeModeLabel    by remember { mutableStateOf("\u2014") }
     var surfaceW           by remember { mutableIntStateOf(0) }
     var surfaceH           by remember { mutableIntStateOf(0) }
     var isControlsVisible  by remember { mutableStateOf(true) }
@@ -389,6 +413,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 
     // ── Init MPV + system UI ─────────────────────────────────────
     LaunchedEffect(Unit) {
+        // Apply the persisted "force software decode" override BEFORE
+        // initMpvEngine() — init_mpv_engine reads s_force_sw_decode to
+        // decide the very first hwdec setting, so this must happen first.
+        try { StreamXCore.setForceSwDecode(getSavedForceSwDecode(context)) } catch (e: Exception) {}
         try { StreamXCore.initMpvEngine(context.applicationContext) }
         catch (e: Exception) { Log.e("MPV", "Init failed", e) }
         activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
@@ -504,9 +532,18 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                     try {
                         val t = StreamXCore.getMpvTime()
                         val d = StreamXCore.getMpvDuration()
+
+                        // Dynamic HW/SW decode compatibility check.
+                        // No-op after the first file-load resolves (see
+                        // check_decode_compatibility() in mpv_handler.cpp) —
+                        // safe to call every tick.
+                        try { StreamXCore.checkDecodeCompat() } catch (e: Exception) {}
+                        val decMode = try { StreamXCore.getDecodeModeLabel() } catch (e: Exception) { "\u2014" }
+
                         withContext(Dispatchers.Main) {
                             if (t >= 0.0) currentTime = t
                             if (d > 0.0)  totalDuration = d
+                            decodeModeLabel = decMode
 
                             // ── Loading overlay dismiss gate ────────────────────
                             // Only clear isPreBuffering (show player) when:
@@ -826,6 +863,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 "SubLanguage" -> "Subtitle Language"
                                 "Audio"       -> "Audio Tracks"
                                 "LiveCaption" -> "Live Caption"
+                                "DecodeInfo"  -> "Decode Mode"
                                 else          -> "Settings"
                             }, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                         }
@@ -839,6 +877,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                         SettingsItem(Icons.Rounded.Translate,     "Sub Language",    selectedSubLang.flag + " " + selectedSubLang.label)   { activeSettingPage = "SubLanguage" }
                                         SettingsItem(Icons.Rounded.FormatSize,    "Subtitle Style",  "Color, size, font")                                  { activeSettingPage = "SubStyle" }
                                         SettingsItem(Icons.Rounded.LibraryMusic,  "Audio Track",     "Internal tracks")                                    { activeSettingPage = "Audio" }
+                                        // Live-updating decode mode — refreshed every 250ms by the
+                                        // time-sync poll loop (decodeModeLabel state var). Tapping
+                                        // opens a detail page with codec/pixel-format diagnostics.
+                                        SettingsItem(Icons.Rounded.Memory,        "Decode Mode",     decodeModeLabel)                                      { activeSettingPage = "DecodeInfo" }
                                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                                             SettingsItem(Icons.Rounded.ClosedCaption, "Live Caption", if (liveCaptionEnabled) "Enabled ✓" else "Tap to enable") { activeSettingPage = "LiveCaption" }
                                     }
@@ -905,6 +947,123 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                             isEnabled      = liveCaptionEnabled,
                                             onRefresh      = { liveCaptionEnabled = isLiveCaptionEnabled(context) },
                                             onOpenSettings = { openLiveCaptionSettings(context) }
+                                        )
+                                    }
+                                    "DecodeInfo" -> {
+                                        // diag = "<codec>|<pixelformat>|<hwdec-current>|<auto_switched>|<reason>"
+                                        // Recomputed on every recomposition of this page while it's
+                                        // visible, driven by decodeModeLabel changing every 250ms —
+                                        // so this stays live if the page is left open across a seek
+                                        // or a mid-playback auto-switch.
+                                        val diag = remember(decodeModeLabel) {
+                                            try { StreamXCore.getDecodeDiagInfo() } catch (e: Exception) { "" }
+                                        }
+                                        val parts        = diag.split("|")
+                                        val codec         = parts.getOrNull(0)?.ifBlank { "Unknown" } ?: "Unknown"
+                                        val pixfmt         = parts.getOrNull(1)?.ifBlank { "\u2014" } ?: "\u2014"
+                                        val hwdecCurrent   = parts.getOrNull(2) ?: ""
+                                        val autoSwitched   = parts.getOrNull(3) == "1"
+                                        val reason         = parts.getOrNull(4) ?: ""
+                                        val isHardware      = hwdecCurrent.isNotEmpty()
+
+                                        var forceSwEnabled by remember {
+                                            mutableStateOf(try { StreamXCore.getForceSwDecode() } catch (e: Exception) { false })
+                                        }
+
+                                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 14.dp)) {
+                                            Icon(
+                                                Icons.Rounded.Memory, null,
+                                                tint = if (isHardware) Color(0xFF4CAF50) else Color(0xFFFFA726),
+                                                modifier = Modifier.size(28.dp)
+                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                            Column {
+                                                Text(decodeModeLabel, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                                Text(
+                                                    if (isHardware) "Hardware-accelerated decoding" else "Software (CPU) decoding",
+                                                    color = Color.Gray, fontSize = 11.sp
+                                                )
+                                            }
+                                        }
+
+                                        if (autoSwitched) {
+                                            val reasonText = when (reason) {
+                                                "10bit"        -> "this file uses a 10-bit color format that your device's hardware decoder can't render correctly (would show a black screen)."
+                                                "oversized"    -> "this file's resolution exceeds what your device's hardware decoder reliably supports."
+                                                "black-frame"  -> "your device's hardware decoder produced a blank frame for this file \u2014 confirmed by checking the actual picture."
+                                                "log-detected" -> "your device's hardware decoder reported an error while starting this file."
+                                                "manual"       -> "you've enabled \u201cAlways use software decoding\u201d below."
+                                                else           -> "a hardware decoding issue was detected."
+                                            }
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .background(Color(0xFFFFA726).copy(0.12f), RoundedCornerShape(10.dp))
+                                                    .padding(10.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(Icons.Rounded.Info, null, tint = Color(0xFFFFA726), modifier = Modifier.size(18.dp))
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    "Auto-switched to software decoding \u2014 $reasonText",
+                                                    color = Color(0xFFFFA726), fontSize = 11.sp, lineHeight = 15.sp
+                                                )
+                                            }
+                                            Spacer(Modifier.height(14.dp))
+                                        }
+
+                                        HorizontalDivider(color = Color.White.copy(0.1f))
+                                        Spacer(Modifier.height(10.dp))
+                                        Text("DIAGNOSTICS", color = Color.Gray, fontSize = 10.sp, letterSpacing = 1.sp)
+                                        Spacer(Modifier.height(8.dp))
+                                        DecodeInfoRow("Codec",          codec)
+                                        DecodeInfoRow("Pixel Format",   pixfmt)
+                                        DecodeInfoRow("HW Decoder",     hwdecCurrent.ifEmpty { "Not active (software)" })
+                                        DecodeInfoRow("Auto-switched",  if (autoSwitched) "Yes" else "No")
+
+                                        Spacer(Modifier.height(20.dp))
+                                        HorizontalDivider(color = Color.White.copy(0.1f))
+                                        Spacer(Modifier.height(14.dp))
+
+                                        // ── Manual override ─────────────────────────────────
+                                        // For the residual case automatic detection can't catch:
+                                        // a broken decoder that still produces ordinary 8-bit
+                                        // output but renders it wrong. If a user notices black
+                                        // screens even after the automatic fixes above, this
+                                        // toggle makes every future video on this device use
+                                        // software decoding — persisted across app restarts.
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("Always use software decoding", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                                Text(
+                                                    "Turn this on if videos still show a black screen after the app's automatic fix. Uses more battery.",
+                                                    color = Color.Gray, fontSize = 11.sp, lineHeight = 14.sp,
+                                                    modifier = Modifier.padding(top = 2.dp, end = 12.dp)
+                                                )
+                                            }
+                                            Switch(
+                                                checked = forceSwEnabled,
+                                                onCheckedChange = { checked ->
+                                                    forceSwEnabled = checked
+                                                    saveForceSwDecode(context, checked)
+                                                    try { StreamXCore.setForceSwDecode(checked) } catch (e: Exception) {}
+                                                },
+                                                colors = SwitchDefaults.colors(checkedThumbColor = Color.Cyan, checkedTrackColor = Color.Cyan.copy(0.5f))
+                                            )
+                                        }
+
+                                        Spacer(Modifier.height(16.dp))
+                                        Text(
+                                            "StreamX automatically detects video formats that render as a " +
+                                            "black screen on hardware decoders (10-bit HDR content, oversized " +
+                                            "frames, decoder errors, or by checking the actual picture) and " +
+                                            "switches to software decoding for that file only \u2014 no settings " +
+                                            "needed in most cases.",
+                                            color = Color.Gray.copy(0.8f), fontSize = 11.sp, lineHeight = 16.sp
                                         )
                                     }
                                 }
@@ -1049,5 +1208,13 @@ private fun SubTrackRow(label: String, selected: Boolean, onClick: () -> Unit) {
         Icon(if (selected) Icons.Rounded.RadioButtonChecked else Icons.Rounded.RadioButtonUnchecked, null, tint = if (selected) Color.Cyan else Color.Gray, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(12.dp))
         Text(label, color = if (selected) Color.Cyan else Color.White, fontSize = 14.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+    }
+}
+
+@Composable
+private fun DecodeInfoRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, color = Color.Gray, fontSize = 13.sp)
+        Text(value, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
 }

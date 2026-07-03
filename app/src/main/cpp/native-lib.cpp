@@ -124,3 +124,45 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getTrackListNative(JNIEnv* env, 
     env->ReleaseStringUTFChars(type, t);
     return env->NewStringUTF(result.c_str());
 }
+
+// ════════════════════════════════════════════════════════════
+//  DYNAMIC HW/SW DECODE COMPATIBILITY BRIDGES
+// ════════════════════════════════════════════════════════════
+
+// Called every ~250ms from Kotlin's existing time-sync poll loop.
+// Cheap no-op after the first file-load check resolves (see
+// check_decode_compatibility() in mpv_handler.cpp for details).
+extern "C" JNIEXPORT void JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_checkDecodeCompat(JNIEnv*, jclass) {
+    check_decode_compatibility();
+}
+
+// Human-readable current decode mode for the settings UI,
+// e.g. "Hardware (mediacodec-copy)" / "Software (FFmpeg)".
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getDecodeModeLabel(JNIEnv* env, jclass) {
+    std::string label = get_decode_mode_label();
+    return env->NewStringUTF(label.c_str());
+}
+
+// Diagnostic string "<codec>|<pixelformat>|<hwdec-current>|<auto_switched>|<reason>"
+// for the detailed decode-info settings page.
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getDecodeDiagInfo(JNIEnv* env, jclass) {
+    std::string diag = get_decode_diag_info();
+    return env->NewStringUTF(diag.c_str());
+}
+
+// Persistent manual override for devices with undetectable broken HW
+// decoders (black frame on ordinary 8-bit content). Kotlin persists
+// this in SharedPreferences and calls it once at app start plus
+// whenever the user toggles it in Settings.
+extern "C" JNIEXPORT void JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_setForceSwDecode(JNIEnv*, jclass, jboolean force) {
+    set_force_sw_decode((bool)force);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getForceSwDecode(JNIEnv*, jclass) {
+    return (jboolean)get_force_sw_decode();
+}

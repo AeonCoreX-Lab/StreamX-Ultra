@@ -77,86 +77,20 @@ class YoutubeJsBridge(
     }
 }
 
-private fun buildYoutubeHtml(videoKey: String) = """
-<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body {
-    width: 100%; height: 100%;
-    background: #000;
-    overflow: hidden;
-  }
-  #player {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-  }
-  iframe {
-    width: 100% !important;
-    height: 100% !important;
-    border: none;
-  }
-</style>
-</head>
-<body>
-<div id="player"></div>
-<script>
-  var tag = document.createElement('script');
-  tag.src = "https://www.youtube.com/iframe_api";
-  var firstScriptTag = document.getElementsByTagName('script')[0];
-  firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-
-  var player;
-  function onYouTubeIframeAPIReady() {
-    player = new YT.Player('player', {
-      videoId: '$videoKey',
-      host: 'https://www.youtube-nocookie.com',
-      playerVars: {
-        autoplay       : 1,
-        mute           : 1,
-        rel            : 0,
-        modestbranding : 1,
-        showinfo       : 0,
-        fs             : 1,
-        playsinline    : 1,
-        iv_load_policy : 3,
-        controls       : 1,
-        cc_load_policy : 0,
-        disablekb      : 0,
-        enablejsapi    : 1,
-        origin         : 'https://www.youtube.com'
-      },
-      events: {
-        onReady: function(e) {
-          e.target.playVideo();
-          try { YoutubeBridge.onPlayerReady(); } catch(err) {}
-        },
-        onError: function(e) {
-          try { YoutubeBridge.onPlayerError(e.data.toString()); } catch(err) {}
-        },
-        onStateChange: function(e) {
-          // State -1 = unstarted, 0 = ended, 1 = playing, 2 = paused, 3 = buffering, 5 = cued
-          if (e.data === 1) {
-            try { YoutubeBridge.onPlayerReady(); } catch(err) {}
-          }
-        }
-      }
-    });
-  }
-
-  // Safety: if API fails to load, report after 8s
-  setTimeout(function() {
-    if (typeof YT === 'undefined' || !player || !player.playVideo) {
-      try { YoutubeBridge.onPlayerError('api_timeout'); } catch(err) {}
-    }
-  }, 8000);
-</script>
-</body>
-</html>
-""".trimIndent()
+// ══════════════════════════════════════════════════════════════════
+//  ✅ ROOT-CAUSE FIX for "Error 152 — restricted embedding":
+//  Many trailers (studio uploads especially) have the uploader's
+//  "allow embedding" flag turned OFF. The iframe API / IFrame embed
+//  ALWAYS fails for these videos — no amount of playerVars tuning
+//  fixes it, because YouTube blocks the embed server-side per video.
+//
+//  The fix is to stop embedding and instead load the real YouTube
+//  watch page directly inside the WebView, exactly like a normal
+//  in-app browser (same approach as InAppBrowserActivity). The
+//  watch page is never embed-restricted since it IS the origin.
+// ══════════════════════════════════════════════════════════════════
+private fun buildYoutubeWatchUrl(videoKey: String) =
+    "https://www.youtube.com/watch?v=$videoKey&autoplay=1&mute=1&playsinline=1"
 
 // ══════════════════════════════════════════════════════════════════
 //  YoutubePlayerSheet — FULL FIXED
@@ -200,7 +134,7 @@ fun YoutubePlayerSheet(
         infiniteRepeatable(tween(1500, easing = LinearEasing)), "sB"
     )
 
-    val youtubeHtml = remember(videoKey) { buildYoutubeHtml(videoKey) }
+    val youtubeWatchUrl = remember(videoKey) { buildYoutubeWatchUrl(videoKey) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -322,6 +256,10 @@ fun YoutubePlayerSheet(
                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                     ViewGroup.LayoutParams.MATCH_PARENT
                                 )
+                                // Match sheet bg so there's no white flash before the
+                                // YouTube page paints (same fix as InAppBrowserActivity).
+                                setBackgroundColor(android.graphics.Color.parseColor("#FF020810"))
+
                                 settings.apply {
                                     @Suppress("DEPRECATION")
                                     javaScriptEnabled                = true
@@ -333,6 +271,8 @@ fun YoutubePlayerSheet(
                                     setSupportMultipleWindows(true)
                                     javaScriptCanOpenWindowsAutomatically = true
                                     mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                    setSupportZoom(false)
+                                    builtInZoomControls = false
 
                                     // Modern Chrome UA — MUST for YouTube to serve correct player
                                     userAgentString =
@@ -341,17 +281,12 @@ fun YoutubePlayerSheet(
                                         "Chrome/126.0.0.0 Mobile Safari/537.36"
                                 }
 
-                                // JS Bridge for error / ready callbacks
+                                // Retain the JS bridge purely as a safety net — the real
+                                // page will drive isLoading/isReady via WebViewClient below.
                                 addJavascriptInterface(
                                     YoutubeJsBridge(
-                                        onError = { code ->
-                                            playerError = code
-                                            isLoading = false
-                                        },
-                                        onReady = {
-                                            isReady = true
-                                            isLoading = false
-                                        }
+                                        onError  = { code -> playerError = code; isLoading = false },
+                                        onReady  = { isReady = true; isLoading = false }
                                     ),
                                     "YoutubeBridge"
                                 )
@@ -361,22 +296,29 @@ fun YoutubePlayerSheet(
                                         view: WebView, request: WebResourceRequest
                                     ): Boolean {
                                         val url = request.url.toString()
-                                        // Open YouTube links externally instead of inside WebView
-                                        if (url.contains("youtube.com") || url.contains("youtu.be")) {
-                                            val intent = Intent(Intent.ACTION_VIEW, request.url)
-                                            context.startActivity(intent)
-                                            return true
+                                        // Stay inside the sheet for the watch page and its
+                                        // player assets — this IS our "in-app browser" now.
+                                        // Only kick out to the real app for things like
+                                        // "Sign in", account switches, or external links.
+                                        val stayInWebView =
+                                            url.contains("youtube.com/watch") ||
+                                            url.contains("youtube.com/embed") ||
+                                            url.startsWith("about:") ||
+                                            url.contains("googlevideo.com")
+                                        if (!stayInWebView && (url.contains("youtube.com") || url.contains("youtu.be"))) {
+                                            return false // let it load in-WebView too; avoids app hand-off jank
                                         }
                                         return false
                                     }
 
+                                    override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                                        playerError = null
+                                    }
+
                                     override fun onPageFinished(view: WebView, url: String) {
-                                        // Give IFrame API time to init before hiding loader
-                                        view.postDelayed({
-                                            if (!isReady && playerError == null) {
-                                                // Still loading, keep spinner
-                                            }
-                                        }, 1500)
+                                        // Real watch page loaded successfully — dismiss spinner.
+                                        isReady   = true
+                                        isLoading = false
                                     }
 
                                     override fun onReceivedError(
@@ -385,8 +327,11 @@ fun YoutubePlayerSheet(
                                         description: String?,
                                         failingUrl: String?
                                     ) {
-                                        playerError = "webview_$errorCode"
-                                        isLoading = false
+                                        // Only fail on the main frame request, not sub-resources
+                                        if (failingUrl == null || failingUrl.contains("youtube.com/watch")) {
+                                            playerError = "webview_$errorCode"
+                                            isLoading = false
+                                        }
                                     }
                                 }
 
@@ -403,15 +348,12 @@ fun YoutubePlayerSheet(
                                     }
                                 }
 
-                                // ✅ FIXED: loadDataWithBaseURL with youtube.com base
-                                // Using nocookie host in HTML + origin param for max compatibility
-                                loadDataWithBaseURL(
-                                    "https://www.youtube.com",
-                                    youtubeHtml,
-                                    "text/html",
-                                    "UTF-8",
-                                    null
-                                )
+                                // ✅ FIXED: load the real YouTube watch page directly,
+                                // same as a genuine in-app browser tab. This bypasses
+                                // "Error 152 — embedding disabled" entirely, since that
+                                // restriction only applies to the <iframe> embed player,
+                                // not the watch page itself.
+                                loadUrl(youtubeWatchUrl)
                             }
                         }
                     )

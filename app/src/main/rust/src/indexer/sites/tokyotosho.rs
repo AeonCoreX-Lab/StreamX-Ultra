@@ -24,21 +24,26 @@ use anyhow::Result;
 use scraper::{Html, Selector};
 use crate::indexer::types::TorrentResult;
 
-const MIRRORS: &[&str] = &[
+const MIRRORS_FALLBACK: &[&str] = &[
     "https://www.tokyotosho.info",
     "https://www.tokyotosho.se",
 ];
 
-pub async fn search(client: &reqwest::Client, query: &str) -> Vec<TorrentResult> {
+pub async fn search(client: &reqwest::Client, mirrors: &[String], query: &str) -> Vec<TorrentResult> {
     let q = urlencoding::encode(query);
     let path = format!("/search.php?terms={q}&cat=0");
-    fetch_results(client, &path).await.unwrap_or_default()
+    let effective_mirrors = if mirrors.is_empty() {
+        MIRRORS_FALLBACK.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+    } else {
+        mirrors.to_vec()
+    };
+    fetch_results(client, &effective_mirrors, &path).await.unwrap_or_default()
 }
 
 // ── Internal ─────────────────────────────────────────────────────────────────
 
-async fn fetch_results(client: &reqwest::Client, path: &str) -> Result<Vec<TorrentResult>> {
-    let html = get_html_with_fallback(client, path).await?;
+async fn fetch_results(client: &reqwest::Client, mirrors: &[String], path: &str) -> Result<Vec<TorrentResult>> {
+    let html = get_html_with_fallback(client, mirrors, path).await?;
     let doc  = Html::parse_document(&html);
 
     // Jackett: rows = table.listing tr.category_0, skip first match (header)
@@ -117,8 +122,8 @@ async fn get_html(client: &reqwest::Client, url: &str) -> Result<String> {
     Ok(resp.text().await?)
 }
 
-async fn get_html_with_fallback(client: &reqwest::Client, path: &str) -> Result<String> {
-    for mirror in MIRRORS {
+async fn get_html_with_fallback(client: &reqwest::Client, mirrors: &[String], path: &str) -> Result<String> {
+    for mirror in mirrors {
         let url = format!("{mirror}{path}");
         match get_html(client, &url).await {
             Ok(html) => return Ok(html),

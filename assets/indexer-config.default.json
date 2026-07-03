@@ -1,0 +1,225 @@
+{
+  "schema_version": 1,
+  "updated": "2026-07-02",
+  "sites": {
+    "x1337x": {
+      "enabled": true,
+      "display_name": "1337x",
+      "kind": "html",
+      "mirrors": ["https://1337x.to", "https://1337x.st", "https://x1337x.ws"],
+      "search_path": "/sort-search/{query}/seeders/desc/{page}/",
+      "pages": 2,
+      "selectors": {
+        "row": "tr:has(a[href^=\"/torrent/\"])",
+        "title": "td[class^=\"coll-1\"] a[href^=\"/torrent/\"]",
+        "title_attr": "text",
+        "magnet_location": "detail",
+        "detail_link": "td[class^=\"coll-1\"] a[href^=\"/torrent/\"]",
+        "detail_link_attr": "href",
+        "detail_magnet_selector": "ul li a[href^=\"magnet:?xt=\"]",
+        "detail_magnet_selector_fallback": "a[href^=\"magnet:\"]",
+        "size": "td[class^=\"coll-4\"]",
+        "seeds": "td[class^=\"coll-2\"]",
+        "seeds_index": 0,
+        "peers": "td[class^=\"coll-3\"]",
+        "peers_index": 0
+      },
+      "request": {
+        "headers": { "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9" },
+        "delay_ms": 1200,
+        "min_seeds_for_detail_fetch": 3
+      }
+    },
+
+    "tgx": {
+      "enabled": true,
+      "display_name": "TorrentGalaxy",
+      "kind": "html",
+      "mirrors": ["https://torrentgalaxy.one", "https://torrentgalaxy.info"],
+      "search_path": "/get-posts/keywords:{query}",
+      "imdb_path": "/get-posts/keywords:{imdb_id}",
+      "pages": 1,
+      "selectors": {
+        "row": "div.tgxtablerow",
+        "title": "a[href^=\"/post-detail/\"]",
+        "title_attr": "title",
+        "magnet_location": "listing",
+        "magnet": "a[href^=\"magnet:?xt=\"]",
+        "magnet_attr": "href",
+        "size": "div.tgxtablecell:nth-last-child(5)",
+        "seeds": "div.tgxtablecell:nth-last-child(2) span font",
+        "seeds_index": 0,
+        "peers": "div.tgxtablecell:nth-last-child(2) span font",
+        "peers_index": 1
+      },
+      "request": {
+        "headers": { "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9" },
+        "delay_ms": 0
+      }
+    },
+
+    "kat": {
+      "enabled": true,
+      "display_name": "KickassTorrents",
+      "kind": "html",
+      "mirrors": ["https://kickass.torrentbay.st"],
+      "search_path": "/search/?q={query}",
+      "pages": 1,
+      "selectors": {
+        "row": "table.data > tbody > tr:has(a[href^=\"magnet:?xt=\"])",
+        "title": "a.cellMainLink",
+        "title_attr": "text",
+        "magnet_location": "listing",
+        "magnet": "a[href^=\"magnet:?xt=\"]",
+        "magnet_attr": "href",
+        "size": "td:nth-child(2)",
+        "seeds": "td:nth-child(5)",
+        "seeds_index": 0,
+        "peers": "td:nth-child(6)",
+        "peers_index": 0
+      },
+      "request": {
+        "headers": { "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9" },
+        "delay_ms": 1500
+      }
+    },
+
+    "kat_ws": {
+      "enabled": true,
+      "display_name": "KickassTorrents-WS",
+      "kind": "html",
+      "mirrors": ["https://kickass.ws", "https://kickasstorrents.bz"],
+      "search_path": "/usearch/{query}/?field=time_add&sorder=desc",
+      "pages": 1,
+      "selectors": {
+        "row": "table.data tr[id]:has(a[data-download])",
+        "title": "a[class=\"cellMainLink\"]",
+        "title_attr": "text",
+        "magnet_location": "listing",
+        "magnet": "td:nth-child(1) > div > a[data-download]",
+        "magnet_attr": "href",
+        "magnet_querystring_param": "url",
+        "size": "td:nth-child(2)",
+        "seeds": "td:nth-child(4)",
+        "seeds_index": 0,
+        "peers": "td:nth-child(5)",
+        "peers_index": 0
+      },
+      "request": {
+        "headers": { "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9" },
+        "delay_ms": 0
+      }
+    },
+
+    "torrentdownload": {
+      "enabled": true,
+      "display_name": "TorrentDownload",
+      "kind": "html",
+      "mirrors": ["https://www.torrentdownload.info"],
+      "search_path": "/searchd?q={query}",
+      "pages": 1,
+      "selectors": {
+        "row": "table.table2 > tbody > tr:has(span.smallish)",
+        "title": "div.tt-name > a[href^=\"/\"]",
+        "title_attr": "text",
+        "magnet_location": "detail",
+        "detail_link": "div.tt-name > a[href^=\"/\"]",
+        "detail_link_attr": "href",
+        "detail_magnet_selector": "a[href^=\"magnet:?xt=\"]",
+        "detail_magnet_selector_fallback": "a[href^=\"magnet:\"]",
+        "category": "div.tt-name > span.smallish",
+        "size": "td:nth-child(3)",
+        "seeds": "td.tdseed",
+        "seeds_index": 0,
+        "peers": "td.tdleech",
+        "peers_index": 0
+      },
+      "request": {
+        "headers": { "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9" },
+        "delay_ms": 0,
+        "min_seeds_for_detail_fetch": 1
+      }
+    },
+
+    "extratorrent": {
+      "enabled": true,
+      "display_name": "ExtraTorrent",
+      "kind": "html",
+      "mirrors": ["https://extratorrent.st"],
+      "search_path": "/search/?srt=added&order=desc&search={query}&new=1&x=0&y=0",
+      "pages": 1,
+      "selectors": {
+        "row": "tr[class^=\"tl\"]:has(a[href^=\"magnet:?xt=\"])",
+        "title": "a[href^=\"/torrent/\"]",
+        "title_attr": "text",
+        "magnet_location": "listing",
+        "magnet": "a[href^=\"magnet:?xt=\"]",
+        "magnet_attr": "href",
+        "category": "span.c_tor",
+        "size": "td:nth-last-of-type(4)",
+        "seeds": "td.sy, td.sn",
+        "seeds_index": 0,
+        "peers": "td.ly, td.ln",
+        "peers_index": 0
+      },
+      "request": {
+        "headers": { "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9" },
+        "delay_ms": 0
+      }
+    },
+
+    "therarbg": {
+      "enabled": true,
+      "display_name": "TheRARBG",
+      "kind": "json",
+      "mirrors": ["https://therarbg.to", "https://therarbg.com"],
+      "search_path": "/get-posts/order:-se:category:Movies:keywords:{query}:paginate_by:50:format:json/",
+      "imdb_path": "/get-posts/order:-se:category:Movies:keywords:{imdb_id}:paginate_by:50:format:json/",
+      "json_fields": {
+        "results_array": "results",
+        "title": "n",
+        "infohash": "h",
+        "infohash_is_full_magnet": false,
+        "size": "s",
+        "seeds": "se",
+        "peers": "le",
+        "category": "c"
+      },
+      "request": {
+        "headers": { "Accept": "application/json" },
+        "delay_ms": 0
+      }
+    },
+
+    "tpb": {
+      "enabled": true,
+      "display_name": "ThePirateBay",
+      "kind": "json",
+      "mirrors": ["https://apibay.org", "https://apibay.li"],
+      "search_path": "/q.php?q={query}&cat=",
+      "pages": 1,
+      "json_fields": {
+        "results_array": "",
+        "title": "name",
+        "infohash": "info_hash",
+        "infohash_is_full_magnet": false,
+        "size": "size",
+        "seeds": "seeders",
+        "peers": "leechers",
+        "imdb": "imdb"
+      },
+      "request": {
+        "headers": { "Accept": "application/json" },
+        "delay_ms": 0
+      }
+    }
+  },
+
+  "special_sites": {
+    "torrentqq":    { "enabled": true, "mirrors": ["https://torrentqq418.com"] },
+    "torrentsome":  { "enabled": true, "mirrors": ["https://torrentsome252.com"] },
+    "torrenttip":   { "enabled": true, "mirrors": ["https://torrenttip233.top"] },
+    "nyaa":         { "enabled": true, "mirrors": ["https://nyaa.si", "https://nyaa.land"] },
+    "tokyotosho":   { "enabled": true, "mirrors": ["https://www.tokyotosho.info", "https://www.tokyotosho.se"] }
+  }
+}

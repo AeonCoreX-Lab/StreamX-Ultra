@@ -42,6 +42,24 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_initNat
     info!("StreamX Rust core initialised");
 }
 
+// Sets the on-disk cache directory the indexer's remote-config loader
+// uses to persist indexer-config.json between launches. Kotlin should
+// call this once, right after initNative(), passing
+// context.cacheDir.absolutePath — see IndexerNative.kt's init block.
+// Safe to skip: if never called, the loader falls back to the system
+// temp dir, which still works but won't survive an app restart as
+// reliably as the real cache dir.
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_nativeSetCacheDir(
+    mut env:  JNIEnv,
+    _cls:     JClass,
+    j_path:   JString,
+) {
+    let path = jstr(&mut env, j_path);
+    info!("Indexer cache dir set: {path}");
+    indexer::engine::init_cache_dir(std::path::PathBuf::from(path));
+}
+
 // ── ① TMDB key ───────────────────────────────────────────────────────────────
 // Unchanged from previous lib.rs — StreamXCore.getTmdbKey() still works
 #[no_mangle]

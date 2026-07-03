@@ -23,4 +23,28 @@ int         get_cache_percent_mpv();
 int         is_paused_for_cache_mpv();
 std::string get_track_list_mpv(const char* type);
 
+// ── Dynamic HW/SW decode compatibility ─────────────────────────
+// Called periodically (every ~250ms poll tick) right after file load.
+// Detects HW-decode formats known to render black on Android GLES
+// (e.g. 10-bit P010 output) and transparently reloads the same file
+// with hwdec disabled — self-healing, no codec whitelist needed.
+void        check_decode_compatibility();
+// Human-readable current mode for settings UI, e.g.
+// "Hardware (mediacodec-copy)" / "Software (FFmpeg)" / "Detecting…"
+std::string get_decode_mode_label();
+// Diagnostic string for the detail settings page:
+// "<codec>|<pixelformat>|<hwdec-current>|<auto_switched 0/1>|<reason>"
+std::string get_decode_diag_info();
+
+// ── Manual persistent override (for undetectable broken-decoder cases) ──
+// Some devices have HW decoders that produce a black frame on 8-bit
+// content too (rare, broken chipset firmware) — this cannot be detected
+// from pixel format or resolution alone without GPU pixel readback,
+// which this rendering architecture (wid-embedded, not render-API) does
+// not support. For that residual case, the user can force SW decode
+// permanently for their device via Settings; Kotlin persists this in
+// SharedPreferences and calls set_force_sw_decode() on every app start.
+void set_force_sw_decode(bool force);
+bool get_force_sw_decode();
+
 #endif

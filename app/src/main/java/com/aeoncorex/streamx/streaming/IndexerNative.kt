@@ -1,5 +1,6 @@
 package com.aeoncorex.streamx.streaming
 
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -37,12 +38,45 @@ object IndexerNative {
 
     private const val TAG = "IndexerNative"
 
+    @Volatile private var cacheDirInitialized = false
+
     init {
         // streamx-native.so already loaded by TorrentEngine — safe to call again
         System.loadLibrary("streamx-native")
     }
 
+    /**
+     * Sets the on-disk directory the remote indexer-config.json cache is
+     * stored in (see indexer/config/loader.rs). Call this ONCE, early —
+     * e.g. from your Application.onCreate() or the first screen that
+     * might trigger a search — passing the app Context:
+     *
+     *   IndexerNative.initialize(applicationContext)
+     *
+     * TODO: wire this call into your Application.onCreate() (or the
+     * splash/home screen's first onCreate, if there's no custom
+     * Application class yet). Not calling it isn't a hard failure —
+     * see the fallback note below — but the disk cache won't persist
+     * as reliably across app restarts without it.
+     *
+     * Safe to call multiple times (subsequent calls are no-ops) and safe
+     * to skip entirely: the Rust side falls back to the system temp dir
+     * if this is never called, which still works but is less durable
+     * across app restarts.
+     */
+    fun initialize(context: Context) {
+        if (cacheDirInitialized) return
+        cacheDirInitialized = true
+        try {
+            nativeSetCacheDir(context.cacheDir.absolutePath)
+        } catch (e: Exception) {
+            Log.w(TAG, "initialize() failed: ${e.message}")
+        }
+    }
+
     // ── Rust JNI declaration ──────────────────────────────────────────────────
+
+    private external fun nativeSetCacheDir(path: String)
 
     /**
      * Searches all indexer sites for dubbed/dual-audio releases.
@@ -197,13 +231,14 @@ data class IndexerResult(
     val quality:   String
 ) {
     /**
-     * TorrentQQ and Torrentsome (Korean drama sites) don't publish real
-     * seeder/leecher counts — the Rust indexer sets seeds=1 as an honest
-     * placeholder rather than fabricating a number. UI should show
-     * "health unknown" instead of a seed count for these sources.
+     * TorrentQQ, Torrentsome, and TorrentTip (Korean drama sites) don't
+     * publish real seeder/leecher counts — the Rust indexer sets seeds=1
+     * as an honest placeholder rather than fabricating a number. UI
+     * should show "health unknown" instead of a seed count for these
+     * sources.
      */
     val isHealthUnknown: Boolean
-        get() = source == "TorrentQQ" || source == "Torrentsome"
+        get() = source == "TorrentQQ" || source == "Torrentsome" || source == "TorrentTip"
 
     /** Short label for list UI, e.g. "1080p • Hindi Dubbed • 1337x" */
     val label: String
