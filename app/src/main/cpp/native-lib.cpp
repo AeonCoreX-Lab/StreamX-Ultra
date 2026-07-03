@@ -166,3 +166,11 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getForceSwDecode(JNIEnv*, jclass) {
     return (jboolean)get_force_sw_decode();
 }
+
+// Human-readable active GPU rendering backend, e.g. "Vulkan (androidvk)"
+// or "OpenGL ES (android)" — reflects mpv's own gpu-context probe result.
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getActiveGpuContext(JNIEnv* env, jclass) {
+    std::string ctx = get_active_gpu_context();
+    return env->NewStringUTF(ctx.c_str());
+}

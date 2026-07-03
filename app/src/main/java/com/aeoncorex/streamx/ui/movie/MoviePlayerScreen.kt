@@ -109,6 +109,7 @@ object StreamXCore {
     @JvmStatic external fun getDecodeDiagInfo(): String
     @JvmStatic external fun setForceSwDecode(force: Boolean)
     @JvmStatic external fun getForceSwDecode(): Boolean
+    @JvmStatic external fun getActiveGpuContext(): String
 
     fun cycleSubtitles()                 = commandNative(arrayOf("cycle", "sub"))
     fun cycleAudio()                     = commandNative(arrayOf("cycle", "audio"))
@@ -969,6 +970,13 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                         var forceSwEnabled by remember {
                                             mutableStateOf(try { StreamXCore.getForceSwDecode() } catch (e: Exception) { false })
                                         }
+                                        // GPU rendering backend (Vulkan/OpenGL) — reflects mpv's own
+                                        // gpu-context="androidvk,android" probe result. Recomputed
+                                        // alongside decodeModeLabel so it stays live if this page is
+                                        // left open across a file switch.
+                                        val gpuContext = remember(decodeModeLabel) {
+                                            try { StreamXCore.getActiveGpuContext() } catch (e: Exception) { "\u2014" }
+                                        }
 
                                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 14.dp)) {
                                             Icon(
@@ -1020,6 +1028,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                         DecodeInfoRow("Pixel Format",   pixfmt)
                                         DecodeInfoRow("HW Decoder",     hwdecCurrent.ifEmpty { "Not active (software)" })
                                         DecodeInfoRow("Auto-switched",  if (autoSwitched) "Yes" else "No")
+                                        DecodeInfoRow("GPU Rendering",  gpuContext)
 
                                         Spacer(Modifier.height(20.dp))
                                         HorizontalDivider(color = Color.White.copy(0.1f))

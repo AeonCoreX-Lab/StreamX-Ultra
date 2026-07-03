@@ -47,4 +47,11 @@ std::string get_decode_diag_info();
 void set_force_sw_decode(bool force);
 bool get_force_sw_decode();
 
+// ── GPU rendering backend visibility ─────────────────────────────
+// Human-readable label for which GPU context actually activated,
+// e.g. "Vulkan (androidvk)" / "OpenGL ES (android)" — reflects mpv's
+// own "current-gpu-context" property (the real outcome of the
+// gpu-context="androidvk,android" probing/fallback list set at init).
+std::string get_active_gpu_context();
+
 #endif

@@ -123,6 +123,36 @@ jobs:
           export PATH=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
           chmod +x *.sh
 
+          # ── FIX: Enable Vulkan support in libmpv.so ──────────────────
+          # mpv-android's buildall.sh hardcodes apilvl=21 for the NDK cross-
+          # compile target. Android's libvulkan.so only exists in the NDK
+          # sysroot from API 24 onward (developer.android.com/ndk/guides/
+          # graphics) — at apilvl=21, meson's dependency('vulkan') link-test
+          # fails, so HAVE_VULKAN never gets defined and Vulkan support is
+          # silently skipped, even on devices with real Vulkan hardware.
+          #
+          # StreamX Ultra's minSdkVersion is 28 (Android 9.0), well above
+          # the API-24 Vulkan floor, so raising this build target is safe
+          # for app compatibility — this only changes the standalone
+          # meson/NDK cross-compile target used by these scripts, not
+          # build.gradle.kts's minSdkVersion.
+          #
+          # IMPORTANT: mpv links Vulkan as a HARD dependency (-lvulkan),
+          # not via dlopen. If minSdkVersion is ever lowered below 24,
+          # this patch MUST be reverted first — otherwise libmpv.so would
+          # fail to load entirely (UnsatisfiedLinkError: libvulkan.so not
+          # found) on any device below Android 7.0, not just lose Vulkan.
+          #
+          # The native decode/render code itself does NOT hardcode Vulkan
+          # usage — it sets gpu-context="androidvk,android" (mpv_handler.cpp)
+          # so mpv safely falls back to OpenGL if Vulkan isn't available at
+          # runtime, exactly as it did before this patch, on any device.
+          # This build ships all 4 ABIs (release), so this patch applies
+          # identically across arm64, armv7l, x86, x86_64.
+          echo "🔧 Patching buildall.sh: apilvl 21 → 24 (enables Vulkan support)"
+          sed -i 's/local apilvl=21/local apilvl=24/' buildall.sh
+          grep -n "apilvl=" buildall.sh
+
           git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "git://git.ffmpeg.org/ffmpeg.git"
           git config --global url."https://".insteadOf git://
 

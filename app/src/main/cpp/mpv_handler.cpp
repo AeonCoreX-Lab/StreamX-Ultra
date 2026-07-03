@@ -153,10 +153,53 @@ void init_mpv_engine(JNIEnv* env, jobject appctx) {
     mpv_ctx = mpv_create();
     if (!mpv_ctx) { LOGE("mpv_create() failed"); return; }
 
-    // ── Video Output ──────────────────────────────────────────────
-    mpv_set_option_string(mpv_ctx, "vo",        "gpu");
-    mpv_set_option_string(mpv_ctx, "gpu-api",   "opengl");
-    mpv_set_option_string(mpv_ctx, "opengl-es", "yes");
+    // ── Video Output — GPU context: let mpv decide, safely ──────────
+    //
+    //  Verified directly against mpv core source (video/out/gpu/context.c
+    //  + video/out/vulkan/context_android.c + video/out/opengl/context_android.c):
+    //
+    //  Registered Android context names:
+    //    "androidvk"  (type=vulkan, video/out/vulkan/context_android.c)
+    //    "android"    (type=opengl, video/out/opengl/context_android.c)
+    //
+    //  gpu-context accepts an ORDERED comma-separated preference list.
+    //  ra_ctx_create() (context.c) tries each name in turn via
+    //  create_in_contexts() and uses the FIRST ONE WHOSE init() call
+    //  actually succeeds — this is mpv's own built-in, upstream-sanctioned
+    //  probing/fallback mechanism, not something we hand-roll:
+    //
+    //    1. "androidvk" tried first.
+    //       - If this specific libmpv.so build didn't compile in Vulkan
+    //         support (HAVE_VULKAN unset at build time), this name simply
+    //         isn't in the compiled contexts[] array — skipped silently,
+    //         zero risk, falls through immediately.
+    //       - If Vulkan WAS compiled in but this device's driver fails to
+    //         create a working VkSurfaceKHR/device/swapchain at runtime,
+    //         android_init() returns failure — mpv moves to the next
+    //         candidate. Also zero risk, self-correcting.
+    //       - Only when Vulkan is both compiled in AND the device
+    //         genuinely initializes it successfully does mpv actually use it.
+    //    2. "android" (EGL/GLES) as the fallback — this is the exact path
+    //       already proven working in production today.
+    //
+    //  We deliberately do NOT set "gpu-api" here (previously hardcoded to
+    //  "opengl"). Setting gpu-api restricts create_in_contexts()'s type
+    //  filter to that API only, which would silently exclude "androidvk"
+    //  (type=vulkan) from the list above even when explicitly named —
+    //  i.e. the old gpu-api=opengl hardcode is EXACTLY what was preventing
+    //  the engine from ever trying Vulkan, regardless of device capability.
+    //
+    //  Our existing black-screen safety net (check_decode_compatibility's
+    //  format/resolution/black-frame checks) is rendering-backend-agnostic:
+    //  "screenshot-raw" reads the decoded video frame via
+    //  vo_get_current_frame(), independent of whether the active RA
+    //  context is OpenGL or Vulkan — so it continues to catch any
+    //  black-screen class under Vulkan exactly as it does under OpenGL,
+    //  with no changes needed there.
+    //
+    mpv_set_option_string(mpv_ctx, "vo",          "gpu");
+    mpv_set_option_string(mpv_ctx, "gpu-context",  "androidvk,android");
+    mpv_set_option_string(mpv_ctx, "opengl-es",   "yes"); // no-op under Vulkan, required when "android" is used
 
     // ── Hardware Decode ───────────────────────────────────────────
     //
@@ -786,6 +829,22 @@ void set_force_sw_decode(bool force) {
 
 bool get_force_sw_decode() {
     return s_force_sw_decode.load();
+}
+
+std::string get_active_gpu_context() {
+    std::lock_guard<std::mutex> lk(mpv_mutex);
+    if (!mpv_ctx) return "\u2014";
+
+    char* raw = mpv_get_property_string(mpv_ctx, "current-gpu-context");
+    std::string ctx = raw ? raw : "";
+    if (raw) mpv_free(raw);
+
+    if (ctx.empty()) return "Detecting\u2026";
+    // Registered names confirmed against mpv source (context_android.c):
+    //   "androidvk" (type=vulkan)  "android" (type=opengl, EGL/GLES)
+    if (ctx == "androidvk") return "Vulkan (androidvk)";
+    if (ctx == "android")   return "OpenGL ES (android)";
+    return ctx; // fallback: show raw name for any future/unexpected context
 }
 
 std::string get_track_list_mpv(const char* type) {
