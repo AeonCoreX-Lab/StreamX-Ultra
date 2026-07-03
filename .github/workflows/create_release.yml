@@ -124,10 +124,10 @@ jobs:
           chmod +x *.sh
 
           # ── FIX: Enable Vulkan support in libmpv.so ──────────────────
-          # mpv-android's buildall.sh hardcodes apilvl=21 for the NDK cross-
+          # mpv-android's buildall.sh hardcodes apilvl=23 for the NDK cross-
           # compile target. Android's libvulkan.so only exists in the NDK
           # sysroot from API 24 onward (developer.android.com/ndk/guides/
-          # graphics) — at apilvl=21, meson's dependency('vulkan') link-test
+          # graphics) — at apilvl=23, meson's dependency('vulkan') link-test
           # fails, so HAVE_VULKAN never gets defined and Vulkan support is
           # silently skipped, even on devices with real Vulkan hardware.
           #
@@ -149,8 +149,8 @@ jobs:
           # runtime, exactly as it did before this patch, on any device.
           # This build ships all 4 ABIs (release), so this patch applies
           # identically across arm64, armv7l, x86, x86_64.
-          echo "🔧 Patching buildall.sh: apilvl 21 → 24 (enables Vulkan support)"
-          sed -i 's/local apilvl=21/local apilvl=24/' buildall.sh
+          echo "🔧 Patching buildall.sh: apilvl 23 → 24 (enables Vulkan support)"
+          sed -i 's/local apilvl=23/local apilvl=24/' buildall.sh
           grep -n "apilvl=" buildall.sh
 
           git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf "git://git.ffmpeg.org/ffmpeg.git"
