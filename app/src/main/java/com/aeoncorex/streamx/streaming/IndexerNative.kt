@@ -124,6 +124,20 @@ object IndexerNative {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
+    /**
+     * FIX (root cause of "0 Hindi/dub results" while the same title had
+     * 80+ English results): [imdbId] is still accepted here for API
+     * stability and forward-compatibility, but the Rust side
+     * (indexer::engine::search_dubbed) currently ignores it and always
+     * searches by [query] text only. Passing an IMDB ID used to make
+     * TGx/TheRARBG search by ID instead of by [query] — which silently
+     * dropped the dub-language keywords baked into [query] (e.g. "...
+     * Hindi Dubbed 1080p") and returned that site's default-language
+     * listing instead, which then correctly failed the dub-tag filter
+     * downstream. If IMDB-based dedicated-site search is reintroduced
+     * later, it must be combined with the query's language keywords,
+     * not used as a full replacement for the query string.
+     */
     suspend fun searchDubbed(
         query:  String,
         imdbId: String? = null
@@ -206,7 +220,8 @@ object IndexerNative {
                 peers     = o.optInt("peers", 0),
                 source    = o.optString("source", ""),
                 audioTags = tags,
-                quality   = o.optString("quality", "SD")
+                quality   = o.optString("quality", "SD"),
+                isConfirmedDub = o.optBoolean("is_confirmed_dub", true)
             )
         }
     } catch (e: Exception) {
@@ -229,23 +244,43 @@ data class IndexerResult(
     val peers:     Int,
     val source:    String,
     val audioTags: List<String>,
-    val quality:   String
+    val quality:   String,
+    /**
+     * False when this result came from searchDubbed()'s fallback path —
+     * meaning no site returned a result carrying a recognized
+     * dub-language tag for the requested title, so the (untagged, but
+     * still title/IMDB-matched) results are shown instead as a
+     * best-effort. UI should NOT show a language chip implying a
+     * confirmed dub for these — see the "label" property below, which
+     * substitutes "Best match" when this is false.
+     */
+    val isConfirmedDub: Boolean = true
 ) {
     /**
-     * TorrentQQ, Torrentsome, and TorrentTip (Korean drama sites) don't
-     * publish real seeder/leecher counts — the Rust indexer sets seeds=1
-     * as an honest placeholder rather than fabricating a number. UI
-     * should show "health unknown" instead of a seed count for these
-     * sources.
+     * TorrentQQ, Torrentsome, TorrentTip (Korean drama sites), and
+     * eztvtorrent.co don't publish real seeder/leecher counts — the
+     * Rust indexer sets seeds=1 as an honest placeholder rather than
+     * fabricating a number. UI should show "health unknown" instead of
+     * a seed count for these sources.
      */
     val isHealthUnknown: Boolean
-        get() = source == "TorrentQQ" || source == "Torrentsome" || source == "TorrentTip"
+        get() = source == "TorrentQQ" || source == "Torrentsome" || source == "TorrentTip" || source == "eztvtorrent.co"
 
-    /** Short label for list UI, e.g. "1080p • Hindi Dubbed • 1337x" */
+    /**
+     * Short label for list UI, e.g. "1080p • Hindi Dubbed • 1337x".
+     * When isConfirmedDub is false, audioTags is empty by construction
+     * (the fallback path only triggers when nothing carried a tag), so
+     * this substitutes an explicit "Best match, language unconfirmed"
+     * note instead of silently showing no language info at all.
+     */
     val label: String
         get() = buildString {
             append(quality)
-            if (audioTags.isNotEmpty()) append(" • ${audioTags.joinToString(", ")}")
+            if (audioTags.isNotEmpty()) {
+                append(" • ${audioTags.joinToString(", ")}")
+            } else if (!isConfirmedDub) {
+                append(" • Best match (language unconfirmed)")
+            }
             append(" • $source")
         }
 }
@@ -258,19 +293,31 @@ data class IndexerResult(
  *
  * Dub tags are folded into the title so they're visible in the list
  * even though StreamLink itself has no dedicated audioTags field.
+ *
+ * FIX: this previously dropped IndexerResult.isConfirmedDub entirely —
+ * StreamLink had no field for it, so the Rust-side untagged fallback
+ * (searchDubbed() returning best-guess, language-unconfirmed matches
+ * when no site had a dub-tagged result) was indistinguishable from a
+ * normal confirmed-dub result once it reached the UI. Now carried
+ * through via StreamLink.isConfirmedDub, and unconfirmed matches get an
+ * explicit "[Best Match]" marker in the title so the list clearly shows
+ * these aren't guaranteed to be in the requested language.
  */
 fun IndexerResult.toStreamLink(): StreamLink {
-    val titleWithTags = if (audioTags.isNotEmpty())
-        "$title [${audioTags.joinToString(", ")}]"
-    else title
+    val titleWithTags = when {
+        audioTags.isNotEmpty() -> "$title [${audioTags.joinToString(", ")}]"
+        !isConfirmedDub        -> "$title [Best Match]"
+        else                    -> title
+    }
 
     return StreamLink(
-        title   = titleWithTags,
-        magnet  = magnet,
-        quality = quality.uppercase(),
-        seeds   = seeds,
-        peers   = peers,
-        size    = size,
-        source  = source
+        title          = titleWithTags,
+        magnet         = magnet,
+        quality        = quality.uppercase(),
+        seeds          = seeds,
+        peers          = peers,
+        size           = size,
+        source         = source,
+        isConfirmedDub = isConfirmedDub
     )
 }

@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TorrentResult {
     pub title:      String,
     pub magnet:     String,
@@ -15,6 +15,40 @@ pub struct TorrentResult {
     pub source:     String,
     pub audio_tags: Vec<String>,
     pub quality:    String,
+    /// True when this result was returned because it carried a
+    /// recognized dub/language tag (see parse_tags()). False for
+    /// results surfaced through search_dubbed()'s untagged fallback
+    /// path — i.e. "best guess, language not confirmed" rather than
+    /// "confirmed dub". Always true for search_all()/search_drama()/
+    /// search_anime_*() results, which don't apply this distinction.
+    /// UI should visually distinguish these (e.g. a "best match" label
+    /// instead of a language chip) so users aren't misled into thinking
+    /// every result is a confirmed Hindi/Tamil/etc. dub.
+    #[serde(default = "default_true")]
+    pub is_confirmed_dub: bool,
+}
+
+fn default_true() -> bool { true }
+
+impl Default for TorrentResult {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            magnet: String::new(),
+            size: String::new(),
+            seeds: 0,
+            peers: 0,
+            source: String::new(),
+            audio_tags: Vec::new(),
+            quality: String::new(),
+            // Defaults to true: every call site that builds a
+            // TorrentResult via `..Default::default()` is a normal,
+            // tag-confirmed result UNLESS explicitly marked otherwise —
+            // see search_dubbed()'s fallback path in engine.rs, which is
+            // the only place this is set to false.
+            is_confirmed_dub: true,
+        }
+    }
 }
 
 impl TorrentResult {
@@ -115,5 +149,56 @@ impl TorrentResult {
 
     pub fn is_dubbed(&self) -> bool {
         !self.audio_tags.is_empty()
+    }
+
+    /// True if this release looks like adult/XXX content based on its
+    /// title. This is a title-level heuristic — it can't inspect the
+    /// actual video, so it errs toward being reasonably broad rather
+    /// than narrow, since a false positive (skipping a legitimate result
+    /// with an unlucky title) is far less harmful than a false negative
+    /// (adult content leaking into a general search — see the "Supergirl
+    /// XXX iMAGESET" / "ConorCoxxxClips" results that prompted this).
+    ///
+    /// Every search_*() entry point in engine.rs applies this filter
+    /// unconditionally — there is no user-facing toggle to disable it.
+    pub fn is_adult_content(&self) -> bool {
+        let t = self.title.to_lowercase();
+
+        // Whole-word / bounded markers. Using simple `contains` on short
+        // strings like "xxx" is intentional and safe here because these
+        // patterns essentially never appear as substrings of legitimate
+        // release tags (unlike e.g. "sex" which could appear in unrelated
+        // words) — every pattern below was chosen to be a strong signal
+        // on its own in torrent-release-title conventions specifically.
+        const MARKERS: &[&str] = &[
+            "xxx",
+            "porn",
+            "1080p.xxx",
+            "hentai",
+            "jav ",
+            "jav.",
+            "jav-",
+            "onlyfans",
+            "brazzers",
+            "naughtyamerica",
+            "realitykings",
+            "bangbros",
+            "pornhub",
+            "xvideos",
+            "camrip.xxx",
+            "adult.",
+            "nsfw",
+            "18+.",
+            "erotic",
+            "fetish",
+            "imageset",     // near-exclusively used for adult photo-set releases
+            "clips4sale",
+            "manyvids",
+            "babes.com",
+            "digitalplayground",
+            "wicked.",
+        ];
+
+        MARKERS.iter().any(|m| t.contains(m))
     }
 }

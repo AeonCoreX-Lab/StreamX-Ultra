@@ -70,7 +70,16 @@ object DubQueryBuilder {
         season:   Int     = 0,
         episode:  Int     = 0
     ): List<String> {
-        val base = buildBase(title, isSeries, season, episode)
+        // FIX: titles with colons/special chars (e.g. "Predator: Badlands")
+        // broke search-engine matching on several sites when combined with
+        // quality terms — "Predator: Badlands Hindi 1080p BluRay" often
+        // matched nothing even when a plain "Predator Badlands Hindi"
+        // would. Strip punctuation that torrent release names never
+        // actually contain (colons, most punctuation gets replaced with
+        // spaces or dots in real release titles).
+        val cleanTitle = sanitize(title)
+        val base = buildBase(cleanTitle, isSeries, season, episode)
+
         return if (dubLang.isNativeLang) {
             listOf(
                 "$base 1080p BluRay",
@@ -87,10 +96,27 @@ object DubQueryBuilder {
                     queries.add(q)
                 }
             }
+            // Broadest possible query — just title + primary language
+            // keyword, no quality/source terms at all. Placed LAST since
+            // callers generally try queries in order and this is the
+            // most permissive; it's also the one most likely to still
+            // return something when quality-qualified queries return
+            // nothing (new/rare releases especially).
             queries.add("$base ${dubLang.searchKeywords.first()}".trim())
             queries.distinct()
         }
     }
+
+    /// Strips characters that appear in display titles (colons, most
+    /// punctuation) but essentially never appear in actual torrent
+    /// release names, which use spaces/dots/hyphens as separators.
+    /// Keeping alphanumerics, spaces, and hyphens is enough for every
+    /// site we search — anything else is more likely to hurt matching
+    /// than help it.
+    private fun sanitize(title: String): String =
+        title.replace(Regex("[^\\p{L}\\p{N}\\s-]"), " ")
+             .replace(Regex("\\s+"), " ")
+             .trim()
 
     private fun buildBase(title: String, isSeries: Boolean, season: Int, episode: Int): String {
         if (!isSeries || season == 0) return title

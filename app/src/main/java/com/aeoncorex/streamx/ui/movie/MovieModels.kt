@@ -17,7 +17,17 @@ data class StreamLink(
     val seeds:   Int,
     val peers:   Int,
     val size:    String,
-    val source:  String
+    val source:  String,
+    /**
+     * False only for results surfaced through IndexerNative's
+     * searchDubbed() untagged fallback path — meaning no site returned
+     * a result carrying a recognized dub-language tag for the requested
+     * title, so this is a title/IMDB-matched result shown as a
+     * best-effort rather than a confirmed dub. Defaults to true for
+     * every other provider (YTS, EZTV, BitSearch, etc.), which don't
+     * have this distinction — they either found a match or didn't.
+     */
+    val isConfirmedDub: Boolean = true
 )
 
 // ── TMDB list/search response ─────────────────────────────────────────────────

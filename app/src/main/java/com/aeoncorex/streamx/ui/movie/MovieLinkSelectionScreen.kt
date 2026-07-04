@@ -26,6 +26,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.aeoncorex.streamx.ads.AdManager
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import java.net.URLDecoder
 import java.net.URLEncoder
 
@@ -76,14 +79,41 @@ fun MovieLinkSelectionScreen(
             val isAnime   = listOf("Naruto","One Piece","Demon Slayer","Jujutsu","Attack on Titan","Dragon Ball")
                 .any { decodedTitle.contains(it, ignoreCase = true) }
             val validImdb = if (imdbId != "null" && imdbId.isNotEmpty()) imdbId else null
-            torrentLinks  = TorrentRepository.getStreamLinks(
+            val result    = TorrentRepository.getStreamLinks(
                 type = movieType, title = decodedTitle, imdbId = validImdb,
                 season = season, episode = episode, isAnime = isAnime,
                 dubLang = selectedLang
             )
+            // Guard: this LaunchedEffect coroutine may have been
+            // cancelled (key changed — e.g. rapid language-chip
+            // switching, or the user navigated back) while
+            // getStreamLinks() was still running. If we're already
+            // cancelled, ensureActive() throws CancellationException,
+            // which we deliberately let propagate below (do NOT swallow
+            // it in the catch block) rather than writing to state that
+            // no longer has anywhere valid to render.
+            currentCoroutineContext().ensureActive()
+            torrentLinks = result
+        } catch (e: CancellationException) {
+            // FIX: this was previously caught by a bare `catch (e:
+            // Exception)` below, which also matches CancellationException
+            // in Kotlin. Catching and swallowing cancellation breaks
+            // structured concurrency — the coroutine's parent (this
+            // composable's scope) expects cancellation to propagate so
+            // it can clean up correctly. Swallowing it here instead let
+            // this block go on to write `errorMessage`/`isLoading` state
+            // AFTER the composition that owned this scope was already
+            // gone, which is exactly what threw "the coroutine scope
+            // left the composition" — the crash seen when quickly
+            // switching language tabs (e.g. Japanese → Dual Audio).
+            // Re-throwing lets Compose cancel this coroutine cleanly with
+            // no state writes and no crash.
+            throw e
         } catch (e: Exception) {
             errorMessage = "Search failed: ${e.localizedMessage}"
-        } finally { isLoading = false }
+        } finally {
+            isLoading = false
+        }
     }
 
     fun playTorrent(magnet: String) {
