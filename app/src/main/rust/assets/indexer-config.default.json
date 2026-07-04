@@ -7,27 +7,30 @@
       "display_name": "1337x",
       "kind": "html",
       "mirrors": ["https://1337x.to", "https://1337x.st", "https://x1337x.ws"],
-      "search_path": "/sort-search/{query}/seeders/desc/{page}/",
+      "search_path": "/search/{query}/{page}/",
       "pages": 2,
       "selectors": {
-        "row": "tr:has(a[href^=\"/torrent/\"])",
-        "title": "td[class^=\"coll-1\"] a[href^=\"/torrent/\"]",
+        "row": "table.table-list tbody tr",
+        "title": "td.coll-1 a:last-of-type[href^=\"/torrent/\"]",
         "title_attr": "text",
         "magnet_location": "detail",
-        "detail_link": "td[class^=\"coll-1\"] a[href^=\"/torrent/\"]",
+        "detail_link": "td.coll-1 a:last-of-type[href^=\"/torrent/\"]",
         "detail_link_attr": "href",
-        "detail_magnet_selector": "ul li a[href^=\"magnet:?xt=\"]",
-        "detail_magnet_selector_fallback": "a[href^=\"magnet:\"]",
-        "size": "td[class^=\"coll-4\"]",
-        "seeds": "td[class^=\"coll-2\"]",
+        "detail_magnet_selector": "a[href^=\"magnet:\"]",
+        "detail_magnet_selector_fallback": "ul li a[href^=\"magnet:?xt=\"]",
+        "size": "td.coll-4",
+        "seeds": "td.coll-2",
         "seeds_index": 0,
-        "peers": "td[class^=\"coll-3\"]",
+        "peers": "td.coll-3",
         "peers_index": 0
       },
       "request": {
-        "headers": { "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9" },
+        "headers": {
+          "Accept": "text/html,application/xhtml+xml",
+          "Accept-Language": "en-US,en;q=0.9"
+        },
         "delay_ms": 1200,
-        "min_seeds_for_detail_fetch": 3
+        "min_seeds_for_detail_fetch": 1
       }
     },
 

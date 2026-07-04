@@ -185,10 +185,38 @@ pub async fn search_dubbed(query: &str, _imdb_id: Option<&str>) -> Vec<TorrentRe
         query
     );
     let mut untagged = with_1337x_fallback(client, &config, query, raw).await;
+    // eztvco can't express a dub-language filter (its slugs carry no
+    // language info), so it only ever contributes to this untagged
+    // best-effort tier, never the confirmed-dub tier above.
+    untagged.extend(search_eztvco(client, query).await);
     for r in &mut untagged {
         r.is_confirmed_dub = false;
     }
     dedupe_and_sort(untagged)
+}
+
+/// Best-effort call into eztvco. Strips quality/dub-language noise that
+/// DubQueryBuilder appends (1080p, BluRay, "Hindi Dubbed", etc.) before
+/// searching, since eztvco's own search engine works on the bare title —
+/// same cleanup rationale as the noise-stripping already done for
+/// search_drama() below. No slug-guessing or year-matching needed here
+/// anymore: eztvco.rs now uses the site's real /search?s= endpoint
+/// (confirmed present via view-source; the earlier version of this file
+/// wrongly assumed no search endpoint existed and guessed detail-page
+/// slugs directly, which was unreliable).
+async fn search_eztvco(client: &reqwest::Client, query: &str) -> Vec<TorrentResult> {
+    let noise_re = regex::Regex::new(
+        r"(?i)\b(1080p|720p|480p|2160p|4k|bluray|web-dl|webrip|hdtv|dubbed|dub|hindi|tamil|telugu|bengali|kannada|malayalam|marathi|korean|chinese|turkish|dual audio|multi audio|s\d{2}e?\d{0,2})\b"
+    ).unwrap();
+    let year_re = regex::Regex::new(r"\((19|20)\d{2}\)|\b(19|20)\d{2}\b").unwrap();
+    let cleaned = noise_re.replace_all(query, "");
+    let cleaned = year_re.replace_all(&cleaned, "");
+    let title = cleaned.trim();
+
+    if title.is_empty() {
+        return vec![];
+    }
+    sites::eztvco::search(client, title).await
 }
 
 /// Plain keyword search across all sites, no dub filtering.
@@ -207,7 +235,12 @@ pub async fn search_all(query: &str) -> Vec<TorrentResult> {
     let config = get_config().await;
 
     let dedicated_ids = ["tgx", "kat", "torrentdownload", "extratorrent", "therarbg", "tpb", "kat_ws"];
-    let merged = config::search_sites(client, &config, &dedicated_ids, query, None).await;
+    let mut merged = config::search_sites(client, &config, &dedicated_ids, query, None).await;
+
+    // eztvco supplements rather than replaces — its slug-guess approach
+    // means a miss here is silent and cheap (a single 404), so it's
+    // always worth trying alongside the query-based sites above.
+    merged.extend(search_eztvco(client, query).await);
 
     let merged = with_1337x_fallback(client, &config, query, merged).await;
 
@@ -290,6 +323,12 @@ pub async fn search_drama(query: &str) -> Vec<TorrentResult> {
         let mirrors = special_mirrors(&config, "torrenttip");
         merged.extend(sites::kdrama::search_torrenttip(client, &mirrors, query).await);
     }
+
+    // eztvco now uses its real /search?s= endpoint (see search_eztvco()
+    // above) for both movies and series — the earlier /series/{slug}
+    // vs /movie/{slug}-{year} distinction only mattered for the old
+    // slug-guessing approach, which has been replaced entirely.
+    merged.extend(search_eztvco(client, query).await);
 
     let merged = with_1337x_fallback(client, &config, query, merged).await;
 
