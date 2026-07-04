@@ -17,7 +17,8 @@
 //
 //   Search        : GET /search?s={query}
 //                   Same "box-item" grid markup as the homepage/listing
-//                   pages — see search_result_boxes_to_links() below.
+//                   pages — see search_result_boxes() below. Paginated
+//                   via &page=2, &page=3, etc. (see has_next_page()).
 //
 //   Movie detail  : /movie/{slug}-{year}    e.g. /movie/daadi-ki-shaadi-2026
 //   Series detail : /series/{slug}          e.g. /series/mystery-at-blind-frog-ranch
@@ -74,14 +75,53 @@ pub async fn search(client: &reqwest::Client, query: &str) -> Vec<TorrentResult>
     let q = urlencoding::encode(query);
     let path = format!("/search?s={q}");
 
+    // CONFIRMED (view-source, "predator" query): result pages are paginated
+    // via ?page=N, with a "page larger" link when a second page exists. A
+    // broad/generic query like "predator" alone returns 2 pages (25 boxes
+    // on page 1). Fetch page 1 first, and only fetch page 2 if the
+    // pagination link is actually present — avoids a wasted request for
+    // the common case (a specific movie/show title) where everything
+    // fits on page 1.
     let html = match get_html(client, &path).await {
         Ok(h) => h,
         Err(e) => { log::warn!("[eztvtorrent.co] search failed: {e}"); return vec![]; }
     };
     let doc = Html::parse_document(&html);
 
-    let detail_urls = search_result_boxes_to_links(&doc);
-    if detail_urls.is_empty() {
+    let mut boxes = search_result_boxes(&doc);
+
+    if has_next_page(&doc) {
+        let page2_path = format!("/search?s={q}&page=2");
+        match get_html(client, &page2_path).await {
+            Ok(h2) => {
+                let doc2 = Html::parse_document(&h2);
+                boxes.extend(search_result_boxes(&doc2));
+            }
+            Err(e) => log::warn!("[eztvtorrent.co] page 2 fetch failed: {e}"),
+        }
+    }
+
+    if boxes.is_empty() {
+        return vec![];
+    }
+
+    // RELEVANCE FILTER: the site's own search matches "predator" as a
+    // loose substring against every title/description field, so a query
+    // like "predator" returns unrelated results too — e.g. "National
+    // Geographic Sharkfest Shark Quest: Hunt for the Apex Predator" and
+    // "The TikTok Man: Catching a Predator" (confirmed via view-source).
+    // Without filtering, fetch_detail_magnets() would waste requests on
+    // (and could return magnets for) titles that aren't actually what
+    // the caller searched for. We require every significant query word
+    // to appear in the box title (case-insensitive), which keeps genuine
+    // matches (e.g. "Predator 2", "The Predator") while dropping
+    // coincidental substring hits.
+    let relevant: Vec<String> = boxes.into_iter()
+        .filter(|(title, _)| title_matches_query(title, query))
+        .map(|(_, url)| url)
+        .collect();
+
+    if relevant.is_empty() {
         return vec![];
     }
 
@@ -90,42 +130,88 @@ pub async fn search(client: &reqwest::Client, query: &str) -> Vec<TorrentResult>
     // score per confirmed homepage markup, no magnet, so a second hop
     // per result is unavoidable here (unlike TGx/KAT-style sites where
     // the magnet is on the listing page itself).
-    let futures = detail_urls.into_iter().take(10).map(|url| {
+    let futures = relevant.into_iter().take(10).map(|url| {
         let client = client.clone();
         async move { fetch_detail_magnets(&client, &url).await.unwrap_or_default() }
     });
     futures::future::join_all(futures).await.into_iter().flatten().collect()
 }
 
-// ── Search-results parsing ───────────────────────────────────────────────────
-
-/// Extracts detail-page URLs from a "box-item" grid page (confirmed
-/// identical markup on the homepage; the /search results page is
-/// expected — though not separately view-sourced — to reuse the same
-/// Blade/template partial, since this site otherwise reuses this exact
-/// box-item component for every listing context: /movies, /tv-series,
-/// /top-imdb, and the homepage all render it identically).
-fn search_result_boxes_to_links(doc: &Html) -> Vec<String> {
-    // Confirmed markup:
-    //   <div class="box-item">
-    //     <a href="https://eztvtorrent.co/movie/x-1996" title="X"> ... </a>
-    //     <h3 class="h5 front_title"><a href="...">...</a></h3>
-    //     <span class="imdb-point">6.1</span>
-    //     <a href="...movie/x-1996" class="btn btn-primary ...">Download</a>
-    //   </div>
-    let box_sel = Selector::parse("div.box-item").unwrap();
-    let link_sel = Selector::parse(r#"a[href*="/movie/"], a[href*="/series/"]"#).unwrap();
-
-    let mut seen = std::collections::HashSet::new();
-    let mut urls = Vec::new();
-    for box_el in doc.select(&box_sel) {
-        if let Some(href) = box_el.select(&link_sel).next().and_then(|a| a.value().attr("href")) {
-            if seen.insert(href.to_string()) {
-                urls.push(href.to_string());
-            }
+/// True if every significant (len > 2) word in `query` appears somewhere
+/// in `title`, case-insensitively. Short words (a, of, in, ...) are
+/// ignored so they don't force spurious mismatches, matching how the
+/// noise-stripped queries from engine.rs's search_eztvco() are already
+/// reduced to the meaningful title words before reaching this function.
+fn title_matches_query(title: &str, query: &str) -> bool {
+    let title_lower = title.to_lowercase();
+    let mut had_word = false;
+    for word in query.to_lowercase().split_whitespace() {
+        if word.len() <= 2 {
+            continue;
+        }
+        had_word = true;
+        if !title_lower.contains(word) {
+            return false;
         }
     }
-    urls
+    // If the query had no words long enough to check (e.g. empty/short
+    // after stripping), fall back to allowing the result through rather
+    // than filtering everything out.
+    had_word || title.is_empty()
+}
+
+// ── Search-results parsing ───────────────────────────────────────────────────
+
+/// Extracts (title, detail-page URL) pairs from a "box-item" grid page
+/// (confirmed identical markup on the homepage and, per view-source of
+/// an actual /search?s= response, on the search-results page too — both
+/// reuse the same box-item component, along with /movies, /tv-series,
+/// and /top-imdb).
+///
+/// CONFIRMED markup (view-source, /search?s=predator):
+///   <div class="box-item">
+///     <a href="https://eztvtorrent.co/movie/x-1996" title="X"> ... </a>
+///     <h3 class="h5 front_title"><a href="...">...<span>X</span></a></h3>
+///     <span class="imdb-point">6.1</span>  (can be EMPTY — confirmed on
+///                                            several boxes, e.g. "Predator
+///                                            Hunters" — don't rely on it)
+///     <a href="...movie/x-1996" class="btn btn-primary ...">Download</a>
+///   </div>
+/// The title text lives in `h3.front_title a span`, which we use in
+/// preference to the outer `<a title="...">` attribute (both agree in
+/// every sampled box, but the visible text is the one users would
+/// actually compare against their search).
+fn search_result_boxes(doc: &Html) -> Vec<(String, String)> {
+    let box_sel = Selector::parse("div.box-item").unwrap();
+    let link_sel = Selector::parse(r#"a[href*="/movie/"], a[href*="/series/"]"#).unwrap();
+    let title_sel = Selector::parse("h3.front_title").unwrap();
+
+    let mut seen = std::collections::HashSet::new();
+    let mut boxes = Vec::new();
+    for box_el in doc.select(&box_sel) {
+        let href = match box_el.select(&link_sel).next().and_then(|a| a.value().attr("href")) {
+            Some(h) => h.to_string(),
+            None => continue,
+        };
+        if !seen.insert(href.clone()) {
+            continue;
+        }
+        let title = box_el.select(&title_sel).next()
+            .map(|e| e.text().collect::<String>().trim().to_string())
+            .unwrap_or_default();
+        boxes.push((title, href));
+    }
+    boxes
+}
+
+/// True if the page contains a "next page" pagination link (confirmed
+/// markup: `<a class="page larger" href=".../search?s=...&page=2">2</a>`
+/// inside `#pagination`). We just check for the presence of any
+/// `a.page.larger` link rather than parsing the page number, since we
+/// only ever need to know whether page 2 exists.
+fn has_next_page(doc: &Html) -> bool {
+    let next_sel = Selector::parse("#pagination a.page.larger").unwrap();
+    doc.select(&next_sel).next().is_some()
 }
 
 // ── Detail-page magnet extraction ────────────────────────────────────────────

@@ -12,5 +12,6 @@
 // remote indexer-config.json — see indexer/config/mod.rs.
 
 pub mod kdrama;
+pub mod eztvco;
 pub mod nyaa;
 pub mod tokyotosho;
