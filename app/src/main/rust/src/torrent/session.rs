@@ -363,6 +363,27 @@ impl TorrentSession {
         // reasoning comment above cleanup_orphaned_leftovers_if_needed().
         cleanup_orphaned_leftovers_if_needed(&save_dir);
 
+        // ── Ensure save_dir actually exists ───────────────────────────────
+        // save_dir is expected to already exist (Kotlin's
+        // allocateFreshMovieDir() creates it via File.mkdirs() immediately
+        // before calling into Rust), but this is verified/enforced here
+        // too rather than assumed — both the disk-space check right below
+        // and the DHT persistence setup further down read/write against
+        // this exact path, and previously assuming it existed (rather than
+        // checking) is exactly the class of bug that caused
+        // Session::new_with_opts() to fail silently before (see the FIX
+        // (ROOT CAUSE): DHT persistence path comment below for the full
+        // history — that bug's symptom was an instant "fetching metadata"
+        // flash with no real buffering, landing on a stuck 00:00, because
+        // the session never actually started).
+        if let Err(e) = std::fs::create_dir_all(&save_dir) {
+            warn!(
+                "[torrent] failed to create save_dir {save_dir}: {e} — proceeding anyway, \
+                 but disk-space check and Session::new_with_opts below will likely fail \
+                 the same way if this directory truly isn't writable."
+            );
+        }
+
         // ── Pre-flight disk-space check ─────────────────────────────────
         // Bail out immediately if storage is already nearly full, before
         // spending time on DHT/peer setup for a download that can't
@@ -410,12 +431,29 @@ impl TorrentSession {
         // ever runs. Session::new_with_opts() returns Err, and (until this
         // fix) so did the fallback Session::new(), leaving state=ERROR
         // with peers=0, seeds=0, rq_session_set=false — exactly matching
-        // what /debug showed.
+        // what /debug showed, and visible in the UI as an instant
+        // "fetching metadata" flash with no real buffering, landing on a
+        // stuck 00:00 (the player opens the stream URL against a session
+        // that never actually started).
+        //
+        // FIX (v4 hardening): originally save_dir was one long-lived shared
+        // folder (getExternalFilesDir("torrents")) that Android itself
+        // guarantees exists once requested, so "does the directory exist"
+        // was never a real concern here. Since the per-movie subfolder
+        // change, save_dir is a freshly-allocated UUID folder created on
+        // the Kotlin side (File.mkdirs()) immediately before start() calls
+        // into Rust. This function used to silently rely on that without
+        // ever verifying it here — see the create_dir_all(&save_dir) call
+        // near the top of run() (right after the orphan-cleanup safety
+        // net), which now guarantees this directory exists before we get
+        // this far, independent of whatever the Kotlin caller already did.
+        // That closes the exact class of regression this comment used to
+        // just assume away.
         //
         // Fix: point DHT persistence at an explicit path inside save_dir,
-        // which we already know is writable (video files download there).
-        // This keeps persistence enabled (faster peer discovery across
-        // app restarts) while skipping OS-directory auto-detection.
+        // which is now guaranteed to exist (previously assumed, not
+        // verified). This keeps persistence enabled (faster peer discovery
+        // across app restarts) while skipping OS-directory auto-detection.
         let dht_json_path = std::path::PathBuf::from(&save_dir).join(".dht_state.json");
         let dht_config = DhtSessionConfig {
             persistence: Some(DhtPersistenceConfig {
