@@ -157,15 +157,18 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getLoca
     env.new_string(url).expect("JNI string").into_raw()
 }
 
-// Clear download cache directory
+// Clear download cache directory. Returns true if the directory was
+// actually removed (or already absent) — false if removal failed, so
+// Kotlin can log/react instead of silently assuming the space was freed.
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_clearCacheNative(
     mut env: JNIEnv,
     _obj:  JClass,
     j_dir: JString,
-) {
+) -> jboolean {
     let dir = jstr(&mut env, j_dir);
-    torrent::engine::TorrentEngine::clear_cache(&dir);
+    let ok = torrent::engine::TorrentEngine::clear_cache(&dir);
+    ok as jboolean
 }
 
 // ── ③ Addon HTTP transport ───────────────────────────────────────────────────

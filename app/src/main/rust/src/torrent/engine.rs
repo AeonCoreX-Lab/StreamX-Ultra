@@ -66,14 +66,42 @@ impl TorrentEngine {
     }
 
     // ── Stop ──────────────────────────────────────────────────────────────────
+    // FIX (storage race): this used to fire-and-forget the async teardown
+    // (rt.spawn(async move { sess.stop().await }) and return immediately.
+    // Kotlin's TorrentEngine.stop() calls this and then IMMEDIATELY calls
+    // clearCache() → remove_dir_all() on the same directory, synchronously,
+    // on the calling (JNI) thread. If the spawned sess.stop().await hadn't
+    // actually finished dropping its Arc<ManagedTorrent>/session handles
+    // yet, remove_dir_all() could hit a still-open file handle and fail
+    // (silently — only warn!-logged), leaving the just-played movie's data
+    // on disk. Over repeated plays this defeats the entire point of
+    // clearing on dispose and slowly re-creates the storage-bloat problem
+    // even with the new per-movie subfolder isolation.
+    //
+    // Fix: block the calling thread on rt.block_on(...) until sess.stop()
+    // has actually finished, so that by the time this function returns to
+    // Kotlin (and Kotlin proceeds to call clearCache()), the directory is
+    // guaranteed free of any live handles. This is safe to call from a JNI
+    // thread: JNI calls run on an Android-managed native thread, never on
+    // one of this struct's own tokio worker threads, so block_on() here
+    // cannot deadlock against the runtime it's blocking on.
     pub fn stop(&self) {
         self.stop_session();
     }
 
     fn stop_session(&self) {
         if let Some(sess) = self.session.lock().take() {
-            let rt = self.rt.clone();
-            rt.spawn(async move { sess.stop().await });
+            self.rt.block_on(async move { sess.stop().await });
+        }
+        // Explicitly detach the HTTP server's reference too. TorrentSession::
+        // stop() already nulls torrent_handle/rq_session internally, so a
+        // stray request landing here would get a clean 503 either way — but
+        // clearing it here makes the "no active session" state explicit
+        // instead of relying on that as a side effect, and avoids the
+        // TorrentHttpServer holding an Arc<TorrentSession> alive (however
+        // inert) for longer than the session is actually meant to exist.
+        if let Some(srv) = self.http_server.lock().as_ref() {
+            srv.clear_session();
         }
     }
 
@@ -112,9 +140,18 @@ impl TorrentEngine {
     }
 
     // ── Clear download cache ──────────────────────────────────────────────────
-    pub fn clear_cache(save_dir: &str) {
-        if let Err(e) = std::fs::remove_dir_all(save_dir) {
-            log::warn!("clear_cache: {}", e);
+    // Returns true if the directory was removed (or didn't exist to begin
+    // with — also a success from the caller's point of view). Returns false
+    // only on a real removal failure (e.g. a file handle still open), so
+    // Kotlin can log/report it instead of silently assuming success.
+    pub fn clear_cache(save_dir: &str) -> bool {
+        match std::fs::remove_dir_all(save_dir) {
+            Ok(())                                                    => true,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound         => true,
+            Err(e) => {
+                log::warn!("clear_cache: failed to remove {save_dir}: {e}");
+                false
+            }
         }
     }
 }

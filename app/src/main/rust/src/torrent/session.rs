@@ -36,6 +36,33 @@
 //   a Retry-After: 2 503 response until state >= STATE_READY, so MPV
 //   retries cleanly instead of locking onto 0-byte data.
 //   (session.rs exposes STATE_READY as pub so http_server can import it.)
+//
+// FIX 4 — Stale previous movie plays again on the next torrent (v4):
+//   Root cause: every torrent used the SAME save_dir
+//   (getExternalFilesDir("torrents")), and video_path was chosen via
+//   files.iter().max_by_key(|f| f.len) over whatever was physically
+//   present in save_dir. clearCache() on the old session's dispose is
+//   best-effort (remove_dir_all errors were only warn!-logged, never
+//   surfaced), and the old size-gated safety net only fired above 8GB
+//   — nowhere near a single leftover movie file. If the old file was
+//   still on disk for ANY reason when the new torrent's metadata
+//   resolved, max_by_key could pick the old, larger, complete file
+//   over the new, still-downloading one, and the new session would
+//   serve the OLD movie's bytes.
+//
+//   Fix (two parts, see TorrentEngine.kt + this file):
+//     1. Kotlin now allocates a fresh, uniquely-named SUBFOLDER per
+//        movie (torrents/<uuid>/) instead of reusing one shared
+//        directory. Each torrent's max_by_key search is now scoped to
+//        its own subfolder, so a leftover from a previous movie is in
+//        a different directory entirely and can never be selected —
+//        this makes the bug structurally impossible, not just less
+//        likely, regardless of clearCache() timing.
+//     2. cleanup_orphaned_leftovers_if_needed() now walks the PARENT
+//        of save_dir and removes every sibling subfolder that isn't
+//        the current one, unconditionally (not size-gated) — so any
+//        leftover from a crashed/killed previous session is reclaimed
+//        immediately, not just once it crosses 8GB.
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -125,37 +152,47 @@ fn check_disk_space(save_dir: &str, required_bytes: u64) -> Result<(), String> {
     }
 }
 
-// ── Orphaned-leftover safety net ───────────────────────────────────────────
+// ── Orphaned-leftover safety net (v4 — sibling-subfolder cleanup) ─────────
 //
-// The app's intentional design is: clear save_dir when the player screen
-// closes normally (see MoviePlayerScreen.kt's DisposableEffect calling
-// TorrentEngine.clearCache()) — movies are often 1GB+, and never persisting
-// them keeps storage bounded and reduces how long potentially-infringing
-// content sits on the device.
+// The app's intentional design is: clear the CURRENT movie's subfolder when
+// the player screen closes normally (see MoviePlayerScreen.kt's
+// DisposableEffect calling TorrentEngine.clearCache()) — movies are often
+// 1GB+, and never persisting them keeps storage bounded and reduces how
+// long potentially-infringing content sits on the device.
 //
-// GAP: Compose's DisposableEffect.onDispose does NOT run if the app process
-// is killed abruptly rather than the Composable being properly removed from
-// composition — e.g. Android killing the app in the background under memory
-// pressure (common on the lower-RAM devices disproportionately used by
-// torrent-streaming app users), or a crash. In that case clearCache() never
-// runs, and a partial/complete download silently persists — contradicting
-// the intended design, invisibly, until the user eventually hits "low
-// storage space."
+// GAP 1: Compose's DisposableEffect.onDispose does NOT run if the app
+// process is killed abruptly (OOM kill, crash) rather than the Composable
+// being properly removed from composition.
+// GAP 2 (the actual wrong-movie-plays-again bug, see FIX 4 above): even on
+// a normal close, clearCache()'s remove_dir_all can fail silently (only
+// warn!-logged), and previously every movie shared ONE save_dir, so any
+// leftover competed directly with the new torrent's own files for
+// max_by_key() file selection — sometimes winning, and playing the wrong
+// movie.
 //
-// FIX: not a new caching strategy (see conversation: rolling/size-limited
-// caches are hard to get right — Stremio's own "cache size" setting has a
-// long-standing, still-open bug where it isn't honored and storage balloons
-// to 10GB+ despite a 2GB limit — github.com/Stremio/stremio-bugs/issues/755).
-// Instead: a simple, bounded safety net. Before starting a new download,
-// check whether save_dir is ALREADY larger than any single movie should
-// reasonably be. If so, that can only mean a previous session's cleanup
-// didn't complete — clear it now, before starting fresh. Normal exits are
-// completely unaffected; this only ever fires to correct a missed cleanup.
-const MAX_EXPECTED_TORRENT_DIR_BYTES: u64 = 8 * 1024 * 1024 * 1024; // 8 GB
+// FIX: each movie now gets its own uniquely-named subfolder under a shared
+// parent (see TorrentEngine.kt — the save_dir passed down to Rust is always
+// "<parent>/<uuid>/"). That alone makes wrong-movie selection structurally
+// impossible, independent of cleanup timing, because max_by_key() only ever
+// sees files inside the CURRENT movie's own subfolder. This function is the
+// second, complementary half: it walks the PARENT of the current save_dir
+// and removes every SIBLING subfolder (i.e. every other movie's leftover
+// directory), unconditionally — not size-gated — since identity (is this
+// mine or not) rather than size is what determines correctness here. This
+// also reclaims space from crashed/killed sessions immediately instead of
+// waiting for an arbitrary size threshold.
+//
+// (We don't rely on a rolling/size-limited cache strategy — see
+// conversation history: Stremio's own "cache size" setting has a
+// long-standing, still-open bug where it isn't honored and storage
+// balloons to 10GB+ despite a 2GB limit —
+// github.com/Stremio/stremio-bugs/issues/755. Deleting everything that
+// isn't the active movie's own folder is simpler and has no such failure
+// mode.)
 
 /// Best-effort recursive directory size. Returns 0 on any error (e.g. the
 /// directory doesn't exist yet on a fresh install) — safe default that
-/// never blocks startup.
+/// never blocks startup. Used for logging/diagnostics, not gating.
 fn dir_size_bytes(dir: &str) -> u64 {
     fn walk(path: &std::path::Path) -> u64 {
         let entries = match std::fs::read_dir(path) {
@@ -177,22 +214,67 @@ fn dir_size_bytes(dir: &str) -> u64 {
     walk(std::path::Path::new(dir))
 }
 
-/// Clears save_dir if it's grown beyond what any single movie should
-/// reasonably need — evidence of a missed cleanup from a previous session,
-/// not normal operation. See module-level comment above for full reasoning.
+/// Removes every sibling of `save_dir` inside `save_dir`'s parent directory
+/// — i.e. every OTHER movie's leftover subfolder — before starting a new
+/// download into `save_dir` itself. `save_dir` is expected to be a fresh,
+/// uniquely-named subfolder allocated by Kotlin for this specific torrent
+/// (see TorrentEngine.kt); it is never removed by this function.
+///
+/// Fails open on any individual entry: a directory that fails to delete
+/// (permissions, file in use) is logged and skipped rather than aborting
+/// the whole cleanup or blocking the new download from starting.
 fn cleanup_orphaned_leftovers_if_needed(save_dir: &str) {
-    let size = dir_size_bytes(save_dir);
-    if size > MAX_EXPECTED_TORRENT_DIR_BYTES {
-        warn!(
-            "[torrent] save_dir at {save_dir} is {} — larger than any single \
-             movie should need ({}). This indicates a previous session's \
-             cleanup didn't complete (app killed/crashed while the player \
-             was open). Clearing it now before starting a new download.",
-            human_bytes(size), human_bytes(MAX_EXPECTED_TORRENT_DIR_BYTES),
-        );
-        if let Err(e) = std::fs::remove_dir_all(save_dir) {
-            warn!("[torrent] orphaned-leftover cleanup failed: {e} — proceeding anyway");
+    let current = std::path::Path::new(save_dir);
+    let parent = match current.parent() {
+        Some(p) => p,
+        None => {
+            warn!("[torrent] save_dir {save_dir} has no parent directory — skipping sibling cleanup");
+            return;
         }
+    };
+
+    let entries = match std::fs::read_dir(parent) {
+        Ok(e) => e,
+        Err(_) => return, // parent doesn't exist yet (fresh install) — nothing to clean
+    };
+
+    let mut reclaimed: u64 = 0;
+    let mut removed_count: u32 = 0;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path == current {
+            continue; // never delete the folder we're about to download into
+        }
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        if !is_dir {
+            continue; // leave stray non-directory files alone
+        }
+
+        let size = dir_size_bytes(&path.to_string_lossy());
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => {
+                reclaimed += size;
+                removed_count += 1;
+                debug!(
+                    "[torrent] removed stale movie folder {} ({})",
+                    path.display(), human_bytes(size)
+                );
+            }
+            Err(e) => {
+                warn!(
+                    "[torrent] failed to remove stale movie folder {}: {e} — skipping",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    if removed_count > 0 {
+        info!(
+            "[torrent] sibling cleanup: removed {removed_count} stale movie folder(s), reclaimed {}",
+            human_bytes(reclaimed),
+        );
     }
 }
 

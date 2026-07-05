@@ -30,8 +30,21 @@ static std::string s_current_path;             // last loaded file path, for rel
 static bool        s_decode_check_done   = true;  // true = nothing to check (idle / already resolved)
 static int         s_decode_check_ticks  = 0;     // poll ticks spent waiting for video-params
 static bool        s_forced_sw_this_file = false; // true once we've auto-switched this file
-static std::string s_switch_reason;               // "10bit" / "oversized" / "log-detected" / "manual" / ""
-static const int   DECODE_CHECK_MAX_TICKS = 16;   // ~4s at 250ms polling — give up after this
+static std::string s_switch_reason;               // "10bit" / "oversized" / "black-frame" / "negotiation-timeout" / "log-detected" / "manual" / "sw-also-black" / ""
+static const int   DECODE_CHECK_MAX_TICKS = 48;   // ~12s at 250ms polling — give up after this
+// (Was 16 ticks / ~4s. Too tight for network-streamed files (HTTP/torrent
+// source, not local disk) and unusual/remuxed containers — some "web" rips
+// take noticeably longer than 4s for mpv to negotiate video-params/pixel-
+// format, especially when the demuxer needs more data buffered before it
+// can commit to a decoder, or MediaCodec's async init is slow on that
+// device/codec combo. The old 4s ceiling meant Stage 1 gave up BEFORE ever
+// inspecting pixel format — HW decode stayed active in whatever broken
+// state caused the stall, with no SW fallback ever attempted: audio played
+// (audio negotiates independently and far faster), video stayed black, and
+// the decode-mode label stayed stuck on "Detecting…" forever, since that
+// label reads video-params/pixelformat live and was never populated.
+// 12s is still bounded (won't hang indefinitely on truly audio-only files)
+// but gives real streamed video enough room to actually negotiate.
 
 // Extreme-resolution safety net. Most Android SoCs (even mid-range,
 // Snapdragon 6xx+) HW-decode up to 4K (3840x2160) reliably; several
@@ -911,10 +924,41 @@ void check_decode_compatibility() {
     if (pixfmt.empty()) {
         // video-params not negotiated yet — wait for the next poll tick,
         // but give up after DECODE_CHECK_MAX_TICKS so we never check forever
-        // (e.g. audio-only files, or a file that fails to open at all).
+        // (e.g. genuinely audio-only files, or a file that fails to open).
         if (++s_decode_check_ticks >= DECODE_CHECK_MAX_TICKS) {
             s_decode_check_done = true;
-            LOGD("decode-compat: gave up waiting for video-params (no video track?)");
+
+            // Distinguish "no video track at all" (normal, nothing to do)
+            // from "there IS a video track but pixel format never resolved"
+            // (a stuck/broken HW decode negotiation — the actual black-
+            // screen-with-audio bug). video-codec reflects demuxer/codec
+            // selection and populates far earlier than video-params/
+            // pixelformat (which needs a decoder to actually produce a
+            // frame), so a non-empty video-codec here means: there IS a
+            // video track, and after 12s of real playback time it STILL
+            // hasn't produced a usable frame under HW decode. That's not
+            // a dark opening scene or a slow network — it's the decoder
+            // never actually succeeding, and previously this fell through
+            // silently with HW decode left on, black screen forever.
+            char* codec_raw = mpv_get_property_string(mpv_ctx, "video-codec");
+            std::string codec = codec_raw ? codec_raw : "";
+            if (codec_raw) mpv_free(codec_raw);
+
+            char* hw_raw2 = mpv_get_property_string(mpv_ctx, "hwdec-current");
+            bool  hw_was_active = hw_raw2 && hw_raw2[0] != '\0';
+            if (hw_raw2) mpv_free(hw_raw2);
+
+            if (!codec.empty() && hw_was_active && !s_current_path.empty()) {
+                LOGD("decode-compat: video-codec=%s present but video-params "
+                     "never negotiated after %d ticks with HW decode active — "
+                     "treating as stuck decoder, falling back to SW",
+                     codec.c_str(), DECODE_CHECK_MAX_TICKS);
+                force_sw_reload_locked("negotiation-timeout");
+                return;
+            }
+
+            LOGD("decode-compat: gave up waiting for video-params "
+                 "(no video track detected, codec=%s)", codec.c_str());
         }
         return;
     }

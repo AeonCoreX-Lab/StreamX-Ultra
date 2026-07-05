@@ -494,8 +494,12 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             try { StreamXCore.pauseMpvVideo(true) } catch (e: Exception) {}
-            TorrentEngine.stop()
-            TorrentEngine.clearCache(context)
+            // stopAndClearCache() dispatches the actual native stop+clear work
+            // onto TorrentEngine's background scope and returns immediately —
+            // onDispose {} is a plain non-suspend lambda that Compose runs
+            // synchronously on the main thread, so it must never block on
+            // native I/O directly (see TorrentEngine.stop() fix comment).
+            TorrentEngine.stopAndClearCache(context)
         }
     }
 
@@ -504,20 +508,29 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         var retryCount = 0; val maxRetries = 3
         while (retryCount < maxRetries) {
             if (decodedUrl.startsWith("magnet:?")) {
-                withContext(Dispatchers.IO) { TorrentEngine.clearCache(context) }
-                val saveDir = withContext(Dispatchers.IO) {
+                // NOTE: no explicit clearCache() pre-call here anymore. Previously
+                // this cleared the single shared torrents dir before every start(),
+                // but that was a race-prone patch, not a fix — if it failed or
+                // didn't finish before start() began downloading, the old movie's
+                // file could still be picked by Rust's file selection and play
+                // again. start() now allocates a fresh per-movie subfolder and
+                // unconditionally removes any leftover sibling subfolders itself
+                // (see TorrentEngine.allocateFreshMovieDir()), so the old movie's
+                // data is guaranteed gone from the new torrent's directory before
+                // a single byte of the new one downloads — not just "probably gone."
+                val torrentsRoot = withContext(Dispatchers.IO) {
                     context.getExternalFilesDir("torrents")?.absolutePath
                         ?: context.cacheDir.absolutePath
                 }
                 var metadataTimeout = 0; var completed = false
-                TorrentEngine.start(decodedUrl, saveDir)
+                withContext(Dispatchers.IO) { TorrentEngine.start(decodedUrl, torrentsRoot) }
                 TorrentEngine.status.collect { status ->
                     when (status.state) {
                         TorrentEngine.State.METADATA -> {
                             statusMsg = "Fetching metadata…"
                             if (++metadataTimeout > 240) {
                                 statusMsg = if (retryCount < maxRetries - 1) "Timeout – retrying (${retryCount+1}/$maxRetries)" else "Timeout – last attempt"
-                                TorrentEngine.stop(); completed = true
+                                TorrentEngine.stopAndAwait(); completed = true
                             }
                         }
                         TorrentEngine.State.BUFFERING -> { isPreBuffering = true; torrentProgress = status.progress; statusMsg = "Buffering ${status.progress}%"; downloadSpeed = "${status.speedBps / 1000} KB/s"; seeds = status.seeds; metadataTimeout = 0 }
