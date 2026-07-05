@@ -173,7 +173,7 @@ impl TorrentEngine {
     pub fn status(&self) -> TorrentStatus {
         self.session.lock()
             .as_ref()
-            .map(|s| s.status())
+            .map(|(_, s)| s.status())
             .unwrap_or_default()
     }
 
@@ -187,13 +187,13 @@ impl TorrentEngine {
     pub fn debug_dump(&self) -> String {
         self.session.lock()
             .as_ref()
-            .map(|s| s.debug_dump())
+            .map(|(_, s)| s.debug_dump())
             .unwrap_or_else(|| "session=NONE (no torrent active)\n".to_string())
     }
 
     // ── Playhead update (from Kotlin MPV observer) ────────────────────────────
     pub fn set_playhead(&self, secs: f64) {
-        if let Some(sess) = self.session.lock().as_ref() {
+        if let Some((_, sess)) = self.session.lock().as_ref() {
             sess.set_playhead(secs);
         }
     }
