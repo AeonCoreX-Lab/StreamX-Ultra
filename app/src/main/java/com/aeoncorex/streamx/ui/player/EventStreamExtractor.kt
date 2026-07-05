@@ -54,6 +54,37 @@ import kotlinx.coroutines.*
  *  professional live-streaming Android apps.
  *
  * ══════════════════════════════════════════════════════════════════
+ *  FIX (playback failure after successful extraction)
+ * ══════════════════════════════════════════════════════════════════
+ *
+ *  Capturing the .m3u8 URL above is only half the problem. Once
+ *  WebView's shouldInterceptRequest() sees it, that request was made
+ *  BY THE WEBVIEW — with the Referer/Origin (streamed.pk) and User-
+ *  Agent that the CDN already checked and approved for that specific
+ *  token-locked URL.
+ *
+ *  If the caller then hands the bare URL string to ExoPlayer via
+ *  MediaItem.Builder().setUri(playUrl) with no custom headers,
+ *  ExoPlayer opens a completely NEW connection with no Referer, no
+ *  Origin, and its own default User-Agent. Many of these CDNs
+ *  (vipstreams.in and others) hotlink-protect on exactly those
+ *  headers — so the capture succeeds, extractionStatus shows
+ *  "Stream found ✓", but playback then fails or hangs, because the
+ *  second request looks nothing like the first one the CDN allowed.
+ *
+ *  Fix: the caller (EventPlayerScreen) must NOT use a plain
+ *  MediaItem.Builder().setUri(...) for MODE B results. It must build
+ *  an HttpMediaSource with a DefaultHttpDataSource.Factory that sets:
+ *    - Referer:    EventStreamExtractor.resolveBaseUrl(embedUrl)
+ *    - User-Agent: EventStreamExtractor.CAPTURE_USER_AGENT
+ *  so ExoPlayer's request is indistinguishable from a continuation of
+ *  the same WebView session that got the URL approved in the first
+ *  place. See EventPlayerScreen.kt's buildMediaSource() for the
+ *  actual wiring — MODE A (already-direct CDN URLs) does not need
+ *  this, since those were never gated by a WebView-only Referer check
+ *  to begin with.
+ *
+ * ══════════════════════════════════════════════════════════════════
  *  TWO MODES
  * ══════════════════════════════════════════════════════════════════
  *
@@ -105,8 +136,18 @@ object EventStreamExtractor {
         "embedme.top"        to "https://embedme.top/",
         "embedstream.me"     to "https://embedstream.me/",
         // ── DaddyLive / DLHD family ────────────────────────────────────
+        // DaddyLive rotates its mirror domain frequently (.pk, .sx, .st,
+        // .to, .mp, .eu, .fm seen so far) — all serve the same backend.
+        // A missing entry here falls through to resolveBaseUrl()'s
+        // fallback (the embed URL's OWN origin), which sends the site
+        // itself as its own Referer — that's exactly what DLHD's "Direct
+        // access blocked, place iframe embed code on your website" page
+        // is rejecting, since it expects an EXTERNAL embedding site, not
+        // itself. Keep this list current as new mirrors appear; an
+        // unmapped domain here silently reproduces that exact block.
         "dlhd.pk"            to "https://dlhd.pk/",
         "dlhd.sx"            to "https://dlhd.sx/",
+        "dlhd.st"            to "https://dlhd.st/",
         "daddylive.dad"      to "https://daddylive.dad/",
         "daddylive.mp"       to "https://daddylive.mp/",
         "daddylive.eu"       to "https://daddylive.eu/",
@@ -252,11 +293,10 @@ object EventStreamExtractor {
                         setSupportMultipleWindows(false)
                         builtInZoomControls              = false
 
-                        // Standard Chrome Android UA — embed pages block non-browser UAs
-                        userAgentString =
-                            "Mozilla/5.0 (Linux; Android 14; Pixel 8) " +
-                            "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                            "Chrome/124.0.0.0 Mobile Safari/537.36"
+                        // Standard Chrome Android UA — embed pages block non-browser UAs.
+                        // Shared with CAPTURE_USER_AGENT so the caller can hand ExoPlayer
+                        // the exact same UA the CDN already saw and approved.
+                        userAgentString = CAPTURE_USER_AGENT
 
                         // Allow HTTP sub-resources inside HTTPS pages (some CDNs need this)
                         @Suppress("DEPRECATION")
@@ -359,8 +399,17 @@ object EventStreamExtractor {
     //  PRIVATE HELPERS
     // ════════════════════════════════════════════════════════════════════════
 
-    /** Resolve which base URL to use for the iframe wrapper. */
-    private fun resolveBaseUrl(embedUrl: String): String {
+    /**
+     * Resolve which base URL (Referer/Origin) to use for a given embed URL —
+     * both for the iframe wrapper here AND for whoever ends up actually
+     * requesting the captured stream URL (see FIX note below).
+     *
+     * Public because EventPlayerScreen needs this SAME value to attach a
+     * matching Referer header when ExoPlayer opens the captured .m3u8 —
+     * see the "FIX (playback failure after successful extraction)" note
+     * at the top of this file.
+     */
+    fun resolveBaseUrl(embedUrl: String): String {
         val domain = try {
             android.net.Uri.parse(embedUrl).host?.lowercase() ?: ""
         } catch (_: Exception) { "" }
@@ -377,6 +426,17 @@ object EventStreamExtractor {
             "${uri.scheme}://${uri.host}/"
         } catch (_: Exception) { "https://streamed.pk/" }
     }
+
+    /**
+     * The exact User-Agent string the WebView used to capture the stream
+     * URL. Exposed so ExoPlayer's request looks like a continuation of the
+     * same "browser session" the CDN already approved, not a different
+     * client suddenly requesting the same token-locked URL — see FIX note.
+     */
+    const val CAPTURE_USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) " +
+        "AppleWebKit/537.36 (KHTML, like Gecko) " +
+        "Chrome/124.0.0.0 Mobile Safari/537.36"
 
     /**
      * Build minimal HTML that iframes [embedUrl] — NO sandbox attribute.

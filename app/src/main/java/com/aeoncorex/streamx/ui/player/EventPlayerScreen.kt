@@ -45,7 +45,10 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.*
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -190,6 +193,48 @@ fun EventPlayerScreen(
         }
     }
 
+    // ── Build a MediaSource with the headers this URL actually needs ──────
+    // FIX (playback failure after successful extraction): a plain
+    // MediaItem.Builder().setUri(playUrl) sends ExoPlayer's default
+    // headers — no Referer, no matching User-Agent. For MODE B URLs,
+    // captured out of a WebView session that the CDN approved specifically
+    // for that Referer/UA combination, a header-less second request often
+    // gets rejected (hotlink protection) even though extraction itself
+    // "succeeded." See EventStreamExtractor.kt's FIX doc comment for the
+    // full root-cause writeup. MODE A URLs (already-direct CDN links) were
+    // never gated by a WebView-only Referer check, so they don't need this.
+    fun buildMediaSource(playUrl: String, forEmbedUrl: String, direct: Boolean): MediaSource {
+        val mediaItem = MediaItem.Builder()
+            .setUri(playUrl)
+            .setLiveConfiguration(
+                MediaItem.LiveConfiguration.Builder()
+                    .setMaxPlaybackSpeed(1.02f)
+                    .build()
+            )
+            .build()
+
+        if (direct) {
+            // MODE A: default ExoPlayer HTTP stack, no special headers needed.
+            return HlsMediaSource.Factory(DefaultHttpDataSource.Factory())
+                .createMediaSource(mediaItem)
+        }
+
+        // MODE B: attach the same Referer + User-Agent the WebView used to
+        // capture this URL, so the CDN sees a consistent "session" rather
+        // than a bare, unauthenticated-looking request.
+        val referer = EventStreamExtractor.resolveBaseUrl(forEmbedUrl)
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent(EventStreamExtractor.CAPTURE_USER_AGENT)
+            .setDefaultRequestProperties(
+                mapOf(
+                    "Referer" to referer,
+                    "Origin"  to referer.trimEnd('/'),
+                )
+            )
+        return HlsMediaSource.Factory(httpFactory)
+            .createMediaSource(mediaItem)
+    }
+
     // ── PHASE 1/2: Start play when embedUrl is ready ──────────────
     LaunchedEffect(retryKey, embedUrl) {
         if (embedUrl.isEmpty()) return@LaunchedEffect
@@ -213,16 +258,8 @@ fun EventPlayerScreen(
 
         if (playUrl != null) {
             extractedUrl = playUrl
-            exoPlayer.setMediaItem(
-                MediaItem.Builder()
-                    .setUri(playUrl)
-                    .setLiveConfiguration(
-                        MediaItem.LiveConfiguration.Builder()
-                            .setMaxPlaybackSpeed(1.02f)
-                            .build()
-                    )
-                    .build()
-            )
+            val mediaSource = buildMediaSource(playUrl, embedUrl, isDirect)
+            exoPlayer.setMediaSource(mediaSource)
             exoPlayer.prepare()
             exoPlayer.playWhenReady = true
         } else {
