@@ -85,6 +85,20 @@ impl TorrentEngine {
             .unwrap_or_default()
     }
 
+    // ── Diagnostics export (Tier 3 #16) ────────────────────────────────────
+    // Exposes TorrentSession::debug_dump() directly via JNI, bypassing the
+    // HTTP /debug route entirely — that route is compiled out of release
+    // builds (#[cfg(debug_assertions)] in http_server.rs) for security, but
+    // this same diagnostic text is still valuable for USER-INITIATED bug
+    // reports (a "Copy Diagnostics" button in Settings), so it's exposed
+    // here as a plain method call with no HTTP/network surface at all.
+    pub fn debug_dump(&self) -> String {
+        self.session.lock()
+            .as_ref()
+            .map(|s| s.debug_dump())
+            .unwrap_or_else(|| "session=NONE (no torrent active)\n".to_string())
+    }
+
     // ── Playhead update (from Kotlin MPV observer) ────────────────────────────
     pub fn set_playhead(&self, secs: f64) {
         if let Some(sess) = self.session.lock().as_ref() {

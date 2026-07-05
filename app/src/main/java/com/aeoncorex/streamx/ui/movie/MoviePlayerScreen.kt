@@ -1,19 +1,24 @@
 package com.aeoncorex.streamx.ui.movie
 
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
+import android.widget.Toast
 import android.util.Log
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.Toast
 import androidx.annotation.Keep
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -218,6 +223,13 @@ fun openLiveCaptionSettings(context: Context) {
 }
 
 private const val PREFS_NAME   = "streamx_prefs"
+// Tier 2 #13: stutter/frame-drop detection tuning.
+// Check every ~2s (smooths out single-frame drops, which are normal and
+// imperceptible); flag as "stuttering" only if drops accumulate faster
+// than ~2.5/sec sustained over that window — occasional 1-2 frame drops
+// during a fast pan are inaudible/invisible and shouldn't alarm the user.
+private const val STUTTER_CHECK_WINDOW_MS = 2000L
+private const val STUTTER_DROP_THRESHOLD  = 5L
 private const val PREF_SUB_LANG = "sub_lang_code"
 private const val PREF_FORCE_SW_DECODE = "force_sw_decode"
 
@@ -380,6 +392,22 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     // Real-time HW/SW decode mode label for the settings UI.
     // Updated from the same 250ms poll loop that already tracks time/duration.
     var decodeModeLabel    by remember { mutableStateOf("\u2014") }
+    // Tier 2 #13: Stutter/frame-drop indicator. Tracks the total dropped-frame
+    // count (VO-level "framedrop=vo" drops + decoder-level drops) and its rate
+    // of change — a sudden burst indicates the device is struggling to keep
+    // up (thermal throttling, CPU/GPU contention from other apps, or a
+    // problematic file), distinct from the black-frame class of bugs this
+    // file already handles. Shown as a subtle indicator, never blocks playback.
+    var isStuttering       by remember { mutableStateOf(false) }
+    var lastDropCount      by remember { mutableStateOf(0L) }
+    var lastDropCheckTime  by remember { mutableStateOf(0L) }
+    // Tier 2 #14: Battery-saver awareness. When Android's Power Save mode is
+    // active, the heavy ewa_lanczossharp GPU scaler (toggleVulkanFSR) is
+    // disabled in favor of the cheap bilinear scaler — meaningful battery
+    // savings over a 2h movie with negligible visual difference, and
+    // respects the user's/system's explicit power-saving intent rather
+    // than silently ignoring it.
+    var isPowerSaveActive  by remember { mutableStateOf(false) }
     var surfaceW           by remember { mutableIntStateOf(0) }
     var surfaceH           by remember { mutableIntStateOf(0) }
     var isControlsVisible  by remember { mutableStateOf(true) }
@@ -413,6 +441,37 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     val maxVolume    = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
 
     // ── Init MPV + system UI ─────────────────────────────────────
+    // ── Tier 2 #14: Battery-saver-aware scaling ──────────────────────
+    // Disables the heavy ewa_lanczossharp GPU scaler while Android's
+    // Power Save mode is active — meaningful battery savings over a
+    // long movie, negligible visual difference, and respects the
+    // user's/system's explicit power-saving choice instead of silently
+    // ignoring it. Reacts in real time if power-save is toggled mid-
+    // playback (e.g. auto-triggered when battery drops below a
+    // threshold), not just checked once at startup.
+    DisposableEffect(Unit) {
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+
+        fun applyPowerSaveState() {
+            val active = powerManager?.isPowerSaveMode ?: false
+            isPowerSaveActive = active
+            try { StreamXCore.toggleVulkanFSR(!active) } catch (e: Exception) {}
+        }
+
+        applyPowerSaveState() // initial check when the player opens
+
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                applyPowerSaveState()
+            }
+        }
+        context.registerReceiver(receiver, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED))
+
+        onDispose {
+            try { context.unregisterReceiver(receiver) } catch (e: Exception) {}
+        }
+    }
+
     LaunchedEffect(Unit) {
         // Apply the persisted "force software decode" override BEFORE
         // initMpvEngine() — init_mpv_engine reads s_force_sw_decode to
@@ -492,6 +551,11 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         mpvPath       = null
         currentTime   = 0.0
         totalDuration = 0.0
+        // Reset stutter tracking (Tier 2 #13) — drop counts are per-file
+        // in mpv, so a fresh baseline is needed for each new video.
+        isStuttering      = false
+        lastDropCount     = 0L
+        lastDropCheckTime = 0L
     }
 
     // ── Start playback ─────────────────────────────────────────────
@@ -541,10 +605,38 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         try { StreamXCore.checkDecodeCompat() } catch (e: Exception) {}
                         val decMode = try { StreamXCore.getDecodeModeLabel() } catch (e: Exception) { "\u2014" }
 
+                        // Tier 2 #13: Stutter/frame-drop tracking. Sums VO-level
+                        // drops (framedrop=vo, timing-based) and decoder-level
+                        // drops (hardware decoder falling behind) — both are
+                        // confirmed mpv properties (player/command.c:
+                        // "frame-drop-count" / "decoder-frame-drop-count").
+                        // -1 sentinel means the property read failed (e.g. no
+                        // file loaded yet) — treated as "no data" below, not
+                        // as zero drops.
+                        val dropsNow = try {
+                            StreamXCore.getPropertyIntNative("frame-drop-count") +
+                            StreamXCore.getPropertyIntNative("decoder-frame-drop-count")
+                        } catch (e: Exception) { -1L }
+
                         withContext(Dispatchers.Main) {
                             if (t >= 0.0) currentTime = t
                             if (d > 0.0)  totalDuration = d
                             decodeModeLabel = decMode
+
+                            if (dropsNow >= 0) {
+                                val now = System.currentTimeMillis()
+                                if (lastDropCheckTime == 0L) {
+                                    // First sample after a (re)load — just establish
+                                    // the baseline, nothing to compare against yet.
+                                    lastDropCount     = dropsNow
+                                    lastDropCheckTime = now
+                                } else if (now - lastDropCheckTime >= STUTTER_CHECK_WINDOW_MS) {
+                                    val delta = dropsNow - lastDropCount
+                                    isStuttering  = delta >= STUTTER_DROP_THRESHOLD
+                                    lastDropCount     = dropsNow
+                                    lastDropCheckTime = now
+                                }
+                            }
 
                             // ── Loading overlay dismiss gate ────────────────────
                             // Only clear isPreBuffering (show player) when:
@@ -770,6 +862,25 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 }
                             }
 
+                            // Tier 2 #13: Stutter indicator — only visible while
+                            // actively dropping frames at a noticeable rate.
+                            // Auto-hides once drops stop; never blocks playback,
+                            // purely informational so the user understands a
+                            // hiccup is a device/network issue, not a broken app.
+                            if (isStuttering) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .padding(end = 12.dp)
+                                        .background(Color(0xFFFFA726).copy(0.85f), RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Icon(Icons.Rounded.Speed, null, tint = Color.Black, modifier = Modifier.size(14.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Playback lag", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                                }
+                            }
+
                             // ── AI Scene Explain button (AeonCore v2.0) ──
 
 
@@ -884,6 +995,23 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                         SettingsItem(Icons.Rounded.Memory,        "Decode Mode",     decodeModeLabel)                                      { activeSettingPage = "DecodeInfo" }
                                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                                             SettingsItem(Icons.Rounded.ClosedCaption, "Live Caption", if (liveCaptionEnabled) "Enabled ✓" else "Tap to enable") { activeSettingPage = "LiveCaption" }
+                                        // Tier 3 #16: combines torrent-engine state (TorrentEngine.
+                                        // getDiagnostics(), works in release builds — no HTTP surface,
+                                        // unlike the debug_assertions-gated /debug route) with decode
+                                        // diagnostics already on-screen, for a one-tap bug report.
+                                        SettingsItem(Icons.Rounded.ContentCopy, "Copy Diagnostics", "For bug reports") {
+                                            val report = buildString {
+                                                appendLine("=== StreamX Diagnostics ===")
+                                                appendLine("Decode mode: $decodeModeLabel")
+                                                appendLine("--- Torrent engine ---")
+                                                append(try { TorrentEngine.getDiagnostics() } catch (e: Exception) { "unavailable: ${e.message}\n" })
+                                                appendLine("--- Decode diagnostics ---")
+                                                append(try { StreamXCore.getDecodeDiagInfo() } catch (e: Exception) { "unavailable" })
+                                            }
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                            clipboard?.setPrimaryClip(ClipData.newPlainText("StreamX Diagnostics", report))
+                                            Toast.makeText(context, "Diagnostics copied to clipboard", Toast.LENGTH_SHORT).show()
+                                        }
                                     }
                                     "Quality" -> {
                                         Text("GPU Render Quality", color = Color.Gray, fontSize = 11.sp, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 8.dp))
@@ -999,22 +1127,31 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                                 "10bit"        -> "this file uses a 10-bit color format that your device's hardware decoder can't render correctly (would show a black screen)."
                                                 "oversized"    -> "this file's resolution exceeds what your device's hardware decoder reliably supports."
                                                 "black-frame"  -> "your device's hardware decoder produced a blank frame for this file \u2014 confirmed by checking the actual picture."
+                                                "black-frame-periodic" -> "your device's hardware decoder started producing a blank picture partway through this file (this can happen due to overheating) \u2014 confirmed by checking the actual picture."
                                                 "log-detected" -> "your device's hardware decoder reported an error while starting this file."
                                                 "manual"       -> "you've enabled \u201cAlways use software decoding\u201d below."
+                                                "sw-also-black" -> "software decoding was tried but also produced a blank picture \u2014 this file may be corrupt or use an unsupported feature."
                                                 else           -> "a hardware decoding issue was detected."
                                             }
+                                            val isUnresolvedFailure = reason == "sw-also-black"
+                                            val cardColor = if (isUnresolvedFailure) Color(0xFFEF5350) else Color(0xFFFFA726)
+                                            val cardPrefix = if (isUnresolvedFailure)
+                                                "Playback issue \u2014 " else "Auto-switched to software decoding \u2014 "
                                             Row(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .background(Color(0xFFFFA726).copy(0.12f), RoundedCornerShape(10.dp))
+                                                    .background(cardColor.copy(0.12f), RoundedCornerShape(10.dp))
                                                     .padding(10.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Icon(Icons.Rounded.Info, null, tint = Color(0xFFFFA726), modifier = Modifier.size(18.dp))
+                                                Icon(
+                                                    if (isUnresolvedFailure) Icons.Rounded.ErrorOutline else Icons.Rounded.Info,
+                                                    null, tint = cardColor, modifier = Modifier.size(18.dp)
+                                                )
                                                 Spacer(Modifier.width(8.dp))
                                                 Text(
-                                                    "Auto-switched to software decoding \u2014 $reasonText",
-                                                    color = Color(0xFFFFA726), fontSize = 11.sp, lineHeight = 15.sp
+                                                    "$cardPrefix$reasonText",
+                                                    color = cardColor, fontSize = 11.sp, lineHeight = 15.sp
                                                 )
                                             }
                                             Spacer(Modifier.height(14.dp))
@@ -1029,6 +1166,8 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                         DecodeInfoRow("HW Decoder",     hwdecCurrent.ifEmpty { "Not active (software)" })
                                         DecodeInfoRow("Auto-switched",  if (autoSwitched) "Yes" else "No")
                                         DecodeInfoRow("GPU Rendering",  gpuContext)
+                                        DecodeInfoRow("Battery Saver",  if (isPowerSaveActive) "On (using lighter scaling)" else "Off")
+                                        DecodeInfoRow("Frame Drops",    if (isStuttering) "Active (device struggling)" else "Stable")
 
                                         Spacer(Modifier.height(20.dp))
                                         HorizontalDivider(color = Color.White.copy(0.1f))

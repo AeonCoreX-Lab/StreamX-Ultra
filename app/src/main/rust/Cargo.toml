@@ -107,6 +107,9 @@ regex       = "1"
 thiserror   = "1"
 uuid        = { version = "1", features = ["v4"] }
 lazy_static = "1.4"
+# Disk-space guard (Tier 1 #11): wraps statvfs on Unix/Android via libc.
+# Small, single-purpose, no heavy transitive dependencies.
+fs2         = "0.4"
 
 [profile.release]
 lto           = true

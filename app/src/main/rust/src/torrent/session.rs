@@ -61,6 +61,141 @@ pub const STATE_BUFFERING: i32 = 2;
 pub const STATE_READY:     i32 = 3;
 pub const STATE_ERROR:     i32 = 4;
 
+// ── Disk-space guard (Tier 1 #11) ──────────────────────────────────────────
+//
+// Without this, a torrent can download until the device's storage fills up
+// mid-download — librqbit's write calls start failing, pieces silently stop
+// completing, and the user sees an unexplained stall/error deep into a
+// multi-GB download instead of an immediate, clear message before it starts.
+//
+// Two checkpoints:
+//   1. Pre-flight (before any network/session activity): bail out fast if
+//      the device is already nearly full, before wasting time on DHT/peer
+//      setup for a download that can't possibly complete.
+//   2. Post-metadata (once the actual file size is known): precise check
+//      against the real download size, before the bulk of the download
+//      begins (only the header/metadata pieces have been fetched so far).
+//
+// A fixed cushion is subtracted from available space rather than requiring
+// space for the exact file size only — Android and other apps need some
+// headroom, and torrent pieces occasionally get re-verified/re-downloaded.
+
+/// Minimum free space required just to START a download, before the torrent's
+/// actual size is known from metadata. Generous enough to almost never
+/// false-positive on a healthy device, small enough to catch "storage is
+/// basically full" immediately rather than after minutes of buffering.
+const MIN_PREFLIGHT_FREE_BYTES: u64 = 300 * 1024 * 1024; // 300 MB
+
+/// Safety margin kept free BEYOND the torrent's exact size once it's known.
+const SPACE_CUSHION_BYTES: u64 = 200 * 1024 * 1024; // 200 MB
+
+fn human_bytes(bytes: u64) -> String {
+    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
+    const MB: f64 = 1024.0 * 1024.0;
+    let b = bytes as f64;
+    if b >= GB { format!("{:.2} GB", b / GB) } else { format!("{:.0} MB", b / MB) }
+}
+
+/// Checks free space at `save_dir` against `required_bytes` (+ cushion).
+/// Fails OPEN (returns Ok, logs a warning) if the free-space check itself
+/// errors — e.g. an unusual filesystem/mount that statvfs can't read.
+/// Blocking playback entirely because of an unrelated statvfs quirk would
+/// be worse than the rare case this guard exists to catch.
+fn check_disk_space(save_dir: &str, required_bytes: u64) -> Result<(), String> {
+    match fs2::available_space(std::path::Path::new(save_dir)) {
+        Ok(avail) => {
+            let needed = required_bytes.saturating_add(SPACE_CUSHION_BYTES);
+            if avail < needed {
+                Err(format!(
+                    "Not enough storage. This download needs {} (+{} safety \
+                     margin) = {} total, but only {} is available.",
+                    human_bytes(required_bytes),
+                    human_bytes(SPACE_CUSHION_BYTES),
+                    human_bytes(needed),
+                    human_bytes(avail),
+                ))
+            } else {
+                Ok(())
+            }
+        }
+        Err(e) => {
+            warn!("[torrent] could not check available disk space at {save_dir}: {e} — proceeding anyway");
+            Ok(())
+        }
+    }
+}
+
+// ── Orphaned-leftover safety net ───────────────────────────────────────────
+//
+// The app's intentional design is: clear save_dir when the player screen
+// closes normally (see MoviePlayerScreen.kt's DisposableEffect calling
+// TorrentEngine.clearCache()) — movies are often 1GB+, and never persisting
+// them keeps storage bounded and reduces how long potentially-infringing
+// content sits on the device.
+//
+// GAP: Compose's DisposableEffect.onDispose does NOT run if the app process
+// is killed abruptly rather than the Composable being properly removed from
+// composition — e.g. Android killing the app in the background under memory
+// pressure (common on the lower-RAM devices disproportionately used by
+// torrent-streaming app users), or a crash. In that case clearCache() never
+// runs, and a partial/complete download silently persists — contradicting
+// the intended design, invisibly, until the user eventually hits "low
+// storage space."
+//
+// FIX: not a new caching strategy (see conversation: rolling/size-limited
+// caches are hard to get right — Stremio's own "cache size" setting has a
+// long-standing, still-open bug where it isn't honored and storage balloons
+// to 10GB+ despite a 2GB limit — github.com/Stremio/stremio-bugs/issues/755).
+// Instead: a simple, bounded safety net. Before starting a new download,
+// check whether save_dir is ALREADY larger than any single movie should
+// reasonably be. If so, that can only mean a previous session's cleanup
+// didn't complete — clear it now, before starting fresh. Normal exits are
+// completely unaffected; this only ever fires to correct a missed cleanup.
+const MAX_EXPECTED_TORRENT_DIR_BYTES: u64 = 8 * 1024 * 1024 * 1024; // 8 GB
+
+/// Best-effort recursive directory size. Returns 0 on any error (e.g. the
+/// directory doesn't exist yet on a fresh install) — safe default that
+/// never blocks startup.
+fn dir_size_bytes(dir: &str) -> u64 {
+    fn walk(path: &std::path::Path) -> u64 {
+        let entries = match std::fs::read_dir(path) {
+            Ok(e) => e,
+            Err(_) => return 0,
+        };
+        let mut total = 0u64;
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_dir() {
+                    total += walk(&entry.path());
+                } else {
+                    total += meta.len();
+                }
+            }
+        }
+        total
+    }
+    walk(std::path::Path::new(dir))
+}
+
+/// Clears save_dir if it's grown beyond what any single movie should
+/// reasonably need — evidence of a missed cleanup from a previous session,
+/// not normal operation. See module-level comment above for full reasoning.
+fn cleanup_orphaned_leftovers_if_needed(save_dir: &str) {
+    let size = dir_size_bytes(save_dir);
+    if size > MAX_EXPECTED_TORRENT_DIR_BYTES {
+        warn!(
+            "[torrent] save_dir at {save_dir} is {} — larger than any single \
+             movie should need ({}). This indicates a previous session's \
+             cleanup didn't complete (app killed/crashed while the player \
+             was open). Clearing it now before starting a new download.",
+            human_bytes(size), human_bytes(MAX_EXPECTED_TORRENT_DIR_BYTES),
+        );
+        if let Err(e) = std::fs::remove_dir_all(save_dir) {
+            warn!("[torrent] orphaned-leftover cleanup failed: {e} — proceeding anyway");
+        }
+    }
+}
+
 // ── TorrentStatus — returned to Kotlin via JNI ────────────────────────────────
 #[derive(Debug, Clone, Default)]
 pub struct TorrentStatus {
@@ -139,6 +274,39 @@ impl TorrentSession {
 
     // ── run() — download loop ─────────────────────────────────────────────────
     pub async fn run(self: &Arc<Self>, magnet: String, save_dir: String) {
+        // ── Orphaned-leftover safety net ─────────────────────────────────
+        // Runs first — if a previous session's cleanup didn't complete
+        // (crash/kill), this frees the space before the disk-space check
+        // below runs, so it sees accurate availability. See the detailed
+        // reasoning comment above cleanup_orphaned_leftovers_if_needed().
+        cleanup_orphaned_leftovers_if_needed(&save_dir);
+
+        // ── Pre-flight disk-space check ─────────────────────────────────
+        // Bail out immediately if storage is already nearly full, before
+        // spending time on DHT/peer setup for a download that can't
+        // possibly complete. This is a generic sanity gate (not size-aware
+        // yet, since the torrent's actual size isn't known until metadata
+        // arrives). The precise, size-aware check happens again below,
+        // once metadata is available (see check_disk_space call further
+        // down with the real file size).
+        match fs2::available_space(std::path::Path::new(&save_dir)) {
+            Ok(avail) if avail < MIN_PREFLIGHT_FREE_BYTES => {
+                let msg = format!(
+                    "Not enough storage to start downloading. At least {} free \
+                     space is needed, but only {} is available.",
+                    human_bytes(MIN_PREFLIGHT_FREE_BYTES), human_bytes(avail),
+                );
+                warn!("[torrent] pre-flight disk-space check failed: {msg}");
+                *self.last_error.write() = msg;
+                self.state.store(STATE_ERROR, Ordering::Relaxed);
+                return;
+            }
+            Ok(_) => { /* enough space to at least attempt starting */ }
+            Err(e) => {
+                warn!("[torrent] pre-flight disk-space check errored: {e} — proceeding anyway");
+            }
+        }
+
         self.state.store(STATE_METADATA, Ordering::Relaxed);
 
         // FIX 1 (v9 API): librqbit v9 removed `listen_port_range` from
@@ -267,6 +435,10 @@ impl TorrentSession {
 
         let mut picker_opt: Option<PiecePicker> = None;
         let mut metadata_ok = false;
+        // Set inside the metadata closure below; checked right after against
+        // available disk space, since we can't `return` from run() from
+        // inside the closure itself.
+        let mut known_file_size: u64 = 0;
         let mut stop_rx     = self.stop_rx.clone();
         let mut tick: u32   = 0;
 
@@ -352,6 +524,7 @@ impl TorrentSession {
                         // Once video_file_id >= 0, stream_info() returns Some(handle, id).
                         self.video_file_id  .store(largest_idx as i32, Ordering::Relaxed);
                         self.video_file_size.store(largest_size,        Ordering::Relaxed);
+                        known_file_size = largest_size;
                         info!("[torrent] Video file: {} ({} bytes, file_id={})",
                               path, largest_size, largest_idx);
 
@@ -367,6 +540,21 @@ impl TorrentSession {
                             total_pieces, first_piece, last_piece, piece_len,
                         ));
                     });
+
+                    // ── Precise, size-aware disk-space check ────────────────
+                    // Now that the real file size is known, verify there's
+                    // actually enough room for it (+ safety cushion) before
+                    // the bulk of the download begins. Catches the case
+                    // where the pre-flight check passed (some space was
+                    // free) but not enough for THIS specific file.
+                    if known_file_size > 0 {
+                        if let Err(msg) = check_disk_space(&save_dir, known_file_size) {
+                            warn!("[torrent] disk-space check failed after metadata: {msg}");
+                            *self.last_error.write() = msg;
+                            self.state.store(STATE_ERROR, Ordering::Relaxed);
+                            return;
+                        }
+                    }
                 }
                 continue;
             }

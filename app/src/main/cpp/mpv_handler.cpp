@@ -64,6 +64,43 @@ static const int BLACK_LUMA_THRESHOLD        = 10;
 // unlikely, while still reliably catching a truly blank/corrupted frame.
 static const int BLACK_CHECK_GRID            = 7;
 
+// ── Periodic re-verification (Tier 1 #1) ─────────────────────────────────
+// The checks above only run during the first few seconds after file load.
+// A decoder that degrades MID-playback — thermal throttling, a GPU driver
+// state bug triggered by a specific scene's complexity, VRAM pressure from
+// other apps — would never be caught. Once the initial check concludes
+// with HW decode confirmed fine (or inconclusive-but-active), we switch to
+// low-frequency ongoing monitoring for the rest of the file.
+static bool  s_periodic_enabled          = false; // true once initial check leaves HW decode active
+static int   s_periodic_next_tick        = 0;
+static bool  s_periodic_escalating       = false; // true while confirming a suspected failure
+static int   s_periodic_escalation_taken = 0;
+static int   s_periodic_escalation_black = 0;
+// Routine interval: cheap, infrequent (~30s) — negligible overhead over a
+// 90-120 min movie. On a POSITIVE sample (looks black), we escalate to a
+// quick 3-sample burst (same spacing as the initial check) to distinguish
+// a genuine failure from an ordinary dark scene / transition, rather than
+// reacting to a single sample or waiting a full extra interval to confirm.
+static const int PERIODIC_RECHECK_INTERVAL_TICKS = 120; // ~30s @ 250ms poll
+static const int PERIODIC_ESCALATION_SAMPLES     = 3;   // ALL must be black to switch
+static const int PERIODIC_ESCALATION_INTERVAL    = 2;   // ticks between escalation samples (~500ms)
+
+// ── Post-switch SW verification (Tier 1 #2) ──────────────────────────────
+// After force_sw_reload_locked() switches to software decode, we assumed
+// SW would simply work. In the extremely rare case a file is genuinely
+// corrupt or hits an unrelated FFmpeg SW-decode bug, the user would be
+// left with a persistent black screen AND a falsely-reassuring "Software
+// (FFmpeg — auto-switched)" label. This closes the loop by re-running the
+// same pixel-perfect check against the NEW (software) decode output.
+static bool  s_sw_verify_pending       = false;
+static int   s_sw_verify_wait_ticks    = 0; // ticks spent waiting for re-negotiated video-params
+static int   s_sw_verify_next_tick     = 0;
+static int   s_sw_verify_samples_taken = 0;
+static int   s_sw_verify_samples_black = 0;
+static const int SW_VERIFY_MAX_SAMPLES    = 2;
+static const int SW_VERIFY_SAMPLE_INTERVAL = 2;  // ticks between samples (~500ms)
+static const int SW_VERIFY_MAX_WAIT_TICKS  = 16; // ~4s to wait for re-negotiated video-params
+
 // ── Manual persistent override ───────────────────────────────────
 // Set from Kotlin at app start (SharedPreferences-backed) and whenever
 // the user flips "Force Software Decode" in Settings. Covers the
@@ -88,6 +125,9 @@ static std::atomic<bool> s_event_thread_running{false};
 // the rest of the dynamic-decode-compatibility implementation).
 static void start_mpv_event_thread();
 static void force_sw_reload_locked(const char* reason);
+static void check_periodic_black_frame(); // Tier 1 #1
+static void check_sw_verify();            // Tier 1 #2
+static void schedule_sw_verify();         // shared by force_sw_reload_locked + manual override
 
 // ════════════════════════════════════════════════════════════════════
 //  BLACK SCREEN — ROOT CAUSE + CURRENT FIX (dynamic, not codec-based)
@@ -200,6 +240,45 @@ void init_mpv_engine(JNIEnv* env, jobject appctx) {
     mpv_set_option_string(mpv_ctx, "vo",          "gpu");
     mpv_set_option_string(mpv_ctx, "gpu-context",  "androidvk,android");
     mpv_set_option_string(mpv_ctx, "opengl-es",   "yes"); // no-op under Vulkan, required when "android" is used
+
+    // ── HDR tone-mapping quality (Tier 2 #5) ─────────────────────────
+    //
+    // Verified against mpv core source (video/out/gpu/video.c) — these
+    // options are part of CLASSIC vo=gpu's option set (NOT exclusive to
+    // vo=gpu-next/libplacebo, which we do not use — see the note on
+    // "target-colorspace-hint" below).
+    //
+    // We deliberately do NOT query Android's Display.isHdr()/
+    // getHdrCapabilities() from Kotlin to conditionally switch behavior.
+    // Real-world reports (e.g. Kodi's own community, forum.kodi.tv
+    // thread on Dolby Vision/HDR10 detection) show isHdr() can report
+    // false on a genuinely HDR-capable display depending on the HDMI/
+    // AVR passthrough chain — an unreliable signal to gate decisions on.
+    // Kodi's own stated position: "we don't care if the display is HDR,
+    // everything is handled by the hardware decoder [pipeline]." We
+    // follow the same principle here: let mpv/libplacebo's own internal
+    // capability negotiation decide (target-peak=auto, target-trc/
+    // target-prim left at their auto defaults), and instead improve the
+    // QUALITY of that negotiation universally — benefiting every device
+    // regardless of what it self-reports.
+    //
+    // hdr-compute-peak=auto: dynamic per-scene peak-brightness detection
+    // to refine tone-mapping when static HDR10 metadata is coarse/absent
+    // — "auto" lets mpv decide based on GPU capability, never forced on
+    // underpowered devices.
+    mpv_set_option_string(mpv_ctx, "hdr-compute-peak", "auto");
+    // tone-mapping=bt.2390: ITU-R BT.2390 is a widely-recommended,
+    // perceptually well-balanced HDR->SDR curve (used as a broadcast/
+    // streaming reference by many implementations) — a solid universal
+    // default, applied only when tone-mapping is actually needed (i.e.
+    // SDR display + HDR source; a no-op for HDR-capable displays where
+    // libplacebo instead does gamut/peak adaptation, not full tone-map).
+    mpv_set_option_string(mpv_ctx, "tone-mapping", "bt.2390");
+    // NOTE: "target-colorspace-hint" (true HDR passthrough signaling)
+    // only exists on vo=gpu-next (video/out/vo_gpu_next.c), which we do
+    // not currently use (see Tier 2 #6 — a separate, larger migration).
+    // Setting it here would be a no-op (or a "no such option" warning)
+    // on our classic vo=gpu backend, so it is intentionally omitted.
 
     // ── Hardware Decode ───────────────────────────────────────────
     //
@@ -321,6 +400,18 @@ void play_mpv_video(const char* path) {
     s_black_samples_taken = 0;
     s_black_samples_black = 0;
     s_black_next_tick     = 0;
+    // Reset periodic re-verification state (Tier 1 #1) for the new file.
+    s_periodic_enabled          = false;
+    s_periodic_next_tick        = 0;
+    s_periodic_escalating       = false;
+    s_periodic_escalation_taken = 0;
+    s_periodic_escalation_black = 0;
+    // Reset post-switch SW verification state (Tier 1 #2) for the new file.
+    s_sw_verify_pending       = false;
+    s_sw_verify_wait_ticks    = 0;
+    s_sw_verify_next_tick     = 0;
+    s_sw_verify_samples_taken = 0;
+    s_sw_verify_samples_black = 0;
 
     if (s_force_sw_decode.load()) {
         // Persistent manual override — skip detection entirely, this
@@ -329,6 +420,10 @@ void play_mpv_video(const char* path) {
         s_decode_check_done   = true;
         s_forced_sw_this_file = true;
         s_switch_reason       = "manual";
+        // Still verify SW actually produces a visible frame — even a
+        // device known to need SW globally could hit a genuinely corrupt
+        // file, and the user deserves an accurate diagnostic either way.
+        schedule_sw_verify();
     } else {
         mpv_set_option_string(mpv_ctx, "hwdec", "mediacodec-copy");
         s_decode_check_done   = false;
@@ -599,11 +694,152 @@ static void force_sw_reload_locked(const char* reason) {
     // Black-frame sampling (if it was running) is no longer relevant —
     // we've already switched to SW decode for this file.
     s_black_stage_active  = false;
+    // Also cancel periodic monitoring — we're on SW now, that mechanism
+    // exists to catch HW-decode degradation and no longer applies.
+    s_periodic_enabled    = false;
+    s_periodic_escalating = false;
+
+    // Verify the switch actually worked (Tier 1 #2) — see state comment
+    // near s_sw_verify_pending's declaration for why this matters.
+    schedule_sw_verify();
+}
+
+static void schedule_sw_verify() {
+    s_sw_verify_pending       = true;
+    s_sw_verify_wait_ticks    = 0;
+    s_sw_verify_next_tick     = 0;
+    s_sw_verify_samples_taken = 0;
+    s_sw_verify_samples_black = 0;
+}
+
+// ── Tier 1 #2: verify the SW switch actually worked ──────────────
+// ASSUMES CALLER ALREADY HOLDS mpv_mutex.
+static void check_sw_verify() {
+    // Wait for the reloaded file's video-params to re-negotiate — confirms
+    // the reload actually completed and a fresh frame pipeline is active,
+    // so we don't accidentally sample a stale pre-reload frame.
+    char* fmt_raw = mpv_get_property_string(mpv_ctx, "video-params/pixelformat");
+    std::string pixfmt = fmt_raw ? fmt_raw : "";
+    if (fmt_raw) mpv_free(fmt_raw);
+
+    if (pixfmt.empty()) {
+        if (++s_sw_verify_wait_ticks >= SW_VERIFY_MAX_WAIT_TICKS) {
+            LOGD("decode-compat: SW-verify gave up waiting for video-params after reload");
+            s_sw_verify_pending = false;
+        }
+        return;
+    }
+
+    s_decode_check_ticks++;
+    if (s_decode_check_ticks < s_sw_verify_next_tick) return;
+
+    int result = capture_and_check_black_frame();
+    s_sw_verify_next_tick = s_decode_check_ticks + SW_VERIFY_SAMPLE_INTERVAL;
+
+    if (result == 0) {
+        LOGD("decode-compat: SW-verify confirmed non-black — software decode working correctly");
+        s_sw_verify_pending = false;
+        return;
+    }
+    if (result == 1) s_sw_verify_samples_black++;
+    s_sw_verify_samples_taken++;
+
+    if (s_sw_verify_samples_taken >= SW_VERIFY_MAX_SAMPLES) {
+        s_sw_verify_pending = false;
+        if (s_sw_verify_samples_black >= SW_VERIFY_MAX_SAMPLES) {
+            // Software decode ALSO produced black frames. We've exhausted
+            // every automatic remedy — update the diagnostic reason so the
+            // settings page tells the user honestly that even the fallback
+            // didn't help, rather than showing a falsely-reassuring
+            // "Software (FFmpeg — auto-switched)" label.
+            LOGD("decode-compat: SW-verify FAILED — software decode also black. "
+                 "File may be corrupt or use an unsupported feature.");
+            s_switch_reason = "sw-also-black";
+        }
+        // else: inconclusive (capture failures mixed in) — leave as-is,
+        // already on SW, nothing further we can automatically try.
+    }
+}
+
+// ── Tier 1 #1: ongoing monitoring for the rest of playback ───────
+// ASSUMES CALLER ALREADY HOLDS mpv_mutex.
+static void check_periodic_black_frame() {
+    s_decode_check_ticks++;
+
+    if (s_periodic_escalating) {
+        if (s_decode_check_ticks < s_periodic_next_tick) return;
+
+        int result = capture_and_check_black_frame();
+        s_periodic_next_tick = s_decode_check_ticks + PERIODIC_ESCALATION_INTERVAL;
+
+        if (result == 0) {
+            // False alarm — likely a scene transition, not a real failure.
+            LOGD("decode-compat: periodic escalation cleared (scene transition, not a failure)");
+            s_periodic_escalating = false;
+            s_periodic_next_tick  = s_decode_check_ticks + PERIODIC_RECHECK_INTERVAL_TICKS;
+            return;
+        }
+        if (result == 1) s_periodic_escalation_black++;
+        s_periodic_escalation_taken++;
+
+        if (s_periodic_escalation_taken >= PERIODIC_ESCALATION_SAMPLES) {
+            s_periodic_escalating = false;
+            if (s_periodic_escalation_black >= PERIODIC_ESCALATION_SAMPLES) {
+                LOGD("decode-compat: periodic re-check confirmed sustained black frame "
+                     "mid-playback (%d/%d samples) — switching to SW",
+                     s_periodic_escalation_black, PERIODIC_ESCALATION_SAMPLES);
+                force_sw_reload_locked("black-frame-periodic");
+            } else {
+                // Inconclusive (capture failures mixed in) — resume
+                // normal-interval monitoring rather than treating this as
+                // confirmed either way.
+                s_periodic_next_tick = s_decode_check_ticks + PERIODIC_RECHECK_INTERVAL_TICKS;
+            }
+        }
+        return;
+    }
+
+    // Normal routine interval — cheap, infrequent.
+    if (s_decode_check_ticks < s_periodic_next_tick) return;
+
+    int result = capture_and_check_black_frame();
+    if (result == 1) {
+        // Possible real failure — escalate to a quick 3-sample burst to
+        // confirm within a few seconds, rather than waiting the full
+        // ~30s interval three times over (which would mean up to 90s of
+        // a genuinely black screen before reacting).
+        LOGD("decode-compat: periodic sample came back black — escalating to confirm");
+        s_periodic_escalating       = true;
+        s_periodic_escalation_taken = 1;
+        s_periodic_escalation_black = 1;
+        s_periodic_next_tick        = s_decode_check_ticks + PERIODIC_ESCALATION_INTERVAL;
+    } else {
+        // Not black (or inconclusive capture) — all fine, schedule the
+        // next routine check.
+        s_periodic_next_tick = s_decode_check_ticks + PERIODIC_RECHECK_INTERVAL_TICKS;
+    }
 }
 
 void check_decode_compatibility() {
     std::lock_guard<std::mutex> lk(mpv_mutex);
     if (!mpv_ctx) return;
+
+    // ── Tier 1 #2: post-switch SW verification ────────────────────────
+    // Takes priority over everything else — runs right after a reload to
+    // SW decode, to confirm the switch actually fixed the problem.
+    if (s_sw_verify_pending) {
+        check_sw_verify();
+        return;
+    }
+
+    // ── Tier 1 #1: ongoing periodic monitoring ────────────────────────
+    // Runs for the rest of playback once the initial Stage 1+2 checks
+    // below have concluded with HW decode confirmed fine (or left active
+    // as inconclusive-but-not-a-confirmed-problem).
+    if (s_decode_check_done && s_periodic_enabled && !s_forced_sw_this_file) {
+        check_periodic_black_frame();
+        return;
+    }
 
     // ── Stage 2: pixel-perfect black-frame sampling ──────────────────
     // Runs AFTER Stage 1 has resolved with format/resolution looking fine
@@ -623,6 +859,11 @@ void check_decode_compatibility() {
             // Confirmed NOT black — device is fine, stop sampling immediately.
             LOGD("decode-compat: black-frame check passed — HW decode confirmed OK");
             s_black_stage_active = false;
+            // Enable ongoing periodic monitoring (Tier 1 #1) for the rest
+            // of this file's playback, now that HW decode is confirmed
+            // genuinely working at this point in time.
+            s_periodic_enabled   = true;
+            s_periodic_next_tick = s_decode_check_ticks + PERIODIC_RECHECK_INTERVAL_TICKS;
             return;
         }
         if (result == 1) {
@@ -650,6 +891,11 @@ void check_decode_compatibility() {
                 LOGD("decode-compat: black-frame sampling inconclusive "
                      "(%d/%d black, capture may have failed) — leaving HW decode active",
                      s_black_samples_black, BLACK_CHECK_MAX_SAMPLES);
+                // Leaving HW decode active without a confirmed problem —
+                // still enable periodic monitoring (Tier 1 #1) as an
+                // ongoing safety net for the rest of playback.
+                s_periodic_enabled   = true;
+                s_periodic_next_tick = s_decode_check_ticks + PERIODIC_RECHECK_INTERVAL_TICKS;
             }
         }
         return;

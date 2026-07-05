@@ -33,6 +33,10 @@ object TorrentEngine {
     private external fun getStatusNative(): LongArray     // [progress,speed,seeds,peers,state]
     private external fun getFilePathNative(): String
     private external fun clearCacheNative(dir: String)
+    // Tier 3 #16: works in release builds too (no HTTP surface, unlike the
+    // debug_assertions-gated /debug route) — for a user-initiated
+    // "Copy Diagnostics" button.
+    private external fun getDebugDumpNative(): String
 
     // ── New Rust-only methods ─────────────────────────────────────────────────
     private external fun getLocalUrlNative(): String      // "http://127.0.0.1:8088/stream"
@@ -128,5 +132,16 @@ object TorrentEngine {
         val dir = context.getExternalFilesDir("torrents")?.absolutePath ?: return
         clearCacheNative(dir)
         Log.d(TAG, "cache cleared: $dir")
+    }
+
+    // ── Diagnostics export (Tier 3 #16) ─────────────────────────────────────
+    // Returns the same torrent-session state that /debug used to expose,
+    // for a user-initiated "Copy Diagnostics" / "Report Issue" button.
+    // Safe to call anytime (returns a "no torrent active" message if
+    // nothing is running) and works identically in release builds.
+    fun getDiagnostics(): String = try {
+        getDebugDumpNative()
+    } catch (e: Exception) {
+        "diagnostics unavailable: ${e.message}\n"
     }
 }

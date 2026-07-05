@@ -124,6 +124,19 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getFile
     env.new_string(path).expect("JNI string").into_raw()
 }
 
+// Diagnostics export (Tier 3 #16) — plain torrent-session state dump for a
+// user-initiated "Copy Diagnostics" button. Works in release builds too
+// (unlike the HTTP /debug route, which is debug_assertions-gated) since
+// this has no network/HTTP surface at all — just a direct method call.
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getDebugDumpNative(
+    env:  JNIEnv,
+    _obj: JClass,
+) -> jstring {
+    let dump = TorrentEngineHandle::get().debug_dump();
+    env.new_string(dump).expect("JNI string").into_raw()
+}
+
 // Called from Kotlin MPV time-pos observer — NEW method, add to TorrentEngine.kt
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_setPlayheadNative(

@@ -72,10 +72,20 @@ pub async fn handle(
     session: Arc<RwLock<Option<Arc<TorrentSession>>>>,
 ) -> Result<Response<RespBody>, hyper::Error> {
 
-    // ── /debug ────────────────────────────────────────────────────────────
+    // ── /debug (DEBUG BUILDS ONLY) ───────────────────────────────────────
     // curl http://127.0.0.1:8088/debug — dumps internal session state
     // immediately (no 10 s wait). Use this to see exactly which field is
     // unset when /stream returns 503, without needing logcat.
+    //
+    // #[cfg(debug_assertions)] compiles this entire block OUT of release
+    // builds (cargo build --release / Gradle's release variant) — it's not
+    // just "hidden", the route literally does not exist in the release
+    // binary, so it cannot be re-enabled by any runtime flag or reflection.
+    // debug_assertions tracks Rust's dev/release profile distinction,
+    // which is NOT overridden anywhere in this project's Cargo.toml (no
+    // debug-assertions=true under [profile.release]), so this correctly
+    // maps to Gradle's debug vs release build variant via cargo-ndk.
+    #[cfg(debug_assertions)]
     if req.uri().path() == "/debug" {
         let dump = {
             let g = session.read();
