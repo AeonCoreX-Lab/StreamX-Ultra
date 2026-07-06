@@ -378,6 +378,19 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var currentTime        by remember { mutableDoubleStateOf(0.0) }
     var totalDuration      by remember { mutableDoubleStateOf(0.0) }
     var isPreBuffering     by remember { mutableStateOf(true) }
+    // Root cause of a real "00:00" regression, found via the in-app "Copy
+    // Diagnostics" button: the old ERROR handler set isPreBuffering=false,
+    // which hides the ONLY overlay that renders statusMsg — so the error
+    // message was set but never actually visible, and bare player controls
+    // showed instead with nothing loaded. Fix: on ERROR, isPreBuffering
+    // STAYS true (so the overlay — and its message — stay visible); this
+    // flag instead switches that overlay from a loading spinner to an
+    // error icon + the actual reason + a manual retry option.
+    var isErrorState       by remember { mutableStateOf(false) }
+    // Bumped by the manual "Retry" button in the error overlay to force
+    // LaunchedEffect(decodedUrl, retryTrigger) below to re-run, since
+    // decodedUrl alone doesn't change on a manual retry.
+    var retryTrigger       by remember { mutableStateOf(0) }
     var isMidBuffering     by remember { mutableStateOf(false) }
     var cachePercent       by remember { mutableIntStateOf(100) }
     var statusMsg          by remember { mutableStateOf("Preparing...") }
@@ -504,9 +517,14 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     }
 
     // ── Torrent / direct URL ──────────────────────────────────────
-    LaunchedEffect(decodedUrl) {
+    LaunchedEffect(decodedUrl, retryTrigger) {
         var retryCount = 0; val maxRetries = 3
         while (retryCount < maxRetries) {
+            // Reset from any previous attempt's error state before trying
+            // again — otherwise a successful retry would still show the
+            // stale error icon/message for a frame or two.
+            isErrorState   = false
+            isPreBuffering = true
             if (decodedUrl.startsWith("magnet:?")) {
                 // NOTE: no explicit clearCache() pre-call here anymore. Previously
                 // this cleared the single shared torrents dir before every start(),
@@ -542,7 +560,16 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             statusMsg = "Opening video…"
                             completed = true
                         }
-                        TorrentEngine.State.ERROR  -> { statusMsg = "Error: Torrent engine failed"; isPreBuffering = false; completed = true }
+                        TorrentEngine.State.ERROR  -> {
+                            val reason = try { TorrentEngine.getLastError() } catch (e: Exception) { "" }
+                            statusMsg = if (reason.isNotBlank()) reason else "Something went wrong starting this download."
+                            isErrorState  = true
+                            // isPreBuffering intentionally left true — see
+                            // the variable's doc comment above. The overlay
+                            // now shows an error icon + this message + a
+                            // retry option instead of a spinner.
+                            completed = true
+                        }
                         else -> {}
                     }
                     if (completed) return@collect
@@ -797,16 +824,27 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         if (isPreBuffering) {  // stays until mpvPath==videoPath && duration>0
             Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                    CircularProgressIndicator(color = Color.Cyan, strokeWidth = 3.dp)
-                    Spacer(Modifier.height(20.dp))
-                    Text(statusMsg, color = Color.White, textAlign = TextAlign.Center, fontSize = 14.sp)
-                    if (torrentProgress > 0) {
-                        Spacer(Modifier.height(12.dp))
-                        LinearProgressIndicator(progress = { torrentProgress / 100f }, modifier = Modifier.fillMaxWidth(0.7f).height(4.dp), color = Color.Cyan, trackColor = Color.White.copy(0.2f))
-                        Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                            Text("▼ $downloadSpeed", color = Color.Green,     fontSize = 13.sp)
-                            Text("S: $seeds",        color = Color.LightGray, fontSize = 13.sp)
+                    if (isErrorState) {
+                        Icon(Icons.Rounded.ErrorOutline, null, tint = Color(0xFFEF5350), modifier = Modifier.size(48.dp))
+                        Spacer(Modifier.height(16.dp))
+                        Text(statusMsg, color = Color.White, textAlign = TextAlign.Center, fontSize = 14.sp)
+                        Spacer(Modifier.height(20.dp))
+                        Button(
+                            onClick = { retryTrigger++ },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Cyan)
+                        ) { Text("Retry", color = Color.Black) }
+                    } else {
+                        CircularProgressIndicator(color = Color.Cyan, strokeWidth = 3.dp)
+                        Spacer(Modifier.height(20.dp))
+                        Text(statusMsg, color = Color.White, textAlign = TextAlign.Center, fontSize = 14.sp)
+                        if (torrentProgress > 0) {
+                            Spacer(Modifier.height(12.dp))
+                            LinearProgressIndicator(progress = { torrentProgress / 100f }, modifier = Modifier.fillMaxWidth(0.7f).height(4.dp), color = Color.Cyan, trackColor = Color.White.copy(0.2f))
+                            Spacer(Modifier.height(8.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                                Text("▼ $downloadSpeed", color = Color.Green,     fontSize = 13.sp)
+                                Text("S: $seeds",        color = Color.LightGray, fontSize = 13.sp)
+                            }
                         }
                     }
                 }

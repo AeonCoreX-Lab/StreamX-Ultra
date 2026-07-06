@@ -137,6 +137,18 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getDebu
     env.new_string(dump).expect("JNI string").into_raw()
 }
 
+// Focused error-message export for the ERROR-state UI fix (as opposed to
+// the full diagnostics dump above, which is meant for bug reports, not
+// for driving user-facing UI text directly).
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getLastErrorNative(
+    env:  JNIEnv,
+    _obj: JClass,
+) -> jstring {
+    let msg = TorrentEngineHandle::get().last_error();
+    env.new_string(msg).expect("JNI string").into_raw()
+}
+
 // Called from Kotlin MPV time-pos observer — NEW method, add to TorrentEngine.kt
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_setPlayheadNative(

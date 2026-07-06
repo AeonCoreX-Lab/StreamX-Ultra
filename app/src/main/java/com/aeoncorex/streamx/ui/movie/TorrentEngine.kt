@@ -54,6 +54,9 @@ object TorrentEngine {
     // debug_assertions-gated /debug route) — for a user-initiated
     // "Copy Diagnostics" button.
     private external fun getDebugDumpNative(): String
+    // Focused error-message export for the ERROR-state UI fix — see
+    // MoviePlayerScreen.kt's State.ERROR handler.
+    private external fun getLastErrorNative(): String
 
     // ── New Rust-only methods ─────────────────────────────────────────────────
     private external fun getLocalUrlNative(): String      // "http://127.0.0.1:8088/stream"
@@ -316,5 +319,21 @@ object TorrentEngine {
         getDebugDumpNative()
     } catch (e: Exception) {
         "diagnostics unavailable: ${e.message}\n"
+    }
+
+    // ── Last error message (for the ERROR-state UI fix) ────────────────────
+    // Root cause found via the "Copy Diagnostics" button itself: the
+    // ERROR-state handler was setting a generic "Torrent engine failed"
+    // message into statusMsg, but ALSO setting isPreBuffering=false in the
+    // same step — which hides the exact overlay that renders statusMsg,
+    // so the message was never actually visible. Player controls showed
+    // instead, with nothing loaded — "00:00 / 00:00". This returns the
+    // SPECIFIC underlying reason (e.g. an actual "not enough storage"
+    // message) so the fixed ERROR handler can show something the user can
+    // actually act on, instead of a generic dead end.
+    fun getLastError(): String = try {
+        getLastErrorNative()
+    } catch (e: Exception) {
+        ""
     }
 }

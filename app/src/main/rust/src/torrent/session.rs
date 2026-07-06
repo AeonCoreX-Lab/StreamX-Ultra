@@ -661,18 +661,56 @@ impl TorrentSession {
                         ));
                     });
 
-                    // ── Precise, size-aware disk-space check ────────────────
-                    // Now that the real file size is known, verify there's
-                    // actually enough room for it (+ safety cushion) before
-                    // the bulk of the download begins. Catches the case
-                    // where the pre-flight check passed (some space was
-                    // free) but not enough for THIS specific file.
+                    // ── Disk-space AWARENESS (non-blocking) ─────────────────
+                    //
+                    // ROOT CAUSE OF A REAL REGRESSION (found via the in-app
+                    // "Copy Diagnostics" button): this used to be a HARD
+                    // BLOCK — if `known_file_size + cushion` exceeded free
+                    // space, it set STATE_ERROR and aborted the download
+                    // entirely, before a single piece downloaded.
+                    //
+                    // That's the wrong policy for THIS app's architecture.
+                    // StreamX streams progressively (FileStream/api_stream,
+                    // sequential download prioritized around the playback
+                    // position) — it does NOT need the entire file resident
+                    // on disk to start or continue playing. A user with,
+                    // say, 4.7GB free and a 7.4GB movie can still watch for
+                    // a long time; the download only actually fails once
+                    // real disk space is exhausted DURING download, which
+                    // the OS/filesystem itself will report at that point —
+                    // this is the same experience any torrent client or
+                    // progressive-download service gives, not a case that
+                    // needs (or should have) a pre-emptive block.
+                    //
+                    // CONCRETE IMPACT of the removed hard block: it doesn't
+                    // just show a bug-free "not enough storage" message —
+                    // it silently causes STATE_ERROR, which
+                    // MoviePlayerScreen.kt's ERROR handler responds to by
+                    // clearing isPreBuffering immediately (to show an error
+                    // state), which — since videoPath was never set to a
+                    // real stream (that only happens on STATE_READY) —
+                    // instead surfaced as bare player controls showing
+                    // "00:00 / 00:00" with nothing loaded. Given movies are
+                    // routinely 1-8GB+ and many devices don't have that
+                    // much free space at all times, this was firing far
+                    // more often than the rare "genuinely no space at all"
+                    // case the pre-flight check (above, 300MB floor) is
+                    // meant to catch — turning a helpful safety check into
+                    // a frequent false "nothing plays" regression.
+                    //
+                    // FIX: log a warning (visible in /debug and Copy
+                    // Diagnostics) so low-space situations are still
+                    // diagnosable, but let the download proceed. The
+                    // pre-flight check above (300MB floor, checked before
+                    // any network activity starts) remains the only
+                    // blocking disk-space gate — it catches "storage is
+                    // essentially full" without penalizing the completely
+                    // normal case of "less free space than the movie's
+                    // full size," which this streaming architecture never
+                    // required in the first place.
                     if known_file_size > 0 {
                         if let Err(msg) = check_disk_space(&save_dir, known_file_size) {
-                            warn!("[torrent] disk-space check failed after metadata: {msg}");
-                            *self.last_error.write() = msg;
-                            self.state.store(STATE_ERROR, Ordering::Relaxed);
-                            return;
+                            warn!("[torrent] low disk space for this download (not blocking): {msg}");
                         }
                     }
                 }
@@ -764,6 +802,15 @@ impl TorrentSession {
             video_path:     self.video_path.read().clone(),
             progress_bytes: self.progress_bytes.load(Ordering::Relaxed),
         }
+    }
+
+    /// Human-readable reason for the most recent STATE_ERROR, if any.
+    /// Empty string if no error has occurred (or it was cleared by a
+    /// subsequent stop()/start()). Used to show an actual, specific error
+    /// message to the user instead of a generic "something went wrong" —
+    /// see MoviePlayerScreen.kt's ERROR-state handling.
+    pub fn last_error(&self) -> String {
+        self.last_error.read().clone()
     }
 
     pub fn set_playhead(&self, secs: f64) {
