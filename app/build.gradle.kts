@@ -319,8 +319,8 @@ tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configu
 // ═══════════════════════════════════════════════════════════════════
 configurations.all {
     resolutionStrategy {
-        force("com.google.protobuf:protobuf-javalite:4.35.1")
-        force("com.google.protobuf:protobuf-kotlin:4.35.1")
+        force("com.google.protobuf:protobuf-javalite:3.25.5")
+        force("com.google.protobuf:protobuf-kotlin:3.25.5")
     }
     exclude(group = "com.google.protobuf", module = "protobuf-lite")
 }
@@ -330,7 +330,7 @@ dependencies {
 
     val media3Version = "1.10.1"
     val lifecycleVersion  = "2.8.0"
-    val protobufVersion   = "4.35.1"
+    val protobufVersion   = "3.25.5"
 
     // Core & Compose
     implementation("androidx.core:core-ktx:1.15.0")
