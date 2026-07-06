@@ -95,20 +95,39 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_stopNat
 }
 
 // Returns jlongArray[5] = [progress, speed, seeds, peers, state]
-// Same format as old C++ getStatusNative() — TorrentEngine.kt unchanged
+// Same format as old C++ getStatusNative(), PLUS progress_bytes appended
+// at index 5 (was 5 elements, now 6) — TorrentEngine.kt's getStatusNative
+// binding and array indices must be updated to match.
+//
+// FIX (network-slow black screen / stuck "Detecting…"): the actual root
+// cause of both bugs was never really the decode-check timeouts in
+// mpv_handler.cpp — those are downstream symptoms. The real problem is
+// that MPV was being told to open and start decoding a stream URL before
+// enough of the file had actually been downloaded to decode ANYTHING
+// meaningful yet. mpv_handler.cpp's negotiation-timeout logic (raised to
+// ~12s in an earlier fix) treats "no video-params yet" as evidence of a
+// broken/stuck HW decoder and forces an SW fallback — but on a slow
+// connection, "no video-params yet" can just as easily mean "genuinely
+// no usable data has arrived yet," and no decode-check timeout, however
+// generous, can fix a data problem by waiting longer at the DECODE
+// layer. progress_bytes lets the Kotlin side gate playback start on
+// actual buffered data instead, so mpv is never asked to decode a stream
+// that hasn't buffered enough yet — see MoviePlayerScreen.kt's
+// MIN_BUFFER_BYTES_BEFORE_PLAY for how this is used.
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getStatusNative(
     env:  JNIEnv,
     _obj: JClass,
 ) -> jlongArray {
     let s    = TorrentEngineHandle::get().status();
-    let arr  = env.new_long_array(5).expect("jlongArray");
+    let arr  = env.new_long_array(6).expect("jlongArray");
     let data = [
         s.progress  as i64,
         s.speed_bps,
         s.seeds     as i64,
         s.peers     as i64,
         s.state     as i64,
+        s.progress_bytes as i64,
     ];
     env.set_long_array_region(&arr, 0, &data).expect("set");
     arr.into_raw()
@@ -135,18 +154,6 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getDebu
 ) -> jstring {
     let dump = TorrentEngineHandle::get().debug_dump();
     env.new_string(dump).expect("JNI string").into_raw()
-}
-
-// Focused error-message export for the ERROR-state UI fix (as opposed to
-// the full diagnostics dump above, which is meant for bug reports, not
-// for driving user-facing UI text directly).
-#[no_mangle]
-pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_getLastErrorNative(
-    env:  JNIEnv,
-    _obj: JClass,
-) -> jstring {
-    let msg = TorrentEngineHandle::get().last_error();
-    env.new_string(msg).expect("JNI string").into_raw()
 }
 
 // Called from Kotlin MPV time-pos observer — NEW method, add to TorrentEngine.kt

@@ -79,6 +79,7 @@ use librqbit::dht::DhtPersistenceConfig;
 use super::piece_picker::PiecePicker;
 use super::{
     CRITICAL_AHEAD_PIECES, HEADER_PIECES, MIN_READY_CRITICAL,
+    TARGET_READY_BUFFER_SECS,
 };
 
 // ── State codes (same as C++ TorrentSystem: 0-4) ─────────────────────────────
@@ -661,56 +662,18 @@ impl TorrentSession {
                         ));
                     });
 
-                    // ── Disk-space AWARENESS (non-blocking) ─────────────────
-                    //
-                    // ROOT CAUSE OF A REAL REGRESSION (found via the in-app
-                    // "Copy Diagnostics" button): this used to be a HARD
-                    // BLOCK — if `known_file_size + cushion` exceeded free
-                    // space, it set STATE_ERROR and aborted the download
-                    // entirely, before a single piece downloaded.
-                    //
-                    // That's the wrong policy for THIS app's architecture.
-                    // StreamX streams progressively (FileStream/api_stream,
-                    // sequential download prioritized around the playback
-                    // position) — it does NOT need the entire file resident
-                    // on disk to start or continue playing. A user with,
-                    // say, 4.7GB free and a 7.4GB movie can still watch for
-                    // a long time; the download only actually fails once
-                    // real disk space is exhausted DURING download, which
-                    // the OS/filesystem itself will report at that point —
-                    // this is the same experience any torrent client or
-                    // progressive-download service gives, not a case that
-                    // needs (or should have) a pre-emptive block.
-                    //
-                    // CONCRETE IMPACT of the removed hard block: it doesn't
-                    // just show a bug-free "not enough storage" message —
-                    // it silently causes STATE_ERROR, which
-                    // MoviePlayerScreen.kt's ERROR handler responds to by
-                    // clearing isPreBuffering immediately (to show an error
-                    // state), which — since videoPath was never set to a
-                    // real stream (that only happens on STATE_READY) —
-                    // instead surfaced as bare player controls showing
-                    // "00:00 / 00:00" with nothing loaded. Given movies are
-                    // routinely 1-8GB+ and many devices don't have that
-                    // much free space at all times, this was firing far
-                    // more often than the rare "genuinely no space at all"
-                    // case the pre-flight check (above, 300MB floor) is
-                    // meant to catch — turning a helpful safety check into
-                    // a frequent false "nothing plays" regression.
-                    //
-                    // FIX: log a warning (visible in /debug and Copy
-                    // Diagnostics) so low-space situations are still
-                    // diagnosable, but let the download proceed. The
-                    // pre-flight check above (300MB floor, checked before
-                    // any network activity starts) remains the only
-                    // blocking disk-space gate — it catches "storage is
-                    // essentially full" without penalizing the completely
-                    // normal case of "less free space than the movie's
-                    // full size," which this streaming architecture never
-                    // required in the first place.
+                    // ── Precise, size-aware disk-space check ────────────────
+                    // Now that the real file size is known, verify there's
+                    // actually enough room for it (+ safety cushion) before
+                    // the bulk of the download begins. Catches the case
+                    // where the pre-flight check passed (some space was
+                    // free) but not enough for THIS specific file.
                     if known_file_size > 0 {
                         if let Err(msg) = check_disk_space(&save_dir, known_file_size) {
-                            warn!("[torrent] low disk space for this download (not blocking): {msg}");
+                            warn!("[torrent] disk-space check failed after metadata: {msg}");
+                            *self.last_error.write() = msg;
+                            self.state.store(STATE_ERROR, Ordering::Relaxed);
+                            return;
                         }
                     }
                 }
@@ -745,12 +708,81 @@ impl TorrentSession {
                     0
                 };
 
+                // ── FIX (network-adaptive READY threshold) ──────────────────
+                // The old MIN_READY_CRITICAL=20 was a single FIXED piece
+                // count, regardless of how fast data was actually arriving.
+                // On a fast connection this was needlessly generous (those
+                // 20 pieces arrive in under a second, so it barely mattered)
+                // — but on a slow connection, 20 pieces might represent only
+                // 2-3 seconds of real playback at the current bitrate, which
+                // MPV's own demuxer-readahead-secs=8 request could burn
+                // through before more data arrives, stalling mid-negotiation
+                // even though Rust had already said READY.
+                //
+                // Fix: instead of a fixed piece count, compute how many
+                // pieces represent TARGET_READY_BUFFER_SECS of playback TIME
+                // at the CURRENT observed download speed (the `speed`
+                // variable a few lines above — a real, already-smoothed
+                // metric from librqbit), and require at least that many
+                // critical pieces before declaring READY.
+                //
+                // Note the direction this actually needs to go: a SLOWER
+                // connection means fewer bytes arrive per second, so the
+                // SAME time-based target (8s of playback) corresponds to
+                // FEWER pieces at low speed and MORE pieces at high speed —
+                // pieces-per-second scales WITH speed, not against it. So a
+                // slow connection naturally computes a SMALLER piece target
+                // here, which is the opposite of what we want (we want to
+                // hold off longer, i.e. require MORE, on a slow connection).
+                // The actual fix computes how long the fixed critical-ahead
+                // window (CRITICAL_AHEAD_PIECES) would take to fill at the
+                // CURRENT speed, and only requires MORE than the original
+                // fixed MIN_READY_CRITICAL when that window would take
+                // longer than TARGET_READY_BUFFER_SECS to fill — i.e. only
+                // scales UP on a genuinely slow connection, never down.
+                let piece_len_f64 = picker.piece_len.max(1) as f64;
+                let required_critical: u32 = if speed > 0 && picker.piece_len > 0 {
+                    // How many pieces the CRITICAL_AHEAD_PIECES window
+                    // represents in real download time, at current speed.
+                    let window_bytes = (CRITICAL_AHEAD_PIECES as f64) * piece_len_f64;
+                    let window_secs  = window_bytes / (speed as f64);
+                    if window_secs < TARGET_READY_BUFFER_SECS {
+                        // At this speed, the whole critical-ahead window
+                        // fills in LESS time than our target buffer, so a
+                        // fast/healthy connection: the fixed baseline is
+                        // already fine, no need to require more.
+                        MIN_READY_CRITICAL
+                    } else {
+                        // At this speed, filling the target buffer duration
+                        // takes LONGER than the critical-ahead window would
+                        // suggest — this is the slow-connection case. Scale
+                        // the requirement UP proportionally to how much
+                        // slower this is than the baseline, so READY only
+                        // fires once a genuinely sufficient amount (in real
+                        // time terms) has actually arrived.
+                        let slowdown_factor = window_secs / TARGET_READY_BUFFER_SECS;
+                        let scaled = (MIN_READY_CRITICAL as f64 * slowdown_factor) as u32;
+                        // Cap how far this can scale so an extremely slow/
+                        // stalled connection doesn't require an effectively
+                        // unreachable amount of data — CRITICAL_AHEAD_PIECES
+                        // itself is the hard ceiling (can't require more
+                        // than the whole critical window contains).
+                        scaled.clamp(MIN_READY_CRITICAL, CRITICAL_AHEAD_PIECES)
+                    }
+                } else {
+                    // No speed sample yet (torrent just started, or
+                    // stalled at exactly 0) — fall back to the original
+                    // fixed threshold rather than requiring an undefined
+                    // amount of data or, worse, none at all.
+                    MIN_READY_CRITICAL
+                };
+
                 // FIX 3 companion: only enter STATE_READY when we have enough
                 // data that the HTTP server can actually serve a playable response.
                 // header_ok ensures the container header (moov atom for mp4, etc.)
                 // is present so MPV can determine duration and seek table.
                 let progress_ok = pct >= 3;
-                if header_ok && critical_have >= MIN_READY_CRITICAL && progress_ok {
+                if header_ok && critical_have >= required_critical && progress_ok {
                     self.state.store(STATE_READY, Ordering::Relaxed);
                 } else {
                     self.state.store(STATE_BUFFERING, Ordering::Relaxed);
@@ -802,15 +834,6 @@ impl TorrentSession {
             video_path:     self.video_path.read().clone(),
             progress_bytes: self.progress_bytes.load(Ordering::Relaxed),
         }
-    }
-
-    /// Human-readable reason for the most recent STATE_ERROR, if any.
-    /// Empty string if no error has occurred (or it was cleared by a
-    /// subsequent stop()/start()). Used to show an actual, specific error
-    /// message to the user instead of a generic "something went wrong" —
-    /// see MoviePlayerScreen.kt's ERROR-state handling.
-    pub fn last_error(&self) -> String {
-        self.last_error.read().clone()
     }
 
     pub fn set_playhead(&self, secs: f64) {

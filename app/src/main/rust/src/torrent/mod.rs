@@ -28,6 +28,27 @@ pub const HEADER_PIECES:         u32 = 30;    // first N pieces for container he
 pub const MIN_READY_CRITICAL:    u32 = 20;    // pieces needed before signalling READY (used in session.rs)
 pub const LOCAL_HTTP_PORT:       u16 = 8088;  // same port Ktor used — MPV unchanged (used in engine.rs)
 
+// ── Network-adaptive READY threshold (used in session.rs) ─────────────────────
+// See the FIX (network-adaptive READY threshold) comment at the call site in
+// session.rs for the full reasoning. Summary: instead of always requiring a
+// fixed MIN_READY_CRITICAL pieces before declaring READY, the actual
+// requirement is computed from the CURRENT observed download speed, so slow
+// connections wait for a genuinely sufficient buffer and fast connections
+// aren't held back by an unnecessarily large fixed floor.
+//
+// TARGET_READY_BUFFER_SECS: how many seconds' worth of data (at current
+// speed) we want buffered ahead of the playhead before calling it READY.
+// This is deliberately close to MPV's own demuxer-readahead-secs=8 (see
+// mpv_handler.cpp) — the two numbers represent the same real requirement
+// (MPV wants ~8s buffered ahead), so Rust's readiness signal and MPV's own
+// buffering behavior are pointed at the same target instead of being tuned
+// independently and potentially disagreeing.
+pub const TARGET_READY_BUFFER_SECS: f64 = 8.0;
+
+// MIN_READY_CRITICAL now doubles as both the fast-connection baseline and
+// the floor of the adaptive scale-up (see session.rs) — no separate floor
+// constant needed; CRITICAL_AHEAD_PIECES serves as the natural ceiling.
+
 #[allow(dead_code)]
 pub const HIGH_AHEAD_PIECES:     u32 = 90;    // high priority zone
 

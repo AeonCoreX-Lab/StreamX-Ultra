@@ -47,16 +47,13 @@ object TorrentEngine {
     private external fun initNative()
     private external fun startNative(magnet: String, savePath: String)
     private external fun stopNative()
-    private external fun getStatusNative(): LongArray     // [progress,speed,seeds,peers,state]
+    private external fun getStatusNative(): LongArray     // [progress,speed,seeds,peers,state,progressBytes]
     private external fun getFilePathNative(): String
     private external fun clearCacheNative(dir: String): Boolean
     // Tier 3 #16: works in release builds too (no HTTP surface, unlike the
     // debug_assertions-gated /debug route) — for a user-initiated
     // "Copy Diagnostics" button.
     private external fun getDebugDumpNative(): String
-    // Focused error-message export for the ERROR-state UI fix — see
-    // MoviePlayerScreen.kt's State.ERROR handler.
-    private external fun getLastErrorNative(): String
 
     // ── New Rust-only methods ─────────────────────────────────────────────────
     private external fun getLocalUrlNative(): String      // "http://127.0.0.1:8088/stream"
@@ -76,18 +73,55 @@ object TorrentEngine {
     }
 
     data class TorrentStatus(
-        val progress:  Int   = 0,
-        val state:     State = State.IDLE,
-        val speedBps:  Long  = 0L,
-        val seeds:     Int   = 0,
-        val peers:     Int   = 0,
-        val filePath:  String = "",
-        val streamUrl: String = ""
+        val progress:      Int   = 0,
+        val state:         State = State.IDLE,
+        val speedBps:      Long  = 0L,
+        val seeds:         Int   = 0,
+        val peers:         Int   = 0,
+        val filePath:      String = "",
+        val streamUrl:     String = "",
+        // Raw bytes downloaded so far (sequential from file start). This is
+        // the actual fix for the "network slow → black screen / stuck
+        // Detecting…" problem: mpv_handler.cpp's decode-check timeouts
+        // (raised earlier to ~12s) treat a stalled negotiation as evidence
+        // of a broken decoder and force a SW fallback — but on a slow
+        // connection, no video-params yet can just as easily mean no real
+        // data has arrived, and no decode-layer timeout can fix a data
+        // problem by waiting longer at the DECODE layer. Gating playback
+        // START on progressBytes (see isSufficientlyBuffered below) means
+        // MPV is never even asked to open a stream that hasn't buffered
+        // enough yet, so the decode-check logic only ever runs once real
+        // data actually exists — eliminating the false "stuck decoder"
+        // read entirely for this specific slow-network case, rather than
+        // just giving it more time to time out.
+        val progressBytes: Long  = 0L,
     ) {
         val isReady     get() = state == State.READY
         val isBuffering get() = state == State.BUFFERING || state == State.METADATA
         val speedMbps   get() = "%.1f Mb/s".format(speedBps / 1_000_000.0)
+
+        // ── Buffering-sufficiency gate ──────────────────────────────────
+        // True once enough of the file has actually downloaded that MPV
+        // is likely to find real, decodable data at the start of the
+        // stream. This is intentionally a SMALL, mostly-invisible gate on
+        // a healthy connection (a few hundred KB/s clears this in well
+        // under a second) — it only meaningfully delays playback start on
+        // a genuinely slow connection, which is exactly the case that
+        // used to produce a black screen with no useful buffering signal
+        // instead of a short, honest "Buffering…" state.
+        //
+        // MIN_BUFFER_BYTES is deliberately small and fixed rather than a
+        // percentage of file size: a 300 KB threshold is enough for mpv
+        // to read a container header and the first few frames on nearly
+        // any format/bitrate, without meaningfully delaying start on a
+        // fast connection where this amount arrives almost instantly.
+        val isSufficientlyBuffered: Boolean
+            get() = progressBytes >= MIN_BUFFER_BYTES_BEFORE_PLAY
     }
+
+    // 300 KB — see isSufficientlyBuffered's doc comment for why this
+    // specific, small, fixed threshold was chosen over a percentage.
+    const val MIN_BUFFER_BYTES_BEFORE_PLAY = 300L * 1024L
 
     // ── Internal state ────────────────────────────────────────────────────────
     private val _status  = MutableStateFlow(TorrentStatus())
@@ -130,16 +164,17 @@ object TorrentEngine {
         pollJob = scope.launch {
             while (isActive) {
                 try {
-                    val arr  = getStatusNative()  // [progress, speed, seeds, peers, state]
+                    val arr  = getStatusNative()  // [progress, speed, seeds, peers, state, progressBytes]
                     val path = getFilePathNative()
                     _status.value = TorrentStatus(
-                        progress  = arr[0].toInt(),
-                        speedBps  = arr[1],
-                        seeds     = arr[2].toInt(),
-                        peers     = arr[3].toInt(),
-                        state     = State.from(arr[4]),
-                        filePath  = path,
-                        streamUrl = localUrl
+                        progress      = arr[0].toInt(),
+                        speedBps      = arr[1],
+                        seeds         = arr[2].toInt(),
+                        peers         = arr[3].toInt(),
+                        state         = State.from(arr[4]),
+                        filePath      = path,
+                        streamUrl     = localUrl,
+                        progressBytes = arr[5]
                     )
                 } catch (e: Exception) {
                     Log.w(TAG, "poll error: ${e.message}")
@@ -319,21 +354,5 @@ object TorrentEngine {
         getDebugDumpNative()
     } catch (e: Exception) {
         "diagnostics unavailable: ${e.message}\n"
-    }
-
-    // ── Last error message (for the ERROR-state UI fix) ────────────────────
-    // Root cause found via the "Copy Diagnostics" button itself: the
-    // ERROR-state handler was setting a generic "Torrent engine failed"
-    // message into statusMsg, but ALSO setting isPreBuffering=false in the
-    // same step — which hides the exact overlay that renders statusMsg,
-    // so the message was never actually visible. Player controls showed
-    // instead, with nothing loaded — "00:00 / 00:00". This returns the
-    // SPECIFIC underlying reason (e.g. an actual "not enough storage"
-    // message) so the fixed ERROR handler can show something the user can
-    // actually act on, instead of a generic dead end.
-    fun getLastError(): String = try {
-        getLastErrorNative()
-    } catch (e: Exception) {
-        ""
     }
 }

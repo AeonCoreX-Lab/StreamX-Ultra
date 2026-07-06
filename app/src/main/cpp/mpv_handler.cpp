@@ -110,9 +110,35 @@ static int   s_sw_verify_wait_ticks    = 0; // ticks spent waiting for re-negoti
 static int   s_sw_verify_next_tick     = 0;
 static int   s_sw_verify_samples_taken = 0;
 static int   s_sw_verify_samples_black = 0;
+// FIX (stuck "Detecting…" label on slow-network SW-reload): set when
+// check_sw_verify() gives up waiting for video-params to re-negotiate
+// after a SW reload — previously this case had NO visible signal at all;
+// get_decode_mode_label() just kept reading an empty pixelformat and
+// showing "Detecting…" indefinitely, matching the exact symptom of a
+// permanently stuck black screen with no way to tell whether it was
+// still legitimately buffering or had already given up. See
+// get_decode_mode_label() for how this is now surfaced.
+static bool  s_sw_verify_gave_up       = false;
 static const int SW_VERIFY_MAX_SAMPLES    = 2;
 static const int SW_VERIFY_SAMPLE_INTERVAL = 2;  // ticks between samples (~500ms)
-static const int SW_VERIFY_MAX_WAIT_TICKS  = 16; // ~4s to wait for re-negotiated video-params
+static const int SW_VERIFY_MAX_WAIT_TICKS  = 48; // ~12s to wait for re-negotiated video-params
+// (Was 16 ticks / ~4s — the exact same too-short timeout that
+// DECODE_CHECK_MAX_TICKS had for Stage 1, but this is a SEPARATE timeout
+// guarding a different phase: waiting for video-params to re-negotiate
+// AFTER force_sw_reload_locked() has already reloaded the file with
+// hwdec=no. If the network/torrent buffer is slow (the exact case that
+// triggers a negotiation-timeout SW switch in the first place — see
+// Stage 1's fallback above), the reloaded SW decode path can ALSO take
+// longer than 4s to produce a negotiated pixel format, for the same
+// buffering reason. When that happened, this function gave up silently
+// (s_sw_verify_pending = false) with no consequence — s_switch_reason
+// stayed at "negotiation-timeout" or whatever triggered the SW switch,
+// get_decode_mode_label() kept reading a still-empty pixelformat and
+// showing "Detecting…" forever, and the screen stayed black — because
+// SW decode was reloading but genuinely hadn't gotten data yet, and
+// nothing here ever re-tried or told the user what was actually
+// happening. Raised to match Stage 1's reasoning: give real slow-network
+// buffering enough time to actually finish negotiating.
 
 // ── Manual persistent override ───────────────────────────────────
 // Set from Kotlin at app start (SharedPreferences-backed) and whenever
@@ -422,6 +448,7 @@ void play_mpv_video(const char* path) {
     // Reset post-switch SW verification state (Tier 1 #2) for the new file.
     s_sw_verify_pending       = false;
     s_sw_verify_wait_ticks    = 0;
+    s_sw_verify_gave_up       = false;
     s_sw_verify_next_tick     = 0;
     s_sw_verify_samples_taken = 0;
     s_sw_verify_samples_black = 0;
@@ -723,6 +750,7 @@ static void schedule_sw_verify() {
     s_sw_verify_next_tick     = 0;
     s_sw_verify_samples_taken = 0;
     s_sw_verify_samples_black = 0;
+    s_sw_verify_gave_up       = false;
 }
 
 // ── Tier 1 #2: verify the SW switch actually worked ──────────────
@@ -737,8 +765,12 @@ static void check_sw_verify() {
 
     if (pixfmt.empty()) {
         if (++s_sw_verify_wait_ticks >= SW_VERIFY_MAX_WAIT_TICKS) {
-            LOGD("decode-compat: SW-verify gave up waiting for video-params after reload");
+            LOGD("decode-compat: SW-verify gave up waiting for video-params after reload "
+                 "(%d ticks, ~%ds) — likely still buffering on a slow connection; "
+                 "reporting this honestly instead of showing Detecting… forever",
+                 SW_VERIFY_MAX_WAIT_TICKS, SW_VERIFY_MAX_WAIT_TICKS / 4);
             s_sw_verify_pending = false;
+            s_sw_verify_gave_up = true;
         }
         return;
     }
@@ -1068,7 +1100,23 @@ std::string get_decode_mode_label() {
     char* fmt_raw = mpv_get_property_string(mpv_ctx, "video-params/pixelformat");
     std::string pixfmt = fmt_raw ? fmt_raw : "";
     if (fmt_raw) mpv_free(fmt_raw);
-    if (pixfmt.empty()) return "Detecting\u2026";
+    if (pixfmt.empty()) {
+        // FIX (permanently stuck "Detecting…" on slow-network SW reload):
+        // this used to return "Detecting…" unconditionally whenever
+        // pixelformat was empty, with no way to distinguish "still
+        // actually negotiating, wait" from "already gave up minutes ago
+        // and nothing is happening." If check_sw_verify() timed out
+        // waiting for the SW-reloaded file to re-negotiate (see
+        // s_sw_verify_gave_up's declaration for the full scenario — this
+        // happens on slow connections where even the SW fallback needs
+        // more than a few seconds to get enough buffered data), this now
+        // says so honestly instead of implying a check is still in
+        // progress when it already ended without a real answer.
+        if (s_sw_verify_gave_up) {
+            return "Unknown (buffering — SW reload didn't confirm)";
+        }
+        return "Detecting\u2026";
+    }
 
     char* hw_raw = mpv_get_property_string(mpv_ctx, "hwdec-current");
     std::string hwdec_current = hw_raw ? hw_raw : "";

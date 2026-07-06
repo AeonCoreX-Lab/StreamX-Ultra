@@ -191,17 +191,6 @@ impl TorrentEngine {
             .unwrap_or_else(|| "session=NONE (no torrent active)\n".to_string())
     }
 
-    /// Human-readable reason for the most recent STATE_ERROR, if any — see
-    /// TorrentSession::last_error() for details. Used by
-    /// MoviePlayerScreen.kt's ERROR-state UI to show an actual message
-    /// instead of a generic "something went wrong".
-    pub fn last_error(&self) -> String {
-        self.session.lock()
-            .as_ref()
-            .map(|(_, s)| s.last_error())
-            .unwrap_or_default()
-    }
-
     // ── Playhead update (from Kotlin MPV observer) ────────────────────────────
     pub fn set_playhead(&self, secs: f64) {
         if let Some((_, sess)) = self.session.lock().as_ref() {
