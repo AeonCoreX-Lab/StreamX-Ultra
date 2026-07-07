@@ -189,11 +189,15 @@ fun AppNavigation(
         }
 
         composable(
-            route     = "torrent_player/{encodedUrl}",
-            arguments = listOf(navArgument("encodedUrl") { type = NavType.StringType })
+            route     = "torrent_player/{encodedUrl}?imdbId={imdbId}",
+            arguments = listOf(
+                navArgument("encodedUrl") { type = NavType.StringType },
+                navArgument("imdbId")     { type = NavType.StringType; defaultValue = "" }
+            )
         ) { back ->
             MoviePlayerScreen(navController = navController,
-                encodedUrl = back.arguments?.getString("encodedUrl") ?: "")
+                encodedUrl = back.arguments?.getString("encodedUrl") ?: "",
+                imdbId     = back.arguments?.getString("imdbId") ?: "")
         }
 
         // ── Music ─────────────────────────────────────────────────────────────

@@ -338,7 +338,7 @@ fun saveForceSwDecode(context: Context, force: Boolean) {
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putBoolean(PREF_FORCE_SW_DECODE, force).apply()
 }
 
-fun autoSubtitle(title: String, context: Context, onStatus: (String) -> Unit) {
+fun autoSubtitle(title: String, imdbId: String, context: Context, onStatus: (String) -> Unit) {
     CoroutineScope(Dispatchers.IO).launch {
         delay(2500)
         val tracks = try { StreamXCore.getTrackList("sub") } catch (e: Exception) { emptyList() }
@@ -349,26 +349,31 @@ fun autoSubtitle(title: String, context: Context, onStatus: (String) -> Unit) {
             } else {
                 val lang = getSavedSubLang(context)
                 onStatus("Loading ${lang.flag} subtitle…")
-                fetchSubtitle(title, lang.code, context) { msg -> onStatus(msg) }
+                fetchSubtitle(title, imdbId, lang.code, context) { msg -> onStatus(msg) }
             }
         }
     }
 }
 
 // ──────────────────────────────────────────────────────────────────
-//  fetchSubtitle — FIXED
+//  fetchSubtitle — FIXED (real-time download bug)
 //
-//  OLD API (broken since 2024):
-//    rest.opensubtitles.org/search/query-{title}/sublanguageid-{lang}
-//    → HTTP 410 Gone. OpenSubtitles shut down REST v1 in late 2023.
-//    → All subtitle requests silently failed with "Server error: 401"
-//      or "Error: …Connection refused".
-//
-//  NEW API: Stremio OpenSubtitles proxy (no API key, no rate limit)
-//    opensubtitles-v3.strem.io/subtitles/{imdbId}.json  (by IMDB ID)
-//    opensubtitles-v3.strem.io/subtitles/search={title}.json (by title)
-//    SubtitleRepository.search() handles both modes and returns ranked
-//    results with direct .srt download URLs.
+//  Root causes this fixes:
+//   1. imdbId never reached the player before — MovieLinkSelectionScreen
+//      had it, but the nav route to the player only carried the magnet
+//      URL. Every subtitle search fell back to unreliable title-only
+//      matching. The player now receives imdbId via the route and
+//      passes it through to SubtitleRepository.search() for a precise
+//      lookup when available.
+//   2. StreamXCore.addExternalSubtitle() handed mpv a raw remote URL.
+//      mpv's own HTTP fetch for "sub-add" has no success/failure signal
+//      that reaches Kotlin — a timeout, 404, or an HTML error page
+//      returned instead of an .srt file all failed *silently*, while
+//      the UI still showed "✓ Subtitle loaded!". Now the file is
+//      downloaded and content-verified here first (see
+//      SubtitleRepository.download()), and only a verified local file
+//      is handed to mpv — which mpv can then load synchronously and
+//      reliably, no network round-trip needed at that point.
 //
 //  Language code mapping: MoviePlayerScreen uses ISO 639-2/B 3-letter
 //  codes (eng, hin, ben…). SubtitleRepository / Stremio use 2-letter
@@ -382,28 +387,55 @@ private val ISO639_3TO2 = mapOf(
     "kor" to "ko"
 )
 
-private fun fetchSubtitle(title: String, langCode: String, context: Context, onComplete: (String) -> Unit) {
+private fun fetchSubtitle(title: String, imdbId: String, langCode: String, context: Context, onComplete: (String) -> Unit) {
     CoroutineScope(Dispatchers.IO).launch {
         try {
             val lang2   = ISO639_3TO2[langCode] ?: langCode.take(2)
+            val validImdb = imdbId.trim().takeIf { it.startsWith("tt") }
             val results = SubtitleRepository.search(
-                imdbId   = null,
+                imdbId   = validImdb,
                 title    = title,
                 type     = MovieType.MOVIE,
                 langCode = lang2
             )
-            withContext(Dispatchers.Main) {
-                val best = results.firstOrNull()
-                if (best != null) {
-                    // Direct .srt URL — MPV downloads and renders it
-                    try { StreamXCore.addExternalSubtitle(best.url) } catch (e: Exception) {
-                        Log.e("SubtitleFetch", "sub-add failed: ${e.message}")
+
+            if (results.isEmpty()) {
+                withContext(Dispatchers.Main) { onComplete("No subtitle found for this language") }
+                return@launch
+            }
+
+            // Try candidates in ranked order until one actually downloads
+            // and verifies as real subtitle content — a single bad/dead
+            // link (common with community-sourced subtitle mirrors)
+            // should not make the whole fetch look like "nothing found".
+            var lastFailureReason = "No subtitle found for this language"
+            for (candidate in results.take(5)) {
+                when (val outcome = SubtitleRepository.download(context, candidate)) {
+                    is SubtitleRepository.DownloadOutcome.Success -> {
+                        withContext(Dispatchers.Main) {
+                            try {
+                                // Local file:// path — mpv loads this
+                                // synchronously, no network fetch needed,
+                                // so no more silent sub-add failures.
+                                StreamXCore.addExternalSubtitle("file://${outcome.file.absolutePath}")
+                                onComplete("✓ Subtitle loaded!")
+                            } catch (e: Exception) {
+                                Log.e("SubtitleFetch", "sub-add failed: ${e.message}")
+                                onComplete("Couldn't load subtitle into player")
+                            }
+                        }
+                        return@launch
                     }
-                    onComplete("✓ Subtitle loaded!")
-                } else {
-                    onComplete("No subtitle found for this language")
+                    is SubtitleRepository.DownloadOutcome.Failure -> {
+                        Log.w("SubtitleFetch", "Candidate ${candidate.url} failed: ${outcome.reason}")
+                        lastFailureReason = "Download failed: ${outcome.reason}"
+                        // fall through, try next candidate
+                    }
                 }
             }
+
+            withContext(Dispatchers.Main) { onComplete(lastFailureReason) }
+
         } catch (e: Exception) {
             withContext(Dispatchers.Main) { onComplete("Error: ${e.message?.take(50)}") }
         }
@@ -439,7 +471,7 @@ private fun formatTime(secs: Long): String {
 //  Main Composable
 // ═══════════════════════════════════════════════════════════════════
 @Composable
-fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
+fun MoviePlayerScreen(navController: NavController, encodedUrl: String, imdbId: String = "") {
     val context  = LocalContext.current
     val activity = context as? Activity
     val decodedUrl = remember { try { URLDecoder.decode(encodedUrl, "UTF-8") } catch (e: Exception) { encodedUrl } }
@@ -731,7 +763,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         delay(200)
         if (surfaceW > 0 && surfaceH > 0) try { StreamXCore.setMpvSurfaceSize(surfaceW, surfaceH) } catch (e: Exception) {}
 
-        autoSubtitle(movieTitle.ifBlank { "Movie" }, context) { msg ->
+        autoSubtitle(movieTitle.ifBlank { "Movie" }, imdbId, context) { msg ->
             if (msg.isNotEmpty()) { autoSubMsg = msg; showAutoSubMsg = true; scope.launch { delay(3000); showAutoSubMsg = false } }
         }
 
@@ -1446,7 +1478,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                         Button(onClick = {
                                             if (!isSearchingSub) {
                                                 isSearchingSub = true; subSearchMsg = "Searching…"
-                                                fetchSubtitle(movieTitle.ifBlank { "Movie" }, selectedSubLang.code, context) { msg ->
+                                                fetchSubtitle(movieTitle.ifBlank { "Movie" }, imdbId, selectedSubLang.code, context) { msg ->
                                                     isSearchingSub = false; subSearchMsg = msg; subTracks = StreamXCore.getTrackList("sub")
                                                 }
                                             }
@@ -1476,7 +1508,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                                     .clickable {
                                                         selectedSubLang = lang; saveSubLang(context, lang)
                                                         isSearchingSub = true; subSearchMsg = "Loading ${lang.flag} ${lang.label}…"
-                                                        fetchSubtitle(movieTitle.ifBlank { "Movie" }, lang.code, context) { msg -> isSearchingSub = false; subSearchMsg = msg; subTracks = StreamXCore.getTrackList("sub") }
+                                                        fetchSubtitle(movieTitle.ifBlank { "Movie" }, imdbId, lang.code, context) { msg -> isSearchingSub = false; subSearchMsg = msg; subTracks = StreamXCore.getTrackList("sub") }
                                                         activeSettingPage = "Subtitles"
                                                     }
                                                     .padding(horizontal = 12.dp, vertical = 10.dp),

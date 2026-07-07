@@ -122,7 +122,11 @@ fun MovieLinkSelectionScreen(
         AdManager.showInterstitial(activity) {
             adLoading = false
             val enc = URLEncoder.encode(magnet, "UTF-8")
-            navController.navigate("torrent_player/$enc")
+            // Forward imdbId (already validated above as "" when absent/"null")
+            // so the player's subtitle search can use the reliable IMDB-ID
+            // lookup instead of falling back to title-only search every time.
+            val encImdb = URLEncoder.encode(imdbId.takeIf { it != "null" } ?: "", "UTF-8")
+            navController.navigate("torrent_player/$enc?imdbId=$encImdb")
         }
     }
 

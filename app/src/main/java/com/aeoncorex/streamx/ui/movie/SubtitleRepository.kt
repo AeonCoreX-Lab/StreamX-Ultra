@@ -146,33 +146,93 @@ object SubtitleRepository {
         }
     }
 
-    // ── Download subtitle to cache ────────────────────────────────
+    // ── Download subtitle to local cache ──────────────────────────
+    //  FIXED: previously this function existed but was never called —
+    //  the player called StreamXCore.addExternalSubtitle(url) directly,
+    //  handing mpv a raw remote URL. That has two real failure modes
+    //  that this download() path avoids:
+    //    1. mpv's own HTTP fetch for "sub-add" has no success/failure
+    //       callback reaching Kotlin — a 404, timeout, or an HTML error
+    //       page returned instead of an .srt file all fail *silently*.
+    //       The UI showed "✓ Subtitle loaded!" even when nothing loaded.
+    //    2. No local cache — every replay re-hit the network.
+    //  Now: download the file ourselves, verify it's plausible SRT/VTT
+    //  content (not an HTML error page or empty body), and only then
+    //  hand mpv a local file:// path — which mpv can load synchronously
+    //  and reliably, since no network round-trip is needed at that point.
+    sealed class DownloadOutcome {
+        data class Success(val file: File) : DownloadOutcome()
+        data class Failure(val reason: String) : DownloadOutcome()
+    }
+
     suspend fun download(
         context: android.content.Context,
         result:  SubtitleResult
-    ): File? = withContext(Dispatchers.IO) {
-        try {
-            val cacheFile = File(context.cacheDir, "subtitle_${result.id}.srt")
-            if (cacheFile.exists() && cacheFile.length() > 100) return@withContext cacheFile
+    ): DownloadOutcome = withContext(Dispatchers.IO) {
+        val safeId = result.id.replace(Regex("[^A-Za-z0-9_-]"), "_")
+        val cacheFile = File(context.cacheDir, "subtitle_$safeId.srt")
 
+        // Reuse a previously-verified cache hit — but only if it still
+        // looks like real subtitle content, not a stale empty/corrupt file
+        // from an earlier failed attempt that slipped through.
+        if (cacheFile.exists() && looksLikeSubtitleFile(cacheFile)) {
+            return@withContext DownloadOutcome.Success(cacheFile)
+        }
+
+        try {
             val conn = (URL(result.url).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 10_000
                 readTimeout    = 15_000
+                setRequestProperty("User-Agent", "StreamX-Ultra/2.0")
                 instanceFollowRedirects = true
             }
 
-            if (conn.responseCode in 200..299) {
-                cacheFile.outputStream().use { out ->
-                    conn.inputStream.use { it.copyTo(out) }
-                }
-                Log.d(TAG, "Subtitle downloaded: ${cacheFile.absolutePath}")
-                cacheFile
-            } else null
+            val code = runCatching { conn.responseCode }.getOrElse { -1 }
+            if (code !in 200..299) {
+                Log.w(TAG, "Subtitle download HTTP $code for ${result.url}")
+                return@withContext DownloadOutcome.Failure("Server returned $code")
+            }
+
+            val tmpFile = File(context.cacheDir, "subtitle_$safeId.tmp")
+            tmpFile.outputStream().use { out -> conn.inputStream.use { it.copyTo(out) } }
+
+            if (!looksLikeSubtitleFile(tmpFile)) {
+                tmpFile.delete()
+                Log.w(TAG, "Downloaded file for ${result.url} isn't valid subtitle content")
+                return@withContext DownloadOutcome.Failure("File wasn't a valid subtitle")
+            }
+
+            // Only replace the real cache file once content is verified —
+            // avoids ever leaving a half-written/invalid file at the path
+            // the player will try to load.
+            tmpFile.copyTo(cacheFile, overwrite = true)
+            tmpFile.delete()
+            Log.d(TAG, "Subtitle downloaded: ${cacheFile.absolutePath} (${cacheFile.length()} bytes)")
+            DownloadOutcome.Success(cacheFile)
 
         } catch (e: Exception) {
             Log.e(TAG, "Subtitle download failed: ${e.message}")
-            null
+            DownloadOutcome.Failure(e.message ?: "Unknown network error")
+        }
+    }
+
+    // Cheap sanity check: real .srt/.vtt files are >100 bytes and contain
+    // either a "-->" timing arrow (SRT/VTT) or start with "WEBVTT". This
+    // catches the two most common silent-failure cases seen in practice:
+    // an HTML error/redirect page saved as if it were a subtitle, or a
+    // truncated/empty response from a flaky connection.
+    private fun looksLikeSubtitleFile(file: File): Boolean {
+        if (!file.exists() || file.length() < 100) return false
+        return try {
+            val buf = CharArray(2000)
+            val head = file.bufferedReader().use { reader ->
+                val n = reader.read(buf, 0, buf.size)
+                if (n <= 0) "" else String(buf, 0, n)
+            }
+            head.contains("-->") || head.trimStart().startsWith("WEBVTT", ignoreCase = true)
+        } catch (e: Exception) {
+            false
         }
     }
 }
