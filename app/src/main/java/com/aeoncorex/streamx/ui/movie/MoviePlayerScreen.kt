@@ -22,6 +22,7 @@ import android.view.WindowManager
 import androidx.annotation.Keep
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -44,8 +45,13 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -53,6 +59,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -74,6 +81,48 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.PI
+
+// ═══════════════════════════════════════════════════════════════════
+//  AeonCoreX brand tokens — player UI
+// ═══════════════════════════════════════════════════════════════════
+//
+// Derived from the AeonCoreX logo (blue → violet gradient "A" mark) and
+// brand palette (deep navy → sky-blue scale). Used throughout the player
+// UI — progress bar, gesture overlays, controls, settings sheet — so the
+// whole playback experience reads as one designed surface instead of
+// default Material colors sprinkled with ad-hoc Color.Cyan/Color.Green.
+private object AeonPlayer {
+    // Brand scale (darkest → lightest), from the palette reference.
+    val Navy900  = Color(0xFF001D39) // deepest background / scrims
+    val Navy700  = Color(0xFF0A4174) // panel fills
+    val Slate500 = Color(0xFF49769F) // secondary text / inactive icons
+    val Teal500  = Color(0xFF4E8EA2) // mid accents
+    val Teal300  = Color(0xFF6EA2B3) // soft accents
+    val Sky300   = Color(0xFF7BBDE8) // primary interactive accent (replaces Color.Cyan)
+    val Ice100   = Color(0xFFBDD8E9) // high-contrast on-dark text accent
+
+    // Logo gradient — blue → violet. This is the ONE signature gradient
+    // used sparingly (progress fills, active-state glows, the loading
+    // ring) so it reads as intentional brand identity, not decoration.
+    val BrandGradient = Brush.linearGradient(listOf(Color(0xFF2979FF), Color(0xFF8C4DFF)))
+    val BrandSweep     = listOf(Color(0xFF2979FF), Sky300, Color(0xFF8C4DFF), Sky300, Color(0xFF2979FF))
+
+    // Functional colors kept close to Material norms for recognizability
+    // (amber=caution, green=good/live, red=error) but tuned to sit
+    // comfortably next to the brand scale above rather than clashing.
+    val Amber = Color(0xFFFFA726)
+    val Green = Color(0xFF66BB6A)
+    val Red   = Color(0xFFEF5350)
+
+    // Glass panel surface — used for the settings sheet, gesture
+    // overlays, and loading panel so they all share one "material."
+    val GlassFill = Brush.verticalGradient(
+        listOf(Navy900.copy(alpha = 0.88f), Color(0xFF060A12).copy(alpha = 0.94f))
+    )
+    val GlassBorder = Brush.linearGradient(
+        listOf(Sky300.copy(0.35f), Color.White.copy(0.06f), Color(0xFF8C4DFF).copy(0.25f))
+    )
+}
 
 // ═══════════════════════════════════════════════════════════════════
 //  StreamXCore — native bridge (unchanged)
@@ -378,6 +427,20 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var currentTime        by remember { mutableDoubleStateOf(0.0) }
     var totalDuration      by remember { mutableDoubleStateOf(0.0) }
     var isPreBuffering     by remember { mutableStateOf(true) }
+    // Root cause of a real "00:00" regression (confirmed twice via the
+    // in-app "Copy Diagnostics" button): the old ERROR handler set
+    // isPreBuffering=false, which hides the ONLY overlay that renders
+    // statusMsg — so the error message was set but never actually
+    // visible, and bare player controls showed instead with nothing
+    // loaded. Fix: on ERROR, isPreBuffering STAYS true (so the overlay —
+    // and its message — stay visible); this flag instead switches that
+    // overlay from a loading spinner to an error icon + the actual
+    // reason + a manual retry option.
+    var isErrorState       by remember { mutableStateOf(false) }
+    // Bumped by the manual "Retry" button in the error overlay to force
+    // LaunchedEffect(decodedUrl, retryTrigger) below to re-run, since
+    // decodedUrl alone doesn't change on a manual retry.
+    var retryTrigger       by remember { mutableStateOf(0) }
     var isMidBuffering     by remember { mutableStateOf(false) }
     var cachePercent       by remember { mutableIntStateOf(100) }
     var statusMsg          by remember { mutableStateOf("Preparing...") }
@@ -504,9 +567,14 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     }
 
     // ── Torrent / direct URL ──────────────────────────────────────
-    LaunchedEffect(decodedUrl) {
+    LaunchedEffect(decodedUrl, retryTrigger) {
         var retryCount = 0; val maxRetries = 3
         while (retryCount < maxRetries) {
+            // Reset from any previous attempt's error state before trying
+            // again — otherwise a successful retry would still show the
+            // stale error icon/message for a frame or two.
+            isErrorState   = false
+            isPreBuffering = true
             if (decodedUrl.startsWith("magnet:?")) {
                 // NOTE: no explicit clearCache() pre-call here anymore. Previously
                 // this cleared the single shared torrents dir before every start(),
@@ -533,7 +601,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 TorrentEngine.stopAndAwait(); completed = true
                             }
                         }
-                        TorrentEngine.State.BUFFERING -> { isPreBuffering = true; torrentProgress = status.progress; statusMsg = "Buffering ${status.progress}%"; downloadSpeed = "${status.speedBps / 1000} KB/s"; seeds = status.seeds; metadataTimeout = 0 }
+                        TorrentEngine.State.BUFFERING -> { isPreBuffering = true; torrentProgress = status.progress; statusMsg = "Loading"; downloadSpeed = "${status.speedBps / 1000} KB/s"; seeds = status.seeds; metadataTimeout = 0 }
                         TorrentEngine.State.READY  -> {
                             // Do NOT set isPreBuffering=false here.
                             // The overlay stays until time-sync confirms MPV
@@ -542,7 +610,16 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             statusMsg = "Opening video…"
                             completed = true
                         }
-                        TorrentEngine.State.ERROR  -> { statusMsg = "Error: Torrent engine failed"; isPreBuffering = false; completed = true }
+                        TorrentEngine.State.ERROR  -> {
+                            val reason = try { TorrentEngine.getLastError() } catch (e: Exception) { "" }
+                            statusMsg = if (reason.isNotBlank()) reason else "Something went wrong starting this download."
+                            isErrorState  = true
+                            // isPreBuffering intentionally left true — see
+                            // the variable's doc comment above. The overlay
+                            // now shows an error icon + this message + a
+                            // retry option instead of a spinner.
+                            completed = true
+                        }
                         else -> {}
                     }
                     if (completed) return@collect
@@ -781,51 +858,82 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 
         // Gesture overlay
         if (showGestureOverlay) {
-            Box(Modifier.align(Alignment.Center).background(Color.Black.copy(0.7f), RoundedCornerShape(16.dp)).padding(24.dp)) {
+            Box(
+                Modifier
+                    .align(Alignment.Center)
+                    .background(AeonPlayer.GlassFill, RoundedCornerShape(20.dp))
+                    .border(1.dp, AeonPlayer.GlassBorder, RoundedCornerShape(20.dp))
+                    .padding(horizontal = 28.dp, vertical = 22.dp)
+            ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    gestureIcon?.let { Icon(it, null, tint = Color.Cyan, modifier = Modifier.size(48.dp)) }
-                    Text(gestureText, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    gestureIcon?.let { Icon(it, null, tint = AeonPlayer.Sky300, modifier = Modifier.size(32.dp)) }
+                    Spacer(Modifier.height(10.dp))
+                    Text(gestureText, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(10.dp))
+                    // Mini progress track — real level, not just a number.
+                    val level = gestureText.trimEnd('%').toFloatOrNull()?.div(100f) ?: 0f
+                    Box(Modifier.width(90.dp).height(3.dp).background(Color.White.copy(0.15f), RoundedCornerShape(2.dp))) {
+                        Box(Modifier.fillMaxHeight().fillMaxWidth(level.coerceIn(0f, 1f)).background(AeonPlayer.BrandGradient, RoundedCornerShape(2.dp)))
+                    }
                 }
             }
         }
 
         // Double-tap anim
-        if (rewindAnimAlpha  > 0) Box(Modifier.align(Alignment.CenterStart).padding(50.dp).alpha(rewindAnimAlpha).background(Color.Black.copy(0.5f), CircleShape).padding(16.dp)) { Icon(Icons.Rounded.FastRewind,  null, tint = Color.White, modifier = Modifier.size(40.dp)) }
-        if (forwardAnimAlpha > 0) Box(Modifier.align(Alignment.CenterEnd).padding(50.dp).alpha(forwardAnimAlpha).background(Color.Black.copy(0.5f), CircleShape).padding(16.dp)) { Icon(Icons.Rounded.FastForward, null, tint = Color.White, modifier = Modifier.size(40.dp)) }
+        if (rewindAnimAlpha  > 0) Box(Modifier.align(Alignment.CenterStart).padding(50.dp).alpha(rewindAnimAlpha).background(AeonPlayer.GlassFill, CircleShape).border(1.dp, AeonPlayer.GlassBorder, CircleShape).padding(18.dp)) { Icon(Icons.Rounded.FastRewind,  null, tint = AeonPlayer.Sky300, modifier = Modifier.size(36.dp)) }
+        if (forwardAnimAlpha > 0) Box(Modifier.align(Alignment.CenterEnd).padding(50.dp).alpha(forwardAnimAlpha).background(AeonPlayer.GlassFill, CircleShape).border(1.dp, AeonPlayer.GlassBorder, CircleShape).padding(18.dp)) { Icon(Icons.Rounded.FastForward, null, tint = AeonPlayer.Sky300, modifier = Modifier.size(36.dp)) }
 
-        // Pre-buffer overlay
+        // Pre-buffer overlay — futuristic loading experience
         if (isPreBuffering) {  // stays until mpvPath==videoPath && duration>0
             Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                    CircularProgressIndicator(color = Color.Cyan, strokeWidth = 3.dp)
-                    Spacer(Modifier.height(20.dp))
-                    Text(statusMsg, color = Color.White, textAlign = TextAlign.Center, fontSize = 14.sp)
-                    if (torrentProgress > 0) {
-                        Spacer(Modifier.height(12.dp))
-                        LinearProgressIndicator(progress = { torrentProgress / 100f }, modifier = Modifier.fillMaxWidth(0.7f).height(4.dp), color = Color.Cyan, trackColor = Color.White.copy(0.2f))
-                        Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                            Text("▼ $downloadSpeed", color = Color.Green,     fontSize = 13.sp)
-                            Text("S: $seeds",        color = Color.LightGray, fontSize = 13.sp)
+                if (isErrorState) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                        Box(
+                            Modifier.size(72.dp).background(Color(0xFFEF5350).copy(0.12f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Rounded.ErrorOutline, null, tint = Color(0xFFEF5350), modifier = Modifier.size(34.dp))
                         }
+                        Spacer(Modifier.height(20.dp))
+                        Text(
+                            "Playback failed",
+                            color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            statusMsg,
+                            color = Color.White.copy(0.6f), fontSize = 13.sp, textAlign = TextAlign.Center,
+                            modifier = Modifier.widthIn(max = 280.dp),
+                        )
+                        Spacer(Modifier.height(24.dp))
+                        Button(
+                            onClick = { retryTrigger++ },
+                            colors = ButtonDefaults.buttonColors(containerColor = AeonPlayer.Sky300),
+                            shape = RoundedCornerShape(24.dp),
+                            contentPadding = PaddingValues(horizontal = 28.dp, vertical = 10.dp),
+                        ) { Text("Try again", color = Color.Black, fontWeight = FontWeight.SemiBold) }
                     }
+                } else {
+                    FuturisticLoadingPanel(
+                        percent       = if (torrentProgress > 0) torrentProgress else null,
+                        downloadSpeed = downloadSpeed,
+                        seeds         = seeds,
+                    )
                 }
                 IconButton(onClick = { navController.popBackStack() }, modifier = Modifier.align(Alignment.TopStart).padding(16.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
             }
         }
 
-        // Mid-play buffering overlay
+        // Mid-play buffering overlay — same futuristic language, compact
         if (!isPreBuffering && isMidBuffering && videoPath != null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Box(Modifier.background(Color.Black.copy(0.78f), RoundedCornerShape(16.dp)).padding(horizontal = 32.dp, vertical = 22.dp)) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = Color.Cyan, modifier = Modifier.size(36.dp), strokeWidth = 3.dp)
-                        Spacer(Modifier.height(10.dp))
-                        Text("Buffering $cachePercent%", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                        Spacer(Modifier.height(4.dp))
-                        Text("▼ $downloadSpeed   S: $seeds", color = Color.Green, fontSize = 12.sp)
-                    }
-                }
+                FuturisticLoadingPanel(
+                    percent       = if (cachePercent in 0..99) cachePercent else null,
+                    downloadSpeed = downloadSpeed,
+                    seeds         = seeds,
+                    compact       = true,
+                )
             }
         }
 
@@ -865,13 +973,35 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(0.4f))) {
 
                     // Top bar
-                    Row(Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopStart), horizontalArrangement = Arrangement.SpaceBetween) {
-                        IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White) }
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 16.dp).align(Alignment.TopStart), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f, fill = false)) {
+                            IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White) }
+                            Text(
+                                movieTitle.ifBlank { "" },
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(start = 4.dp, end = 8.dp).weight(1f, fill = false),
+                            )
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (decodedUrl.startsWith("magnet")) {
-                                Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 12.dp)) {
-                                    Text("▼ $downloadSpeed", color = Color.Green,     fontSize = 12.sp)
-                                    Text("S: $seeds",        color = Color.LightGray, fontSize = 10.sp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .padding(end = 10.dp)
+                                        .background(Color.Black.copy(0.35f), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Icon(Icons.Rounded.ArrowDownward, null, tint = AeonPlayer.Amber, modifier = Modifier.size(11.dp))
+                                    Spacer(Modifier.width(3.dp))
+                                    Text(downloadSpeed, color = Color.White.copy(0.85f), fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                                    Spacer(Modifier.width(8.dp))
+                                    Icon(Icons.Rounded.People, null, tint = AeonPlayer.Green, modifier = Modifier.size(11.dp))
+                                    Spacer(Modifier.width(3.dp))
+                                    Text("$seeds", color = Color.White.copy(0.85f), fontSize = 11.sp, fontWeight = FontWeight.Medium)
                                 }
                             }
 
@@ -884,13 +1014,13 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
-                                        .padding(end = 12.dp)
-                                        .background(Color(0xFFFFA726).copy(0.85f), RoundedCornerShape(6.dp))
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        .padding(end = 10.dp)
+                                        .background(AeonPlayer.Amber.copy(0.9f), RoundedCornerShape(50))
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
                                 ) {
-                                    Icon(Icons.Rounded.Speed, null, tint = Color.Black, modifier = Modifier.size(14.dp))
+                                    Icon(Icons.Rounded.Speed, null, tint = Color.Black, modifier = Modifier.size(13.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    Text("Playback lag", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                                    Text("Playback lag", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                                 }
                             }
 
@@ -905,7 +1035,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                     else Toast.makeText(context, "Live Caption is ON ✓", Toast.LENGTH_SHORT).show()
                                 }) {
                                     Icon(Icons.Rounded.ClosedCaption, null,
-                                        tint     = if (liveCaptionEnabled) Color.Cyan else Color.White,
+                                        tint     = if (liveCaptionEnabled) AeonPlayer.Sky300 else Color.White,
                                         modifier = Modifier.size(28.dp))
                                 }
                             }
@@ -918,8 +1048,28 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             }) {
                                 Icon(if (isSubtitleEnabled) Icons.Rounded.Subtitles else Icons.Rounded.SubtitlesOff,
                                     null,
-                                    tint     = if (isSubtitleEnabled) Color.Cyan else Color.White.copy(0.5f),
+                                    tint     = if (isSubtitleEnabled) AeonPlayer.Sky300 else Color.White.copy(0.5f),
                                     modifier = Modifier.size(28.dp))
+                            }
+
+                            // NEW: quick-access Video Quality chip — graduates the
+                            // single most frequently changed setting out of the
+                            // sheet, following the same pattern Netflix/YouTube use
+                            // for their top-bar quality selector. Tapping opens the
+                            // settings sheet directly to the Quality page instead of
+                            // the Main list, saving a tap for the common case.
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .padding(end = 4.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color.White.copy(0.08f))
+                                    .clickable { showSettingsMenu = true; activeSettingPage = "Quality" }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Icon(Icons.Rounded.HighQuality, null, tint = AeonPlayer.Sky300, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(5.dp))
+                                Text(selectedQuality.label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
 
                             IconButton(onClick = { showSettingsMenu = true; activeSettingPage = "Main" }) {
@@ -930,26 +1080,53 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 
                     // Center controls
                     if (!isLocked) {
-                        Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(40.dp)) {
-                            IconButton(onClick = { val t = max(0.0, currentTime - 10.0); try { StreamXCore.seekMpvAbsolute(t); currentTime = t } catch (e: Exception) {} }) { Icon(Icons.Rounded.Replay10,   null, tint = Color.White, modifier = Modifier.size(48.dp)) }
-                            IconButton(onClick = { isPlaying = !isPlaying; try { StreamXCore.pauseMpvVideo(!isPlaying) } catch (e: Exception) {} }) { Icon(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(64.dp)) }
-                            IconButton(onClick = { val t = min(totalDuration, currentTime + 10.0); try { StreamXCore.seekMpvAbsolute(t); currentTime = t } catch (e: Exception) {} }) { Icon(Icons.Rounded.Forward10, null, tint = Color.White, modifier = Modifier.size(48.dp)) }
+                        Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier
+                                    .size(52.dp)
+                                    .background(Color.White.copy(0.10f), CircleShape)
+                                    .clickable { val t = max(0.0, currentTime - 10.0); try { StreamXCore.seekMpvAbsolute(t); currentTime = t } catch (e: Exception) {} },
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(Icons.Rounded.Replay10, null, tint = Color.White, modifier = Modifier.size(26.dp)) }
+
+                            Box(
+                                Modifier
+                                    .size(76.dp)
+                                    .background(AeonPlayer.BrandGradient, CircleShape)
+                                    .clickable { isPlaying = !isPlaying; try { StreamXCore.pauseMpvVideo(!isPlaying) } catch (e: Exception) {} },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                    null, tint = Color.White,
+                                    modifier = Modifier.size(38.dp),
+                                )
+                            }
+
+                            Box(
+                                Modifier
+                                    .size(52.dp)
+                                    .background(Color.White.copy(0.10f), CircleShape)
+                                    .clickable { val t = min(totalDuration, currentTime + 10.0); try { StreamXCore.seekMpvAbsolute(t); currentTime = t } catch (e: Exception) {} },
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(Icons.Rounded.Forward10, null, tint = Color.White, modifier = Modifier.size(26.dp)) }
                         }
                     }
 
                     // Lock
                     IconButton(onClick = { isLocked = !isLocked }, modifier = Modifier.align(Alignment.CenterEnd).padding(32.dp)) {
-                        Icon(if (isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, null, tint = if (isLocked) Color.Red else Color.White)
+                        Icon(if (isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, null, tint = if (isLocked) AeonPlayer.Red else Color.White)
                     }
 
                     // Seek bar
                     if (!isLocked) {
-                        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp)) {
+                        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp)) {
                             val displayTime = if (isSeeking) seekPreviewTime else currentTime
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(formatTime(displayTime.toLong()),   color = Color.White, fontSize = 12.sp)
-                                Text(formatTime(totalDuration.toLong()), color = Color.White, fontSize = 12.sp)
+                                Text(formatTime(displayTime.toLong()),   color = Color.White.copy(0.9f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                Text(formatTime(totalDuration.toLong()), color = Color.White.copy(0.6f), fontSize = 12.sp)
                             }
+                            Spacer(Modifier.height(2.dp))
                             Slider(
                                 value             = displayTime.toFloat(),
                                 onValueChange     = { v -> isSeeking = true; seekPreviewTime = v.toDouble().coerceIn(0.0, totalDuration) },
@@ -959,7 +1136,37 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                     isSeeking = false
                                 },
                                 valueRange = 0f..max(1f, totalDuration.toFloat()),
-                                colors     = SliderDefaults.colors(thumbColor = Color.Cyan, activeTrackColor = Color.Cyan)
+                                // Custom track: brand-gradient fill instead of a flat
+                                // color, quiet translucent remainder track — same
+                                // drag/seek behavior as before (untouched), only the
+                                // visual rendering changes.
+                                track = { state ->
+                                    val fraction = ((state.value - state.valueRange.start) /
+                                        (state.valueRange.endInclusive - state.valueRange.start).coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                    Box(Modifier.fillMaxWidth().height(4.dp)) {
+                                        Box(
+                                            Modifier
+                                                .fillMaxSize()
+                                                .background(Color.White.copy(0.18f), RoundedCornerShape(2.dp))
+                                        )
+                                        Box(
+                                            Modifier
+                                                .fillMaxHeight()
+                                                .fillMaxWidth(fraction)
+                                                .background(AeonPlayer.BrandGradient, RoundedCornerShape(2.dp))
+                                        )
+                                    }
+                                },
+                                thumb = {
+                                    Box(
+                                        Modifier
+                                            .size(15.dp)
+                                            .background(AeonPlayer.Sky300.copy(0.25f), CircleShape),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Box(Modifier.size(11.dp).background(Color.White, CircleShape))
+                                    }
+                                },
                             )
                         }
                     }
@@ -973,12 +1180,22 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 exit     = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(),
                 modifier = Modifier.align(Alignment.CenterEnd)
             ) {
-                Box(Modifier.fillMaxHeight().width(340.dp).background(Color(0xF01A1A2E)).padding(16.dp)) {
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .width(340.dp)
+                        .background(AeonPlayer.GlassFill)
+                        .border(width = 1.dp, brush = Brush.linearGradient(listOf(AeonPlayer.Sky300.copy(0.2f), Color.Transparent)))
+                        .padding(horizontal = 16.dp, vertical = 20.dp)
+                ) {
                     Column {
                         // Header
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 20.dp)) {
                             if (activeSettingPage != "Main") {
-                                IconButton(onClick = { activeSettingPage = "Main" }, modifier = Modifier.size(24.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
+                                Box(
+                                    Modifier.size(32.dp).background(Color.White.copy(0.08f), CircleShape).clickable { activeSettingPage = "Main" },
+                                    contentAlignment = Alignment.Center,
+                                ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White, modifier = Modifier.size(18.dp)) }
                                 Spacer(Modifier.width(12.dp))
                             }
                             Text(when (activeSettingPage) {
@@ -990,24 +1207,26 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 "LiveCaption" -> "Live Caption"
                                 "DecodeInfo"  -> "Decode Mode"
                                 else          -> "Settings"
-                            }, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            }, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.2.sp)
                         }
 
                         LazyColumn {
                             item {
                                 when (activeSettingPage) {
                                     "Main" -> {
+                                        SettingsSectionLabel("Playback")
                                         SettingsItem(Icons.Rounded.HighQuality,   "Video Quality",   selectedQuality.label)                               { activeSettingPage = "Quality" }
+                                        SettingsItem(Icons.Rounded.Memory,        "Decode Mode",     decodeModeLabel)                                      { activeSettingPage = "DecodeInfo" }
+
+                                        SettingsSectionLabel("Subtitles & Audio")
                                         SettingsItem(Icons.Rounded.Subtitles,     "Subtitles",       "Tracks & Download")                                  { subTracks = StreamXCore.getTrackList("sub"); activeSettingPage = "Subtitles" }
                                         SettingsItem(Icons.Rounded.Translate,     "Sub Language",    selectedSubLang.flag + " " + selectedSubLang.label)   { activeSettingPage = "SubLanguage" }
                                         SettingsItem(Icons.Rounded.FormatSize,    "Subtitle Style",  "Color, size, font")                                  { activeSettingPage = "SubStyle" }
                                         SettingsItem(Icons.Rounded.LibraryMusic,  "Audio Track",     "Internal tracks")                                    { activeSettingPage = "Audio" }
-                                        // Live-updating decode mode — refreshed every 250ms by the
-                                        // time-sync poll loop (decodeModeLabel state var). Tapping
-                                        // opens a detail page with codec/pixel-format diagnostics.
-                                        SettingsItem(Icons.Rounded.Memory,        "Decode Mode",     decodeModeLabel)                                      { activeSettingPage = "DecodeInfo" }
                                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                                             SettingsItem(Icons.Rounded.ClosedCaption, "Live Caption", if (liveCaptionEnabled) "Enabled ✓" else "Tap to enable") { activeSettingPage = "LiveCaption" }
+
+                                        SettingsSectionLabel("Support")
                                         // Tier 3 #16: combines torrent-engine state (TorrentEngine.
                                         // getDiagnostics(), works in release builds — no HTTP surface,
                                         // unlike the debug_assertions-gated /debug route) with decode
@@ -1243,6 +1462,194 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
 
 
 // ═══════════════════════════════════════════════════════════════════
+//  Futuristic Loading Experience
+// ═══════════════════════════════════════════════════════════════════
+//
+// Replaces the old flat CircularProgressIndicator + separate
+// LinearProgressIndicator + "Buffering N%" text + scattered green speed/
+// seed text with ONE composed glassmorphic panel built around a single
+// signature element: an orbital dual-ring that fills to the REAL buffer
+// percentage (torrentProgress / cachePercent — both driven by actual
+// downloaded bytes, never a fake/simulated animation).
+//
+// percent == null means "no real number yet" (metadata still resolving) —
+// shown as a slow orbital sweep in the same visual language as the
+// determinate ring, so the transition from "resolving" to "43%" reads as
+// one continuous state rather than two different widgets swapping.
+@Composable
+private fun FuturisticLoadingPanel(
+    percent: Int?,
+    downloadSpeed: String,
+    seeds: Int,
+    compact: Boolean = false,
+) {
+    val ringSize = if (compact) 76.dp else 128.dp
+    val panelPadding = if (compact) 22.dp else 36.dp
+
+    Box(
+        modifier = Modifier
+            .padding(horizontal = 28.dp)
+            .then(if (compact) Modifier.widthIn(max = 260.dp) else Modifier)
+            .background(AeonPlayer.GlassFill, RoundedCornerShape(28.dp))
+            .border(width = 1.dp, brush = AeonPlayer.GlassBorder, shape = RoundedCornerShape(28.dp))
+            .padding(panelPadding),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            OrbitalBufferRing(percent = percent, size = ringSize)
+
+            Spacer(Modifier.height(if (compact) 14.dp else 22.dp))
+
+            Text(
+                "Loading",
+                color = Color.White,
+                fontSize = if (compact) 13.sp else 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.5.sp,
+            )
+
+            if (percent != null && percent in 1..99) {
+                Spacer(Modifier.height(if (compact) 10.dp else 16.dp))
+                ConnectionStatRow(downloadSpeed = downloadSpeed, seeds = seeds, compact = compact)
+            }
+        }
+    }
+}
+
+// The signature element: a dual-layer ring —
+//   • outer ring: real progress, 0-100%, filled proportionally to the
+//     ACTUAL buffered percentage (never simulated/fake)
+//   • inner ring: a slim, continuously-orbiting accent arc, purely
+//     decorative — this is what gives the "futuristic/alive" feel even
+//     while the outer ring's real progress is barely moving on a slow
+//     connection, without ever pretending the outer number is something
+//     it isn't
+//   • center: glowing percentage text, or a pulsing dot while resolving
+@Composable
+private fun OrbitalBufferRing(percent: Int?, size: Dp) {
+    val animatedPercent by animateFloatAsState(
+        targetValue   = (percent ?: 0).coerceIn(0, 100) / 100f,
+        animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing),
+        label = "orbitalRingProgress",
+    )
+
+    val infinite = rememberInfiniteTransition(label = "orbitalRingMotion")
+
+    // Slow outer decorative orbit — always spinning, regardless of state,
+    // to read as "actively working" rather than stalled.
+    val orbitAngle by infinite.animateFloat(
+        initialValue = 0f, targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(2600, easing = LinearEasing)),
+        label = "orbitAngle",
+    )
+
+    // Faster inner sweep, used both as the indeterminate indicator AND as
+    // a constant "alive" accent layered under the determinate ring.
+    val sweepAngle by infinite.animateFloat(
+        initialValue = 0f, targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(1100, easing = LinearEasing)),
+        label = "sweepAngle",
+    )
+
+    // Gentle breathing glow for the center content while resolving.
+    val pulse by infinite.animateFloat(
+        initialValue = 0.4f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "pulse",
+    )
+
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val outerStroke = Stroke(width = this.size.minDimension * 0.055f, cap = StrokeCap.Round)
+            val innerStroke = Stroke(width = this.size.minDimension * 0.03f,  cap = StrokeCap.Round)
+
+            val outerInset = outerStroke.width / 2f
+            val outerArcSize = Size(this.size.width - outerStroke.width, this.size.height - outerStroke.width)
+
+            val innerMargin = outerStroke.width * 1.8f
+            val innerInset = innerMargin + innerStroke.width / 2f
+            val innerArcSize = Size(this.size.width - innerInset * 2f, this.size.height - innerInset * 2f)
+
+            // Outer track — quiet, always full circle.
+            drawArc(
+                color = Color.White.copy(alpha = 0.10f),
+                startAngle = -90f, sweepAngle = 360f, useCenter = false,
+                topLeft = Offset(outerInset, outerInset), size = outerArcSize, style = outerStroke,
+            )
+
+            // Outer ring — REAL progress (or a soft full-brightness decorative
+            // spin while percent is unknown, so it never implies a fake number).
+            if (percent != null) {
+                drawArc(
+                    brush = Brush.sweepGradient(AeonPlayer.BrandSweep),
+                    startAngle = -90f, sweepAngle = 360f * animatedPercent, useCenter = false,
+                    topLeft = Offset(outerInset, outerInset), size = outerArcSize, style = outerStroke,
+                )
+            } else {
+                rotate(orbitAngle) {
+                    drawArc(
+                        brush = Brush.sweepGradient(listOf(Color.Transparent, AeonPlayer.Sky300, Color.Transparent)),
+                        startAngle = 0f, sweepAngle = 140f, useCenter = false,
+                        topLeft = Offset(outerInset, outerInset), size = outerArcSize, style = outerStroke,
+                    )
+                }
+            }
+
+            // Inner decorative orbit — always spinning, gives the "alive/
+            // futuristic" feel independent of how far along real progress is.
+            rotate(-sweepAngle) {
+                drawArc(
+                    brush = Brush.sweepGradient(listOf(Color.Transparent, Color(0xFF8C4DFF).copy(0.85f))),
+                    startAngle = 0f, sweepAngle = 70f, useCenter = false,
+                    topLeft = Offset(innerInset, innerInset), size = innerArcSize, style = innerStroke,
+                )
+            }
+        }
+
+        if (percent != null) {
+            Text(
+                "$percent%",
+                color = Color.White,
+                fontSize = (size.value * 0.20f).sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.sp,
+            )
+        } else {
+            Box(
+                Modifier
+                    .size(size * 0.16f)
+                    .alpha(pulse)
+                    .background(AeonPlayer.Sky300, CircleShape)
+            )
+        }
+    }
+}
+
+// Compact "connection health" row — icon-led, unified instead of two
+// disconnected pieces of colored text.
+@Composable
+private fun ConnectionStatRow(downloadSpeed: String, seeds: Int, compact: Boolean = false) {
+    val fontSize = if (compact) 11.sp else 13.sp
+    val iconSize = if (compact) 12.dp else 14.dp
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 14.dp else 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.ArrowDownward, null, tint = AeonPlayer.Amber, modifier = Modifier.size(iconSize))
+            Spacer(Modifier.width(4.dp))
+            Text(downloadSpeed, color = Color.White.copy(0.8f), fontSize = fontSize, fontWeight = FontWeight.Medium)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.People, null, tint = AeonPlayer.Green, modifier = Modifier.size(iconSize))
+            Spacer(Modifier.width(4.dp))
+            Text("$seeds", color = Color.White.copy(0.8f), fontSize = fontSize, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
 //  Subtitle Style Page
 // ═══════════════════════════════════════════════════════════════════
 @Composable
@@ -1356,11 +1763,39 @@ private fun LiveCaptionBanner(onEnable: () -> Unit, onDismiss: () -> Unit) {
 // ═══════════════════════════════════════════════════════════════════
 @Composable
 fun SettingsItem(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = Color.White, modifier = Modifier.size(24.dp)); Spacer(Modifier.width(16.dp))
-        Column(Modifier.weight(1f)) { Text(title, color = Color.White, fontSize = 16.sp); Text(subtitle, color = Color.LightGray, fontSize = 12.sp) }
-        Icon(Icons.Rounded.ChevronRight, null, tint = Color.Gray)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp, horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(38.dp).background(Color.White.copy(0.06f), RoundedCornerShape(11.dp)),
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, null, tint = AeonPlayer.Sky300, modifier = Modifier.size(19.dp)) }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(subtitle, color = Color.White.copy(0.5f), fontSize = 12.sp)
+        }
+        Icon(Icons.Rounded.ChevronRight, null, tint = Color.White.copy(0.3f), modifier = Modifier.size(20.dp))
     }
+}
+
+// Small caps section header used to group the settings list (Playback /
+// Subtitles & Audio / Support) instead of one long undifferentiated list.
+@Composable
+private fun SettingsSectionLabel(text: String) {
+    Text(
+        text.uppercase(),
+        color = AeonPlayer.Slate500,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 1.2.sp,
+        modifier = Modifier.padding(top = 18.dp, bottom = 4.dp, start = 6.dp),
+    )
 }
 
 @Composable

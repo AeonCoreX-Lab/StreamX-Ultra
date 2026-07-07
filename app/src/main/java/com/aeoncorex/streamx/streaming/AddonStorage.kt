@@ -203,12 +203,7 @@ object AddonStorage {
     fun getHttpAddonsForResource(resource: String, contentType: String, id: String): List<AddonDescriptor> =
         getHttpAddons().filter { desc ->
             desc.manifest.resources.any { r ->
-                val name = when (r) {
-                    is String             -> r
-                    is Map<*, *>          -> r["name"]?.toString() ?: ""
-                    else                  -> ""
-                }
-                name == resource
+                r == resource
             } && (desc.manifest.types.isEmpty() || contentType in desc.manifest.types)
         }
 
