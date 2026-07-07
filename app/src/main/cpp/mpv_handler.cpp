@@ -119,6 +119,17 @@ static int   s_sw_verify_samples_black = 0;
 // still legitimately buffering or had already given up. See
 // get_decode_mode_label() for how this is now surfaced.
 static bool  s_sw_verify_gave_up       = false;
+// FIX (auto-fallback should retry once instead of giving up permanently):
+// a slow network's buffer state at the moment of the FIRST SW-verify
+// timeout doesn't mean it will still be slow a few seconds later — the
+// underlying torrent could easily have caught up in the meantime. Retrying
+// the SAME reload once, from the current (by-then-later) playback
+// position, gives the connection a second real chance before we resort to
+// showing the user a permanent "didn't confirm" state. Capped at 1 retry
+// so a persistently broken file/decoder still reaches a final, honest
+// answer instead of looping forever.
+static int   s_sw_verify_retry_count   = 0;
+static const int SW_VERIFY_MAX_RETRIES = 1;
 static const int SW_VERIFY_MAX_SAMPLES    = 2;
 static const int SW_VERIFY_SAMPLE_INTERVAL = 2;  // ticks between samples (~500ms)
 static const int SW_VERIFY_MAX_WAIT_TICKS  = 48; // ~12s to wait for re-negotiated video-params
@@ -164,6 +175,7 @@ static std::atomic<bool> s_event_thread_running{false};
 // the rest of the dynamic-decode-compatibility implementation).
 static void start_mpv_event_thread();
 static void force_sw_reload_locked(const char* reason);
+static void apply_decode_mode_now_locked(bool want_sw, const char* reason);
 static void check_periodic_black_frame(); // Tier 1 #1
 static void check_sw_verify();            // Tier 1 #2
 static void schedule_sw_verify();         // shared by force_sw_reload_locked + manual override
@@ -452,6 +464,7 @@ void play_mpv_video(const char* path) {
     s_sw_verify_next_tick     = 0;
     s_sw_verify_samples_taken = 0;
     s_sw_verify_samples_black = 0;
+    s_sw_verify_retry_count   = 0;
 
     if (s_force_sw_decode.load()) {
         // Persistent manual override — skip detection entirely, this
@@ -744,6 +757,83 @@ static void force_sw_reload_locked(const char* reason) {
     schedule_sw_verify();
 }
 
+// ── Manual, unconditional, bidirectional decode-mode switch ──────────
+// FIX (manual "Always use software decoding" toggle not working after
+// an automatic switch already happened): force_sw_reload_locked() above
+// refuses to run a second time once s_forced_sw_this_file is true — by
+// design, so the automatic detector doesn't reload the same file over
+// and over. But this meant the MANUAL toggle, which calls into the same
+// codepath, was ALSO silently blocked in exactly the situation a user
+// reaches for it: the automatic switch already ran, SW-verify timed out
+// without confirming a real frame (see s_sw_verify_gave_up — screen
+// still black, label says "buffering — SW reload didn't confirm"), and
+// toggling the manual switch did nothing because s_forced_sw_this_file
+// was already true from the earlier automatic attempt.
+//
+// This function is completely separate from force_sw_reload_locked()
+// and does not check s_forced_sw_this_file at all — it is the single,
+// unconditional entry point for "the user explicitly asked for this
+// decode mode right now," and always actually reloads, in EITHER
+// direction (SW→HW too, not just HW→SW), so turning the toggle off
+// mid-playback also works instead of only ever going one way.
+// ASSUMES CALLER ALREADY HOLDS mpv_mutex.
+static void apply_decode_mode_now_locked(bool want_sw, const char* reason) {
+    if (!mpv_ctx || s_current_path.empty()) return;
+
+    double time_pos = 0.0;
+    mpv_get_property(mpv_ctx, "time-pos", MPV_FORMAT_DOUBLE, &time_pos);
+    if (time_pos < 0.0) time_pos = 0.0;
+
+    LOGD("decode-compat: MANUAL switch to %s (%s), resume at %.2fs, file=%s",
+         want_sw ? "SW" : "HW", reason, time_pos, s_current_path.c_str());
+
+    mpv_set_option_string(mpv_ctx, "hwdec", want_sw ? "no" : "mediacodec-copy");
+
+    std::string start_opt = "start=" + std::to_string(time_pos);
+    const char* cmd[] = {"loadfile", s_current_path.c_str(), "replace", start_opt.c_str(), nullptr};
+    int r = mpv_command(mpv_ctx, cmd);
+    if (r < 0) LOGE("decode-compat: manual reload failed: %s", mpv_error_string(r));
+
+    // Unlike force_sw_reload_locked(), do NOT reset hwdec back afterward —
+    // the option we just set IS the mode the user asked for, and should
+    // stick for this file (play_mpv_video() decides fresh for the NEXT
+    // file based on s_force_sw_decode's persisted value, same as today).
+
+    s_forced_sw_this_file = want_sw;
+    s_switch_reason       = reason;
+    s_decode_check_done   = true;
+
+    // Reset ALL monitoring state for a clean slate under the new mode —
+    // whichever stage was active under the OLD mode is no longer
+    // meaningful (e.g. black-frame sampling that was mid-flight for HW
+    // shouldn't carry over into freshly-reloaded SW output, and vice
+    // versa when switching back to HW).
+    s_black_stage_active  = false;
+    s_black_samples_taken = 0;
+    s_black_samples_black = 0;
+    s_periodic_enabled    = false;
+    s_periodic_escalating = false;
+
+    if (want_sw) {
+        // Switching TO software — verify it actually produces a visible
+        // frame, same as the automatic path.
+        schedule_sw_verify();
+    } else {
+        // Switching BACK to hardware — re-run the full compatibility
+        // check from scratch (Stage 1 pixel-format negotiation, then
+        // format/black-frame checks) rather than assuming HW will just
+        // work; if the ORIGINAL reason for switching away from HW still
+        // applies (e.g. genuinely broken HW decoder producing black
+        // frames on ordinary content), this lets that be re-detected and
+        // switched back to SW again automatically instead of leaving the
+        // user stuck on a HW mode that will just go black again.
+        s_decode_check_done   = false;
+        s_decode_check_ticks  = 0;
+        s_sw_verify_pending   = false;
+        s_sw_verify_gave_up   = false;
+    }
+}
+
 static void schedule_sw_verify() {
     s_sw_verify_pending       = true;
     s_sw_verify_wait_ticks    = 0;
@@ -765,10 +855,39 @@ static void check_sw_verify() {
 
     if (pixfmt.empty()) {
         if (++s_sw_verify_wait_ticks >= SW_VERIFY_MAX_WAIT_TICKS) {
+            if (s_sw_verify_retry_count < SW_VERIFY_MAX_RETRIES) {
+                // FIX: retry once, from the current (later) playback
+                // position, instead of giving up immediately. The
+                // connection may well have caught up since the FIRST
+                // reload attempt started — see s_sw_verify_retry_count's
+                // declaration for the full reasoning. This re-runs the
+                // same reload mpv_command the original switch used, just
+                // resumed from wherever time-pos is now.
+                s_sw_verify_retry_count++;
+                LOGD("decode-compat: SW-verify timed out — retrying reload "
+                     "(attempt %d/%d) before giving up",
+                     s_sw_verify_retry_count, SW_VERIFY_MAX_RETRIES);
+
+                double time_pos = 0.0;
+                mpv_get_property(mpv_ctx, "time-pos", MPV_FORMAT_DOUBLE, &time_pos);
+                if (time_pos < 0.0) time_pos = 0.0;
+
+                std::string start_opt = "start=" + std::to_string(time_pos);
+                const char* cmd[] = {"loadfile", s_current_path.c_str(), "replace", start_opt.c_str(), nullptr};
+                int r = mpv_command(mpv_ctx, cmd);
+                if (r < 0) LOGE("decode-compat: SW-verify retry reload failed: %s", mpv_error_string(r));
+
+                // Give the retry its own fresh wait window rather than
+                // continuing to count against the window that already
+                // expired.
+                s_sw_verify_wait_ticks = 0;
+                return;
+            }
+
             LOGD("decode-compat: SW-verify gave up waiting for video-params after reload "
-                 "(%d ticks, ~%ds) — likely still buffering on a slow connection; "
+                 "(%d ticks, ~%ds, %d retries) — likely still buffering on a slow connection; "
                  "reporting this honestly instead of showing Detecting… forever",
-                 SW_VERIFY_MAX_WAIT_TICKS, SW_VERIFY_MAX_WAIT_TICKS / 4);
+                 SW_VERIFY_MAX_WAIT_TICKS, SW_VERIFY_MAX_WAIT_TICKS / 4, s_sw_verify_retry_count);
             s_sw_verify_pending = false;
             s_sw_verify_gave_up = true;
         }
@@ -1113,7 +1232,7 @@ std::string get_decode_mode_label() {
         // says so honestly instead of implying a check is still in
         // progress when it already ended without a real answer.
         if (s_sw_verify_gave_up) {
-            return "Unknown (buffering — SW reload didn't confirm)";
+            return "Unresolved (buffering) — try \u201cAlways use software decoding\u201d";
         }
         return "Detecting\u2026";
     }
@@ -1158,10 +1277,19 @@ void set_force_sw_decode(bool force) {
     std::lock_guard<std::mutex> lk(mpv_mutex);
     s_force_sw_decode.store(force);
     LOGD("decode-compat: force_sw_decode set to %d (persisted by Kotlin)", (int)force);
-    // If a file is already loaded and this was just turned ON, apply it
-    // immediately rather than waiting for the next file.
-    if (force && mpv_ctx && !s_current_path.empty() && !s_forced_sw_this_file) {
-        force_sw_reload_locked("manual");
+
+    // FIX: apply immediately and UNCONDITIONALLY if a file is already
+    // loaded, in EITHER direction — not just "turned ON and not already
+    // forced." The old check (force && !s_forced_sw_this_file) meant this
+    // was a silent no-op exactly when the user needed it most: if an
+    // earlier AUTOMATIC switch had already run (and, per the SW-verify
+    // timeout screens, still hadn't confirmed a visible frame), toggling
+    // this manual switch changed nothing, because s_forced_sw_this_file
+    // was already true. It also never handled turning the toggle back
+    // OFF mid-playback at all. apply_decode_mode_now_locked() has no such
+    // guard — it always reloads to whichever mode was just requested.
+    if (mpv_ctx && !s_current_path.empty()) {
+        apply_decode_mode_now_locked(force, "manual");
     }
 }
 

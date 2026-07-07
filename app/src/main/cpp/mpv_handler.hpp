@@ -44,6 +44,14 @@ std::string get_decode_diag_info();
 // not support. For that residual case, the user can force SW decode
 // permanently for their device via Settings; Kotlin persists this in
 // SharedPreferences and calls set_force_sw_decode() on every app start.
+//
+// FIX: set_force_sw_decode() now applies IMMEDIATELY and UNCONDITIONALLY
+// to whatever file is currently playing, in EITHER direction (SW<->HW),
+// via apply_decode_mode_now_locked() — not gated on whether an automatic
+// switch already happened this file. Previously, toggling this after an
+// automatic negotiation-timeout/black-frame switch had already run was a
+// silent no-op (the automatic path's own re-entry guard blocked it too),
+// which was exactly the situation a user reaches for this toggle in.
 void set_force_sw_decode(bool force);
 bool get_force_sw_decode();
 

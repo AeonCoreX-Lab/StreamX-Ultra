@@ -214,6 +214,26 @@ val GPU_QUALITY_PRESETS = listOf(
     QualityPreset("480p Scale", "Force 480p, Save battery","scale=854:480", "bilinear",         "bilinear",         false),
 )
 
+// ── Adaptive-quality step-down ladder ──────────────────────────────────
+// Used ONLY while the user's selected preset is "Auto" — ordered from
+// what Auto starts at down to the cheapest render cost. Auto itself
+// starts at index 0 here (same render settings as the "Auto" entry
+// above), and sustained stutter (see isStuttering/stutterStreak) steps
+// DOWN one index at a time, same pattern as YouTube/Netflix's ABR ladder
+// stepping down a rung rather than jumping straight to the bottom.
+//
+// Deliberately does NOT include "Cinematic" — that tier is strictly
+// MORE expensive than Auto's own settings and would never be reached by
+// stepping down from a strain condition; it's a manual opt-in-only tier
+// for users who explicitly want maximum quality regardless of GPU cost.
+val ADAPTIVE_LADDER = listOf(
+    GPU_QUALITY_PRESETS[0], // Auto        (bilinear)      — starting point
+    GPU_QUALITY_PRESETS[3], // Medium      (bilinear)      — same scaler as Auto but deband off, next logical step
+    GPU_QUALITY_PRESETS[4], // 720p Scale  (bilinear + downscale) — real render-cost reduction
+    GPU_QUALITY_PRESETS[5], // 480p Scale  (bilinear + downscale) — floor
+)
+
+
 data class SubtitleLanguage(val code: String, val label: String, val flag: String)
 
 val SUBTITLE_LANGUAGES = listOf(
@@ -490,6 +510,30 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
     var showSettingsMenu   by remember { mutableStateOf(false) }
     var activeSettingPage  by remember { mutableStateOf("Main") }
     var selectedQuality    by remember { mutableStateOf(GPU_QUALITY_PRESETS[0]) }
+    // ── Adaptive quality (auto-downgrade under sustained GPU strain) ────────
+    // Real-world observation (Redmi 15C / Mali-G52 / Helio G81 Ultra, 6GB):
+    // most movies play perfectly smoothly at Auto, but some high-complexity
+    // sources push the GPU scaler past what the device can sustain — the
+    // EXISTING stutter detector (isStuttering, based on real mpv frame-drop
+    // counters) already correctly flags this, but previously nothing acted
+    // on it automatically; the user had to notice, open Settings, and
+    // manually step down to Medium themselves.
+    //
+    // This mirrors the well-known adaptive-bitrate pattern (YouTube/Netflix
+    // step DOWN a rung under real strain, never jump straight to the
+    // bottom, and don't fight the user's own manual choice) but adapted to
+    // what actually varies here: this is a local file/torrent stream with
+    // a FIXED bitrate already downloaded — there's no network ABR ladder to
+    // switch between. What actually varies under strain is RENDER cost
+    // (scaler algorithm, debanding, output resolution), which is exactly
+    // what GPU_QUALITY_PRESETS already controls. So "adaptive quality" here
+    // means adaptively stepping down GPU_QUALITY_PRESETS's render-cost
+    // ladder, not switching between differently-encoded source files.
+    var autoQualityTier    by remember { mutableIntStateOf(0) }   // index into ADAPTIVE_LADDER while in Auto mode
+    var stutterStreak      by remember { mutableIntStateOf(0) }   // consecutive stuttering check-windows, for debounce
+    var showAutoDowngradeToast by remember { mutableStateOf(false) }
+    var autoDowngradeLabel by remember { mutableStateOf("") }
+
     var subTracks          by remember { mutableStateOf<List<MpvTrack>>(emptyList()) }
     var isSearchingSub     by remember { mutableStateOf(false) }
     var subSearchMsg       by remember { mutableStateOf("") }
@@ -658,6 +702,14 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         isStuttering      = false
         lastDropCount     = 0L
         lastDropCheckTime = 0L
+        // Reset adaptive-quality tracking for the new file too — a
+        // downgrade decided for the PREVIOUS video's GPU/thermal state
+        // shouldn't carry over and silently start the next video at a
+        // lower tier than Auto's default without the user knowing why.
+        if (selectedQuality.label == "Auto") {
+            autoQualityTier = 0
+            stutterStreak   = 0
+        }
     }
 
     // ── Start playback ─────────────────────────────────────────────
@@ -737,6 +789,51 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                     isStuttering  = delta >= STUTTER_DROP_THRESHOLD
                                     lastDropCount     = dropsNow
                                     lastDropCheckTime = now
+
+                                    // ── Adaptive quality: step down under sustained strain ──
+                                    // Only acts while the user is on "Auto" — a manual
+                                    // selection (Cinematic/High/Medium/720p/480p) is
+                                    // explicit user intent and is NEVER overridden
+                                    // automatically. This is the actual answer to "can
+                                    // this work like YouTube's auto quality" — same
+                                    // debounced step-down behavior, applied to render
+                                    // cost (scaler/resolution) instead of network
+                                    // bitrate, since that's what this player's Auto mode
+                                    // actually controls.
+                                    if (selectedQuality.label == "Auto") {
+                                        if (isStuttering) {
+                                            stutterStreak++
+                                            // Require 2 CONSECUTIVE stuttering windows
+                                            // (~4s of real sustained strain, not one
+                                            // brief hiccup — a single dropped-frame burst
+                                            // from a scene cut or a momentary system
+                                            // blip shouldn't trigger a quality change)
+                                            // before actually stepping down.
+                                            if (stutterStreak >= 2 && autoQualityTier < ADAPTIVE_LADDER.size - 1) {
+                                                autoQualityTier++
+                                                val next = ADAPTIVE_LADDER[autoQualityTier]
+                                                applyQualityPreset(next)
+                                                autoDowngradeLabel = next.label
+                                                showAutoDowngradeToast = true
+                                                stutterStreak = 0
+                                                Log.d("MPV", "adaptive-quality: stepped down to ${next.label} after sustained strain")
+                                            }
+                                        } else {
+                                            // Playback recovered for at least one full
+                                            // window — reset the streak so a single past
+                                            // stutter doesn't count toward a future,
+                                            // unrelated strain episode. Deliberately does
+                                            // NOT step back UP automatically: silently
+                                            // raising render cost again is exactly the
+                                            // quality-ladder flip-flopping that makes
+                                            // some ABR systems feel unstable. The user's
+                                            // next video starts fresh at Auto's top tier
+                                            // (autoQualityTier resets on new file load),
+                                            // and manually re-selecting Auto from the
+                                            // settings sheet also resets it immediately.
+                                            stutterStreak = 0
+                                        }
+                                    }
                                 }
                             }
 
@@ -894,6 +991,40 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
         // Double-tap anim
         if (rewindAnimAlpha  > 0) Box(Modifier.align(Alignment.CenterStart).padding(50.dp).alpha(rewindAnimAlpha).background(AeonPlayer.GlassFill, CircleShape).border(1.dp, AeonPlayer.GlassBorder, CircleShape).padding(18.dp)) { Icon(Icons.Rounded.FastRewind,  null, tint = AeonPlayer.Sky300, modifier = Modifier.size(36.dp)) }
         if (forwardAnimAlpha > 0) Box(Modifier.align(Alignment.CenterEnd).padding(50.dp).alpha(forwardAnimAlpha).background(AeonPlayer.GlassFill, CircleShape).border(1.dp, AeonPlayer.GlassBorder, CircleShape).padding(18.dp)) { Icon(Icons.Rounded.FastForward, null, tint = AeonPlayer.Sky300, modifier = Modifier.size(36.dp)) }
+
+        // Adaptive-quality auto-downgrade notice — transient, auto-dismissing.
+        // Tells the user WHY quality just changed (device couldn't sustain
+        // the previous render cost) rather than letting it look like an
+        // unexplained quality drop, while staying out of the way of
+        // playback — auto-hides after a few seconds, same pattern as the
+        // gesture overlay above.
+        LaunchedEffect(showAutoDowngradeToast) {
+            if (showAutoDowngradeToast) {
+                delay(3500)
+                showAutoDowngradeToast = false
+            }
+        }
+        AnimatedVisibility(
+            visible  = showAutoDowngradeToast,
+            enter    = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+            exit     = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 64.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .background(AeonPlayer.GlassFill, RoundedCornerShape(50))
+                    .border(1.dp, AeonPlayer.GlassBorder, RoundedCornerShape(50))
+                    .padding(horizontal = 16.dp, vertical = 9.dp)
+            ) {
+                Icon(Icons.Rounded.Speed, null, tint = AeonPlayer.Amber, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Quality lowered to $autoDowngradeLabel for smoother playback",
+                    color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                )
+            }
+        }
 
         // Pre-buffer overlay — futuristic loading experience
         if (isPreBuffering) {  // stays until mpvPath==videoPath && duration>0
@@ -1081,7 +1212,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                             ) {
                                 Icon(Icons.Rounded.HighQuality, null, tint = AeonPlayer.Sky300, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(5.dp))
-                                Text(selectedQuality.label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    if (selectedQuality.label == "Auto" && autoQualityTier > 0) ADAPTIVE_LADDER[autoQualityTier].label else selectedQuality.label,
+                                    color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold
+                                )
                             }
 
                             IconButton(onClick = { showSettingsMenu = true; activeSettingPage = "Main" }) {
@@ -1246,7 +1380,12 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 when (activeSettingPage) {
                                     "Main" -> {
                                         SettingsSectionLabel("Playback")
-                                        SettingsItem(Icons.Rounded.HighQuality,   "Video Quality",   selectedQuality.label)                               { activeSettingPage = "Quality" }
+                                        SettingsItem(
+                                            Icons.Rounded.HighQuality, "Video Quality",
+                                            if (selectedQuality.label == "Auto" && autoQualityTier > 0)
+                                                "Auto \u2192 ${ADAPTIVE_LADDER[autoQualityTier].label} (device-adjusted)"
+                                            else selectedQuality.label
+                                        ) { activeSettingPage = "Quality" }
                                         SettingsItem(Icons.Rounded.Memory,        "Decode Mode",     decodeModeLabel)                                      { activeSettingPage = "DecodeInfo" }
 
                                         SettingsSectionLabel("Subtitles & Audio")
@@ -1286,7 +1425,12 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                                     .clip(RoundedCornerShape(10.dp))
                                                     .background(if (sel) AeonPlayer.Sky300.copy(0.12f) else Color.Transparent)
                                                     .then(if (sel) Modifier.border(1.dp, AeonPlayer.Sky300.copy(0.35f), RoundedCornerShape(10.dp)) else Modifier)
-                                                    .clickable { selectedQuality = preset; applyQualityPreset(preset); showSettingsMenu = false }
+                                                    .clickable {
+                                                        selectedQuality = preset
+                                                        applyQualityPreset(preset)
+                                                        if (preset.label == "Auto") { autoQualityTier = 0; stutterStreak = 0 }
+                                                        showSettingsMenu = false
+                                                    }
                                                     .padding(horizontal = 12.dp, vertical = 10.dp),
                                                 verticalAlignment = Alignment.CenterVertically,
                                             ) {
