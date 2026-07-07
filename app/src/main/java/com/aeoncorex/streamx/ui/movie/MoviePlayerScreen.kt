@@ -26,6 +26,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -33,6 +35,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -45,6 +48,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -122,6 +126,14 @@ private object AeonPlayer {
     val GlassBorder = Brush.linearGradient(
         listOf(Sky300.copy(0.35f), Color.White.copy(0.06f), Color(0xFF8C4DFF).copy(0.25f))
     )
+
+    // Type scale — four steps used consistently across the settings sheet
+    // and sub-pages, instead of ad-hoc sizes (10/11/12/13/14/15/16sp) picked
+    // per-label. New text in the player UI should pick from these four.
+    val TextCaption = 11.sp   // section labels, hints, diagnostics values
+    val TextBody    = 13.sp   // secondary rows, subtitles under a title
+    val TextTitle   = 15.sp   // list item titles, control labels
+    val TextHeading = 19.sp   // sheet header ("Settings", "Video Quality"...)
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -889,10 +901,10 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                 if (isErrorState) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                         Box(
-                            Modifier.size(72.dp).background(Color(0xFFEF5350).copy(0.12f), CircleShape),
+                            Modifier.size(72.dp).background(AeonPlayer.Red.copy(0.12f), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Rounded.ErrorOutline, null, tint = Color(0xFFEF5350), modifier = Modifier.size(34.dp))
+                            Icon(Icons.Rounded.ErrorOutline, null, tint = AeonPlayer.Red, modifier = Modifier.size(34.dp))
                         }
                         Spacer(Modifier.height(20.dp))
                         Text(
@@ -945,7 +957,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
             modifier = Modifier.align(Alignment.BottomStart).padding(start = 16.dp, bottom = 80.dp)
         ) {
             Row(Modifier.background(Color.Black.copy(0.75f), RoundedCornerShape(20.dp)).padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(color = Color.Cyan, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(color = AeonPlayer.Sky300, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(8.dp))
                 Text(autoSubMsg, color = Color.White, fontSize = 12.sp)
             }
@@ -1081,19 +1093,31 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                     // Center controls
                     if (!isLocked) {
                         Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
+                            val rewindInteraction = remember { MutableInteractionSource() }
+                            val rewindPressed by rewindInteraction.collectIsPressedAsState()
+                            val rewindScale by animateFloatAsState(if (rewindPressed) 0.88f else 1f, label = "rewindScale")
                             Box(
                                 Modifier
                                     .size(52.dp)
+                                    .scale(rewindScale)
                                     .background(Color.White.copy(0.10f), CircleShape)
-                                    .clickable { val t = max(0.0, currentTime - 10.0); try { StreamXCore.seekMpvAbsolute(t); currentTime = t } catch (e: Exception) {} },
+                                    .clickable(interactionSource = rewindInteraction, indication = null) {
+                                        val t = max(0.0, currentTime - 10.0); try { StreamXCore.seekMpvAbsolute(t); currentTime = t } catch (e: Exception) {}
+                                    },
                                 contentAlignment = Alignment.Center,
                             ) { Icon(Icons.Rounded.Replay10, null, tint = Color.White, modifier = Modifier.size(26.dp)) }
 
+                            val playInteraction = remember { MutableInteractionSource() }
+                            val playPressed by playInteraction.collectIsPressedAsState()
+                            val playScale by animateFloatAsState(if (playPressed) 0.92f else 1f, label = "playScale")
                             Box(
                                 Modifier
                                     .size(76.dp)
+                                    .scale(playScale)
                                     .background(AeonPlayer.BrandGradient, CircleShape)
-                                    .clickable { isPlaying = !isPlaying; try { StreamXCore.pauseMpvVideo(!isPlaying) } catch (e: Exception) {} },
+                                    .clickable(interactionSource = playInteraction, indication = null) {
+                                        isPlaying = !isPlaying; try { StreamXCore.pauseMpvVideo(!isPlaying) } catch (e: Exception) {}
+                                    },
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
@@ -1103,11 +1127,17 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 )
                             }
 
+                            val forwardInteraction = remember { MutableInteractionSource() }
+                            val forwardPressed by forwardInteraction.collectIsPressedAsState()
+                            val forwardScale by animateFloatAsState(if (forwardPressed) 0.88f else 1f, label = "forwardScale")
                             Box(
                                 Modifier
                                     .size(52.dp)
+                                    .scale(forwardScale)
                                     .background(Color.White.copy(0.10f), CircleShape)
-                                    .clickable { val t = min(totalDuration, currentTime + 10.0); try { StreamXCore.seekMpvAbsolute(t); currentTime = t } catch (e: Exception) {} },
+                                    .clickable(interactionSource = forwardInteraction, indication = null) {
+                                        val t = min(totalDuration, currentTime + 10.0); try { StreamXCore.seekMpvAbsolute(t); currentTime = t } catch (e: Exception) {}
+                                    },
                                 contentAlignment = Alignment.Center,
                             ) { Icon(Icons.Rounded.Forward10, null, tint = Color.White, modifier = Modifier.size(26.dp)) }
                         }
@@ -1160,8 +1190,9 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 thumb = {
                                     Box(
                                         Modifier
-                                            .size(15.dp)
-                                            .background(AeonPlayer.Sky300.copy(0.25f), CircleShape),
+                                            .size(22.dp)
+                                            .shadow(6.dp, CircleShape, ambientColor = AeonPlayer.Sky300, spotColor = AeonPlayer.Sky300)
+                                            .background(AeonPlayer.Sky300.copy(0.22f), CircleShape),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         Box(Modifier.size(11.dp).background(Color.White, CircleShape))
@@ -1185,7 +1216,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                         .fillMaxHeight()
                         .width(340.dp)
                         .background(AeonPlayer.GlassFill)
-                        .border(width = 1.dp, brush = Brush.linearGradient(listOf(AeonPlayer.Sky300.copy(0.2f), Color.Transparent)))
+                        .border(width = 1.dp, brush = Brush.linearGradient(listOf(AeonPlayer.Sky300.copy(0.2f), Color.Transparent)), shape = RectangleShape)
                         .padding(horizontal = 16.dp, vertical = 20.dp)
                 ) {
                     Column {
@@ -1207,7 +1238,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                 "LiveCaption" -> "Live Caption"
                                 "DecodeInfo"  -> "Decode Mode"
                                 else          -> "Settings"
-                            }, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.2.sp)
+                            }, color = Color.White, fontSize = AeonPlayer.TextHeading, fontWeight = FontWeight.Bold, letterSpacing = 0.2.sp)
                         }
 
                         LazyColumn {
@@ -1246,15 +1277,24 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                         }
                                     }
                                     "Quality" -> {
-                                        Text("GPU Render Quality", color = Color.Gray, fontSize = 11.sp, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 8.dp))
+                                        Text("GPU Render Quality", color = AeonPlayer.Slate500, fontSize = 11.sp, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 8.dp))
                                         GPU_QUALITY_PRESETS.forEach { preset ->
                                             val sel = selectedQuality.label == preset.label
-                                            Row(Modifier.fillMaxWidth().background(if (sel) Color.Cyan.copy(0.12f) else Color.Transparent, RoundedCornerShape(10.dp)).clickable { selectedQuality = preset; applyQualityPreset(preset); showSettingsMenu = false }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Row(
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(if (sel) AeonPlayer.Sky300.copy(0.12f) else Color.Transparent)
+                                                    .then(if (sel) Modifier.border(1.dp, AeonPlayer.Sky300.copy(0.35f), RoundedCornerShape(10.dp)) else Modifier)
+                                                    .clickable { selectedQuality = preset; applyQualityPreset(preset); showSettingsMenu = false }
+                                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
                                                 Column(Modifier.weight(1f)) {
-                                                    Text(preset.label,    color = if (sel) Color.Cyan else Color.White, fontSize = 15.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
-                                                    Text(preset.subtitle, color = Color.Gray, fontSize = 11.sp)
+                                                    Text(preset.label,    color = if (sel) AeonPlayer.Sky300 else Color.White, fontSize = 15.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
+                                                    Text(preset.subtitle, color = AeonPlayer.Slate500, fontSize = 11.sp)
                                                 }
-                                                if (sel) Icon(Icons.Rounded.Check, null, tint = Color.Cyan, modifier = Modifier.size(20.dp))
+                                                if (sel) Icon(Icons.Rounded.Check, null, tint = AeonPlayer.Sky300, modifier = Modifier.size(20.dp))
                                             }
                                         }
                                     }
@@ -1266,41 +1306,50 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                                     isSearchingSub = false; subSearchMsg = msg; subTracks = StreamXCore.getTrackList("sub")
                                                 }
                                             }
-                                        }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A5F))) {
-                                            if (isSearchingSub) { CircularProgressIndicator(color = Color.Cyan, modifier = Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)); Text("Searching…", color = Color.White, fontSize = 12.sp) }
-                                            else { Icon(Icons.Rounded.Download, null, tint = Color.Cyan, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Download  ${selectedSubLang.flag} ${selectedSubLang.label}", color = Color.White) }
+                                        }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = AeonPlayer.Navy700)) {
+                                            if (isSearchingSub) { CircularProgressIndicator(color = AeonPlayer.Sky300, modifier = Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)); Text("Searching…", color = Color.White, fontSize = 12.sp) }
+                                            else { Icon(Icons.Rounded.Download, null, tint = AeonPlayer.Sky300, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Download  ${selectedSubLang.flag} ${selectedSubLang.label}", color = Color.White) }
                                         }
-                                        if (subSearchMsg.isNotEmpty()) Text(subSearchMsg, color = Color.Cyan, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
-                                        Spacer(Modifier.height(14.dp)); HorizontalDivider(color = Color.White.copy(0.1f)); Spacer(Modifier.height(10.dp))
-                                        Text("SUBTITLE TRACKS", color = Color.Gray, fontSize = 10.sp, letterSpacing = 1.sp); Spacer(Modifier.height(8.dp))
+                                        if (subSearchMsg.isNotEmpty()) Text(subSearchMsg, color = AeonPlayer.Sky300, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                                        Spacer(Modifier.height(18.dp))
+                                        Text("SUBTITLE TRACKS", color = AeonPlayer.Slate500, fontSize = 10.sp, letterSpacing = 1.sp); Spacer(Modifier.height(8.dp))
                                         SubTrackRow("Disable", false) { StreamXCore.setSubTrack(-1); showSettingsMenu = false }
-                                        if (subTracks.isEmpty()) Text("No tracks found", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
+                                        if (subTracks.isEmpty()) Text("No tracks found", color = AeonPlayer.Slate500, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
                                         else subTracks.forEach { t -> SubTrackRow(t.title, t.selected) { StreamXCore.setSubTrack(t.id); showSettingsMenu = false } }
                                     }
                                     "SubLanguage" -> {
-                                        Text("SELECT LANGUAGE", color = Color.Gray, fontSize = 10.sp, letterSpacing = 1.sp)
-                                        Text("Language for auto-download", color = Color.Gray.copy(0.7f), fontSize = 11.sp)
+                                        Text("SELECT LANGUAGE", color = AeonPlayer.Slate500, fontSize = 10.sp, letterSpacing = 1.sp)
+                                        Text("Language for auto-download", color = AeonPlayer.Slate500.copy(0.7f), fontSize = 11.sp)
                                         Spacer(Modifier.height(12.dp))
                                         SUBTITLE_LANGUAGES.forEach { lang ->
                                             val sel = selectedSubLang.code == lang.code
-                                            Row(Modifier.fillMaxWidth().background(if (sel) Color.Cyan.copy(0.12f) else Color.Transparent, RoundedCornerShape(10.dp)).clickable {
-                                                selectedSubLang = lang; saveSubLang(context, lang)
-                                                isSearchingSub = true; subSearchMsg = "Loading ${lang.flag} ${lang.label}…"
-                                                fetchSubtitle(movieTitle.ifBlank { "Movie" }, lang.code, context) { msg -> isSearchingSub = false; subSearchMsg = msg; subTracks = StreamXCore.getTrackList("sub") }
-                                                activeSettingPage = "Subtitles"
-                                            }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Row(
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(if (sel) AeonPlayer.Sky300.copy(0.12f) else Color.Transparent)
+                                                    .then(if (sel) Modifier.border(1.dp, AeonPlayer.Sky300.copy(0.35f), RoundedCornerShape(10.dp)) else Modifier)
+                                                    .clickable {
+                                                        selectedSubLang = lang; saveSubLang(context, lang)
+                                                        isSearchingSub = true; subSearchMsg = "Loading ${lang.flag} ${lang.label}…"
+                                                        fetchSubtitle(movieTitle.ifBlank { "Movie" }, lang.code, context) { msg -> isSearchingSub = false; subSearchMsg = msg; subTracks = StreamXCore.getTrackList("sub") }
+                                                        activeSettingPage = "Subtitles"
+                                                    }
+                                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
                                                 Text(lang.flag, fontSize = 22.sp)
                                                 Spacer(Modifier.width(12.dp))
-                                                Text(lang.label, color = if (sel) Color.Cyan else Color.White, fontSize = 15.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.weight(1f))
-                                                if (sel) Icon(Icons.Rounded.Check, null, tint = Color.Cyan, modifier = Modifier.size(20.dp))
+                                                Text(lang.label, color = if (sel) AeonPlayer.Sky300 else Color.White, fontSize = 15.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.weight(1f))
+                                                if (sel) Icon(Icons.Rounded.Check, null, tint = AeonPlayer.Sky300, modifier = Modifier.size(20.dp))
                                             }
                                         }
                                     }
                                     "SubStyle" -> { SubtitleStylePage(style = subtitleStyle, onChange = { s -> subtitleStyle = s; applySubtitleStyleToMpv(s) }) }
                                     "Audio" -> {
                                         val audioTracks = remember(activeSettingPage) { StreamXCore.getTrackList("audio") }
-                                        Text("AUDIO TRACKS", color = Color.Gray, fontSize = 10.sp, letterSpacing = 1.sp); Spacer(Modifier.height(8.dp))
-                                        if (audioTracks.isEmpty()) Text("No audio tracks found", color = Color.Gray, fontSize = 12.sp)
+                                        Text("AUDIO TRACKS", color = AeonPlayer.Slate500, fontSize = 10.sp, letterSpacing = 1.sp); Spacer(Modifier.height(8.dp))
+                                        if (audioTracks.isEmpty()) Text("No audio tracks found", color = AeonPlayer.Slate500, fontSize = 12.sp)
                                         else audioTracks.forEach { t -> SubTrackRow(t.title, t.selected) { StreamXCore.setAudioTrack(t.id); showSettingsMenu = false } }
                                     }
                                     "LiveCaption" -> {
@@ -1341,7 +1390,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 14.dp)) {
                                             Icon(
                                                 Icons.Rounded.Memory, null,
-                                                tint = if (isHardware) Color(0xFF4CAF50) else Color(0xFFFFA726),
+                                                tint = if (isHardware) AeonPlayer.Green else AeonPlayer.Amber,
                                                 modifier = Modifier.size(28.dp)
                                             )
                                             Spacer(Modifier.width(10.dp))
@@ -1349,7 +1398,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                                 Text(decodeModeLabel, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                                                 Text(
                                                     if (isHardware) "Hardware-accelerated decoding" else "Software (CPU) decoding",
-                                                    color = Color.Gray, fontSize = 11.sp
+                                                    color = AeonPlayer.Slate500, fontSize = 11.sp
                                                 )
                                             }
                                         }
@@ -1366,7 +1415,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                                 else           -> "a hardware decoding issue was detected."
                                             }
                                             val isUnresolvedFailure = reason == "sw-also-black"
-                                            val cardColor = if (isUnresolvedFailure) Color(0xFFEF5350) else Color(0xFFFFA726)
+                                            val cardColor = if (isUnresolvedFailure) AeonPlayer.Red else AeonPlayer.Amber
                                             val cardPrefix = if (isUnresolvedFailure)
                                                 "Playback issue \u2014 " else "Auto-switched to software decoding \u2014 "
                                             Row(
@@ -1389,9 +1438,8 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                             Spacer(Modifier.height(14.dp))
                                         }
 
-                                        HorizontalDivider(color = Color.White.copy(0.1f))
-                                        Spacer(Modifier.height(10.dp))
-                                        Text("DIAGNOSTICS", color = Color.Gray, fontSize = 10.sp, letterSpacing = 1.sp)
+                                        Spacer(Modifier.height(6.dp))
+                                        Text("DIAGNOSTICS", color = AeonPlayer.Slate500, fontSize = 10.sp, letterSpacing = 1.sp)
                                         Spacer(Modifier.height(8.dp))
                                         DecodeInfoRow("Codec",          codec)
                                         DecodeInfoRow("Pixel Format",   pixfmt)
@@ -1401,9 +1449,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                         DecodeInfoRow("Battery Saver",  if (isPowerSaveActive) "On (using lighter scaling)" else "Off")
                                         DecodeInfoRow("Frame Drops",    if (isStuttering) "Active (device struggling)" else "Stable")
 
-                                        Spacer(Modifier.height(20.dp))
-                                        HorizontalDivider(color = Color.White.copy(0.1f))
-                                        Spacer(Modifier.height(14.dp))
+                                        Spacer(Modifier.height(24.dp))
 
                                         // ── Manual override ─────────────────────────────────
                                         // For the residual case automatic detection can't catch:
@@ -1421,7 +1467,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                                 Text("Always use software decoding", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                                                 Text(
                                                     "Turn this on if videos still show a black screen after the app's automatic fix. Uses more battery.",
-                                                    color = Color.Gray, fontSize = 11.sp, lineHeight = 14.sp,
+                                                    color = AeonPlayer.Slate500, fontSize = 11.sp, lineHeight = 14.sp,
                                                     modifier = Modifier.padding(top = 2.dp, end = 12.dp)
                                                 )
                                             }
@@ -1432,7 +1478,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                                     saveForceSwDecode(context, checked)
                                                     try { StreamXCore.setForceSwDecode(checked) } catch (e: Exception) {}
                                                 },
-                                                colors = SwitchDefaults.colors(checkedThumbColor = Color.Cyan, checkedTrackColor = Color.Cyan.copy(0.5f))
+                                                colors = SwitchDefaults.colors(checkedThumbColor = AeonPlayer.Sky300, checkedTrackColor = AeonPlayer.Sky300.copy(0.5f))
                                             )
                                         }
 
@@ -1443,7 +1489,7 @@ fun MoviePlayerScreen(navController: NavController, encodedUrl: String) {
                                             "frames, decoder errors, or by checking the actual picture) and " +
                                             "switches to software decoding for that file only \u2014 no settings " +
                                             "needed in most cases.",
-                                            color = Color.Gray.copy(0.8f), fontSize = 11.sp, lineHeight = 16.sp
+                                            color = AeonPlayer.Slate500.copy(0.9f), fontSize = 11.sp, lineHeight = 16.sp
                                         )
                                     }
                                 }
@@ -1655,61 +1701,68 @@ private fun ConnectionStatRow(downloadSpeed: String, seeds: Int, compact: Boolea
 @Composable
 private fun SubtitleStylePage(style: SubtitleStyle, onChange: (SubtitleStyle) -> Unit) {
     Column {
-        Box(Modifier.fillMaxWidth().height(72.dp).background(Color(0xFF0D0D1A), RoundedCornerShape(12.dp)).border(1.dp, Color.White.copy(0.1f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .background(AeonPlayer.GlassFill, RoundedCornerShape(12.dp))
+                .border(1.dp, AeonPlayer.GlassBorder, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
             Text("Sample Subtitle Text", color = style.textColor, fontSize = style.fontSize.sp, fontWeight = style.fontWeight, textAlign = TextAlign.Center,
                 modifier = Modifier.background(if (style.showBackground) style.backgroundColor else Color.Transparent, RoundedCornerShape(4.dp)).padding(horizontal = 8.dp, vertical = 4.dp))
         }
-        Spacer(Modifier.height(16.dp))
-        Text("COLOR PRESET", color = Color.Gray, fontSize = 10.sp, letterSpacing = 1.sp)
+        Spacer(Modifier.height(20.dp))
+        Text("COLOR PRESET", color = AeonPlayer.Slate500, fontSize = 10.sp, letterSpacing = 1.sp)
         Spacer(Modifier.height(8.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(SUBTITLE_COLOR_PRESETS) { preset ->
                 val sel = style.textColor == preset.text && style.backgroundColor == preset.bg
                 Column(horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.clip(RoundedCornerShape(10.dp))
-                        .background(if (sel) Color.Cyan.copy(0.15f) else Color.White.copy(0.05f))
-                        .border(if (sel) 1.5.dp else 0.dp, if (sel) Color.Cyan else Color.Transparent, RoundedCornerShape(10.dp))
+                        .background(if (sel) AeonPlayer.Sky300.copy(0.15f) else Color.White.copy(0.05f))
+                        .border(if (sel) 1.5.dp else 0.dp, if (sel) AeonPlayer.Sky300 else Color.Transparent, RoundedCornerShape(10.dp))
                         .clickable { onChange(style.copy(textColor = preset.text, backgroundColor = preset.bg, showBackground = preset.bg != Color.Transparent)) }
                         .padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
                     Box(Modifier.size(32.dp, 18.dp).background(if (preset.bg == Color.Transparent) Color.White.copy(0.1f) else preset.bg, RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) { Text("A", color = preset.text, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
                     Spacer(Modifier.height(4.dp))
-                    Text(preset.name, color = if (sel) Color.Cyan else Color.Gray, fontSize = 9.sp)
+                    Text(preset.name, color = if (sel) AeonPlayer.Sky300 else AeonPlayer.Slate500, fontSize = 9.sp)
                 }
             }
         }
-        Spacer(Modifier.height(16.dp)); HorizontalDivider(color = Color.White.copy(0.08f)); Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(24.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Font Size", color = Color.White, fontSize = 14.sp)
-            Text("${style.fontSize}sp", color = Color.Cyan, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text("${style.fontSize}sp", color = AeonPlayer.Sky300, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
-        Slider(value = style.fontSize.toFloat(), onValueChange = { onChange(style.copy(fontSize = it.toInt())) }, valueRange = 12f..36f, colors = SliderDefaults.colors(thumbColor = Color.Cyan, activeTrackColor = Color.Cyan))
+        Slider(value = style.fontSize.toFloat(), onValueChange = { onChange(style.copy(fontSize = it.toInt())) }, valueRange = 12f..36f, colors = SliderDefaults.colors(thumbColor = AeonPlayer.Sky300, activeTrackColor = AeonPlayer.Sky300))
         Row(Modifier.fillMaxWidth().clickable { onChange(style.copy(fontWeight = if (style.fontWeight == FontWeight.Bold) FontWeight.Normal else FontWeight.Bold)) }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Bold Text", color = Color.White, fontSize = 14.sp)
-            Switch(checked = style.fontWeight == FontWeight.Bold, onCheckedChange = { on -> onChange(style.copy(fontWeight = if (on) FontWeight.Bold else FontWeight.Normal)) }, colors = SwitchDefaults.colors(checkedThumbColor = Color.Cyan, checkedTrackColor = Color.Cyan.copy(0.4f)))
+            Switch(checked = style.fontWeight == FontWeight.Bold, onCheckedChange = { on -> onChange(style.copy(fontWeight = if (on) FontWeight.Bold else FontWeight.Normal)) }, colors = SwitchDefaults.colors(checkedThumbColor = AeonPlayer.Sky300, checkedTrackColor = AeonPlayer.Sky300.copy(0.4f)))
         }
         Row(Modifier.fillMaxWidth().clickable { onChange(style.copy(showBackground = !style.showBackground)) }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Background Box", color = Color.White, fontSize = 14.sp)
-            Switch(checked = style.showBackground, onCheckedChange = { onChange(style.copy(showBackground = it)) }, colors = SwitchDefaults.colors(checkedThumbColor = Color.Cyan, checkedTrackColor = Color.Cyan.copy(0.4f)))
+            Switch(checked = style.showBackground, onCheckedChange = { onChange(style.copy(showBackground = it)) }, colors = SwitchDefaults.colors(checkedThumbColor = AeonPlayer.Sky300, checkedTrackColor = AeonPlayer.Sky300.copy(0.4f)))
         }
-        Spacer(Modifier.height(4.dp)); HorizontalDivider(color = Color.White.copy(0.08f)); Spacer(Modifier.height(14.dp))
-        Text("POSITION", color = Color.Gray, fontSize = 10.sp, letterSpacing = 1.sp); Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(20.dp))
+        Text("POSITION", color = AeonPlayer.Slate500, fontSize = 10.sp, letterSpacing = 1.sp); Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SubtitlePosition.entries.forEach { pos ->
                 val sel = style.position == pos
-                Box(Modifier.weight(1f).background(if (sel) Color.Cyan.copy(0.18f) else Color.White.copy(0.07f), RoundedCornerShape(10.dp)).border(if (sel) 1.5.dp else 0.dp, if (sel) Color.Cyan else Color.Transparent, RoundedCornerShape(10.dp)).clickable { onChange(style.copy(position = pos)) }.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.weight(1f).background(if (sel) AeonPlayer.Sky300.copy(0.18f) else Color.White.copy(0.07f), RoundedCornerShape(10.dp)).border(if (sel) 1.5.dp else 0.dp, if (sel) AeonPlayer.Sky300 else Color.Transparent, RoundedCornerShape(10.dp)).clickable { onChange(style.copy(position = pos)) }.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         val icon = when (pos) { SubtitlePosition.TOP -> Icons.Rounded.VerticalAlignTop; SubtitlePosition.CENTER -> Icons.Rounded.VerticalAlignCenter; SubtitlePosition.BOTTOM -> Icons.Rounded.VerticalAlignBottom }
-                        Icon(icon, null, tint = if (sel) Color.Cyan else Color.Gray, modifier = Modifier.size(22.dp))
+                        Icon(icon, null, tint = if (sel) AeonPlayer.Sky300 else AeonPlayer.Slate500, modifier = Modifier.size(22.dp))
                         Spacer(Modifier.height(4.dp))
-                        Text(pos.name.lowercase().replaceFirstChar { it.uppercase() }, color = if (sel) Color.Cyan else Color.Gray, fontSize = 11.sp)
+                        Text(pos.name.lowercase().replaceFirstChar { it.uppercase() }, color = if (sel) AeonPlayer.Sky300 else AeonPlayer.Slate500, fontSize = 11.sp)
                     }
                 }
             }
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(18.dp))
         TextButton(onClick = { onChange(SubtitleStyle()); applySubtitleStyleToMpv(SubtitleStyle()) }, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Rounded.Refresh, null, tint = Color.Gray, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Reset to Default", color = Color.Gray, fontSize = 13.sp)
+            Icon(Icons.Rounded.Refresh, null, tint = AeonPlayer.Slate500, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Reset to Default", color = AeonPlayer.Slate500, fontSize = 13.sp)
         }
     }
 }
@@ -1721,40 +1774,46 @@ private fun SubtitleStylePage(style: SubtitleStyle, onChange: (SubtitleStyle) ->
 private fun LiveCaptionSettingsPage(isEnabled: Boolean, onRefresh: () -> Unit, onOpenSettings: () -> Unit) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(12.dp))
-        Box(Modifier.size(72.dp).background(if (isEnabled) Color.Cyan.copy(0.15f) else Color.White.copy(0.08f), CircleShape).border(2.dp, if (isEnabled) Color.Cyan else Color.Gray, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.ClosedCaption, null, tint = if (isEnabled) Color.Cyan else Color.Gray, modifier = Modifier.size(36.dp)) }
+        Box(Modifier.size(72.dp).background(if (isEnabled) AeonPlayer.Sky300.copy(0.15f) else Color.White.copy(0.08f), CircleShape).border(2.dp, if (isEnabled) AeonPlayer.Sky300 else AeonPlayer.Slate500, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.ClosedCaption, null, tint = if (isEnabled) AeonPlayer.Sky300 else AeonPlayer.Slate500, modifier = Modifier.size(36.dp)) }
         Spacer(Modifier.height(12.dp))
-        Text(if (isEnabled) "Live Caption is ON" else "Live Caption is OFF", color = if (isEnabled) Color.Cyan else Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(if (isEnabled) "Live Caption is ON" else "Live Caption is OFF", color = if (isEnabled) AeonPlayer.Sky300 else Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(6.dp))
-        Text("Google's on-device AI captions work for\nall media including your movies.", color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center, lineHeight = 18.sp)
+        Text("Google's on-device AI captions work for\nall media including your movies.", color = AeonPlayer.Slate500, fontSize = 12.sp, textAlign = TextAlign.Center, lineHeight = 18.sp)
         Spacer(Modifier.height(20.dp))
         if (!isEnabled) {
-            Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color.Cyan)) {
+            Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = AeonPlayer.Sky300)) {
                 Icon(Icons.Rounded.OpenInNew, null, tint = Color.Black, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Enable Live Caption", color = Color.Black, fontWeight = FontWeight.Bold)
             }
         } else {
-            Box(Modifier.fillMaxWidth().background(Color(0xFF0D2B0D), RoundedCornerShape(10.dp)).padding(12.dp)) {
+            Box(Modifier.fillMaxWidth().background(AeonPlayer.Green.copy(0.12f), RoundedCornerShape(10.dp)).padding(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.CheckCircle, null, tint = Color(0xFF66BB6A), modifier = Modifier.size(20.dp)); Spacer(Modifier.width(10.dp))
-                    Text("Active — captions appear automatically.", color = Color(0xFF66BB6A), fontSize = 12.sp)
+                    Icon(Icons.Rounded.CheckCircle, null, tint = AeonPlayer.Green, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(10.dp))
+                    Text("Active — captions appear automatically.", color = AeonPlayer.Green, fontSize = 12.sp)
                 }
             }
             Spacer(Modifier.height(10.dp))
             OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Settings, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Manage Caption Settings") }
         }
         Spacer(Modifier.height(12.dp))
-        TextButton(onClick = onRefresh) { Icon(Icons.Rounded.Refresh, null, tint = Color.Gray, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Refresh Status", color = Color.Gray, fontSize = 12.sp) }
+        TextButton(onClick = onRefresh) { Icon(Icons.Rounded.Refresh, null, tint = AeonPlayer.Slate500, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Refresh Status", color = AeonPlayer.Slate500, fontSize = 12.sp) }
     }
 }
 
 @Composable
 private fun LiveCaptionBanner(onEnable: () -> Unit, onDismiss: () -> Unit) {
-    Row(Modifier.background(Color(0xFF1A2A3A), RoundedCornerShape(12.dp)).border(1.dp, Color.Cyan.copy(0.3f), RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Rounded.ClosedCaption, null, tint = Color.Cyan, modifier = Modifier.size(20.dp))
+    Row(
+        Modifier
+            .background(AeonPlayer.GlassFill, RoundedCornerShape(12.dp))
+            .border(1.dp, AeonPlayer.GlassBorder, RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.ClosedCaption, null, tint = AeonPlayer.Sky300, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(8.dp))
         Text("Enable Live Caption for auto subtitles", color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(8.dp))
-        TextButton(onClick = onEnable, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) { Text("Enable", color = Color.Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
-        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) { Icon(Icons.Default.Close, null, tint = Color.Gray, modifier = Modifier.size(16.dp)) }
+        TextButton(onClick = onEnable, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) { Text("Enable", color = AeonPlayer.Sky300, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) { Icon(Icons.Default.Close, null, tint = AeonPlayer.Slate500, modifier = Modifier.size(16.dp)) }
     }
 }
 
@@ -1777,8 +1836,8 @@ fun SettingsItem(icon: ImageVector, title: String, subtitle: String, onClick: ()
         ) { Icon(icon, null, tint = AeonPlayer.Sky300, modifier = Modifier.size(19.dp)) }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Text(subtitle, color = Color.White.copy(0.5f), fontSize = 12.sp)
+            Text(title, color = Color.White, fontSize = AeonPlayer.TextTitle, fontWeight = FontWeight.Medium)
+            Text(subtitle, color = Color.White.copy(0.5f), fontSize = AeonPlayer.TextBody)
         }
         Icon(Icons.Rounded.ChevronRight, null, tint = Color.White.copy(0.3f), modifier = Modifier.size(20.dp))
     }
@@ -1791,7 +1850,7 @@ private fun SettingsSectionLabel(text: String) {
     Text(
         text.uppercase(),
         color = AeonPlayer.Slate500,
-        fontSize = 11.sp,
+        fontSize = AeonPlayer.TextCaption,
         fontWeight = FontWeight.SemiBold,
         letterSpacing = 1.2.sp,
         modifier = Modifier.padding(top = 18.dp, bottom = 4.dp, start = 6.dp),
@@ -1801,16 +1860,16 @@ private fun SettingsSectionLabel(text: String) {
 @Composable
 private fun SubTrackRow(label: String, selected: Boolean, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(if (selected) Icons.Rounded.RadioButtonChecked else Icons.Rounded.RadioButtonUnchecked, null, tint = if (selected) Color.Cyan else Color.Gray, modifier = Modifier.size(18.dp))
+        Icon(if (selected) Icons.Rounded.RadioButtonChecked else Icons.Rounded.RadioButtonUnchecked, null, tint = if (selected) AeonPlayer.Sky300 else AeonPlayer.Slate500, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(12.dp))
-        Text(label, color = if (selected) Color.Cyan else Color.White, fontSize = 14.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+        Text(label, color = if (selected) AeonPlayer.Sky300 else Color.White, fontSize = 14.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
     }
 }
 
 @Composable
 private fun DecodeInfoRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = Color.Gray, fontSize = 13.sp)
+        Text(label, color = AeonPlayer.Slate500, fontSize = 13.sp)
         Text(value, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
 }
