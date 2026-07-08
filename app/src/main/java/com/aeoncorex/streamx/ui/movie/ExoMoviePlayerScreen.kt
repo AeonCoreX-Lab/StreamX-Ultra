@@ -105,6 +105,8 @@ fun ExoMoviePlayerScreen(
     var subtitleShadow    by remember { mutableStateOf(true) }
     var subtitleBackground by remember { mutableStateOf(false) }
     var subtitlePosition  by remember { mutableFloatStateOf(0.85f) }
+    var subtitleStatusMsg  by remember { mutableStateOf("") }   // transient toast: download success/failure
+    var showSubtitleStatus by remember { mutableStateOf(false) }
 
     // ── UI panels ─────────────────────────────────────────────────
     var showLanguagePanel  by remember { mutableStateOf(false) }
@@ -568,6 +570,27 @@ fun ExoMoviePlayerScreen(
             }
         }
 
+        // Subtitle download status toast — auto-dismisses after 3s
+        LaunchedEffect(showSubtitleStatus) {
+            if (showSubtitleStatus) {
+                delay(3000)
+                showSubtitleStatus = false
+            }
+        }
+        AnimatedVisibility(
+            visible  = showSubtitleStatus,
+            enter    = fadeIn() + slideInVertically { it / 2 },
+            exit     = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomStart).padding(start = 16.dp, bottom = 80.dp)
+        ) {
+            Row(
+                Modifier.background(Color.Black.copy(0.75f), RoundedCornerShape(20.dp)).padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(subtitleStatusMsg, color = Color.White, fontSize = 12.sp)
+            }
+        }
+
         // ── LANGUAGE PANEL (Movie Box style: Audio | Subtitle) ────
         if (showLanguagePanel) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(0.6f))
@@ -598,8 +621,23 @@ fun ExoMoviePlayerScreen(
                         loading = subtitleLoading,
                         onSelect = { result ->
                             scope.launch {
-                                subtitleFile = SubtitleRepository.download(context, result)
-                                subtitleEnabled = true
+                                // FIXED: SubtitleRepository.download() now returns a
+                                // DownloadOutcome (Success/Failure) instead of a bare
+                                // File?, so a failed download (bad link, network
+                                // error, non-subtitle response) can be reported to
+                                // the user instead of silently leaving the old/no
+                                // subtitle in place with no explanation.
+                                when (val outcome = SubtitleRepository.download(context, result)) {
+                                    is SubtitleRepository.DownloadOutcome.Success -> {
+                                        subtitleFile = outcome.file
+                                        subtitleEnabled = true
+                                        subtitleStatusMsg = "✓ Subtitle loaded!"
+                                    }
+                                    is SubtitleRepository.DownloadOutcome.Failure -> {
+                                        subtitleStatusMsg = "Couldn't load subtitle: ${outcome.reason}"
+                                    }
+                                }
+                                showSubtitleStatus = true
                             }
                             showSubtitleSearch = false
                             showLanguagePanel  = false
