@@ -174,3 +174,29 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getActiveGpuContext(JNIEnv* env,
     std::string ctx = get_active_gpu_context();
     return env->NewStringUTF(ctx.c_str());
 }
+
+// ════════════════════════════════════════════════════════════
+//  PLAYBACK-ERROR BRIDGES (MOVIEBOX/DIRECT retry support)
+// ════════════════════════════════════════════════════════════
+
+// Empty string = no pending error. Non-empty = mpv_error_string() text
+// from the most recent MPV_END_FILE_REASON_ERROR event.
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvLastError(JNIEnv* env, jclass) {
+    std::string err = get_last_playback_error();
+    return env->NewStringUTF(err.c_str());
+}
+
+// Monotonically increasing counter — bumped on every new playback
+// error. Kotlin compares against the last generation it reacted to,
+// so it can tell "same error still pending" apart from "a new one
+// just happened" without racing on the message string itself.
+extern "C" JNIEXPORT jint JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getMpvErrorGeneration(JNIEnv*, jclass) {
+    return (jint)get_playback_error_generation();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aeoncorex_streamx_ui_movie_StreamXCore_clearMpvLastError(JNIEnv*, jclass) {
+    clear_last_playback_error();
+}

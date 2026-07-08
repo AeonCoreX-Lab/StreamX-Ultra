@@ -111,6 +111,14 @@ lazy_static = "1.4"
 # Small, single-purpose, no heavy transitive dependencies.
 fs2         = "0.4"
 
+# ── MovieBox request signing (v3 mobile-bff HMAC scheme) ────────────────────
+# hmac/md-5 → request signing (X-Client-Token, x-tr-signature) required by
+# every /wefeed-mobile-bff/* endpoint. base64 → secret-key decode + signature
+# encoding. All three are tiny, no transitive bloat, pure-Rust.
+hmac        = "0.12"
+md-5        = "0.10"
+base64      = "0.22"
+
 [profile.release]
 lto           = true
 opt-level     = "z"

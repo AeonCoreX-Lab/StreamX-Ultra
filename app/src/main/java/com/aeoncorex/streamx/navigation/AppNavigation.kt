@@ -189,15 +189,28 @@ fun AppNavigation(
         }
 
         composable(
-            route     = "torrent_player/{encodedUrl}?imdbId={imdbId}",
+            route     = "torrent_player/{encodedUrl}?imdbId={imdbId}&mbSubjectId={mbSubjectId}&mbSe={mbSe}&mbEp={mbEp}",
             arguments = listOf(
-                navArgument("encodedUrl") { type = NavType.StringType },
-                navArgument("imdbId")     { type = NavType.StringType; defaultValue = "" }
+                navArgument("encodedUrl")   { type = NavType.StringType },
+                navArgument("imdbId")       { type = NavType.StringType; defaultValue = "" },
+                // Original MovieBox identifiers, present ONLY when this
+                // navigation came from MovieBoxInstantPlayCard. Lets
+                // MoviePlayerScreen re-call MovieBoxNative.getStreams()
+                // and fetch a fresh signed URL if the one it was given
+                // expires mid-playback, instead of failing with no
+                // recovery path. Empty/0 for torrent and plain-DIRECT
+                // playback — those modes ignore these args entirely.
+                navArgument("mbSubjectId")  { type = NavType.StringType; defaultValue = "" },
+                navArgument("mbSe")         { type = NavType.IntType;    defaultValue = 0 },
+                navArgument("mbEp")         { type = NavType.IntType;    defaultValue = 0 }
             )
         ) { back ->
             MoviePlayerScreen(navController = navController,
-                encodedUrl = back.arguments?.getString("encodedUrl") ?: "",
-                imdbId     = back.arguments?.getString("imdbId") ?: "")
+                encodedUrl  = back.arguments?.getString("encodedUrl") ?: "",
+                imdbId      = back.arguments?.getString("imdbId") ?: "",
+                mbSubjectId = back.arguments?.getString("mbSubjectId") ?: "",
+                mbSe        = back.arguments?.getInt("mbSe") ?: 0,
+                mbEp        = back.arguments?.getInt("mbEp") ?: 0)
         }
 
         // ── Music ─────────────────────────────────────────────────────────────

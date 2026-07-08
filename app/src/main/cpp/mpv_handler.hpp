@@ -23,6 +23,19 @@ int         get_cache_percent_mpv();
 int         is_paused_for_cache_mpv();
 std::string get_track_list_mpv(const char* type);
 
+// ── Playback-error accessors ─────────────────────────────────────
+// Surfaces genuine MPV_END_FILE_REASON_ERROR failures (network errors,
+// expired signed URLs, HTTP 403/404, connection resets) so Kotlin can
+// detect and react to them — used by MOVIEBOX/DIRECT playback modes,
+// which have no torrent-engine ERROR state to poll instead.
+// get_playback_error_generation() increments on every new error;
+// compare against the last-seen value to detect a fresh failure
+// without re-acting to one already handled.
+std::string get_last_playback_error();
+int         get_playback_error_generation();
+void        clear_last_playback_error();
+
+
 // ── Dynamic HW/SW decode compatibility ─────────────────────────
 // Called periodically (every ~250ms poll tick) right after file load.
 // Detects HW-decode formats known to render black on Android GLES

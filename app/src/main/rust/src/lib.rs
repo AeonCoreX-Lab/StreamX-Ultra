@@ -17,6 +17,7 @@
 mod torrent;
 mod jsengine;
 mod indexer;
+mod moviebox;
 
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
@@ -353,6 +354,110 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
 
     let json = TorrentEngineHandle::get().rt.block_on(async {
         indexer::engine::search_anime_other_dub_json(&query).await
+    });
+
+    env.new_string(json).expect("JNI string").into_raw()
+}
+
+// ── ⑥ MovieBox — direct-stream provider (search / dubs / resolve) ────────────
+//
+// Separate from the indexer (⑤) above: indexer returns magnet URIs for
+// TorrentEngine to download; MovieBox returns ready-to-play HTTP(S) MP4/HLS
+// URLs directly — no torrent session involved. Called from MovieBoxNative.kt.
+//
+// Dub handling: nativeGetItemDetails() returns a `dubs[]` array where each
+// entry has ITS OWN subject_id (confirmed against real MovieBox responses —
+// dubs are not a query-param switch on one subject_id, they are separate
+// subjects). Kotlin re-calls nativeGetStreams() with whichever subject_id
+// the user picked from that list.
+use moviebox::client as moviebox_client;
+
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_MovieBoxNative_nativeSearch(
+    mut env: JNIEnv,
+    _cls: JClass,
+    j_query: JString,
+    page: jni::sys::jint,
+) -> jstring {
+    let query = jstr(&mut env, j_query);
+
+    let json = TorrentEngineHandle::get().rt.block_on(async {
+        match moviebox_client::search(&query, page.max(1) as u32).await {
+            Ok(items) => serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string()),
+            Err(e) => format!(
+                "{{\"error\":{}}}",
+                serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"unknown error\"".into())
+            ),
+        }
+    });
+
+    env.new_string(json).expect("JNI string").into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_MovieBoxNative_nativeGetItemDetails(
+    mut env: JNIEnv,
+    _cls: JClass,
+    j_subject_id: JString,
+) -> jstring {
+    let subject_id = jstr(&mut env, j_subject_id);
+
+    let json = TorrentEngineHandle::get().rt.block_on(async {
+        match moviebox_client::get_item_details(&subject_id).await {
+            Ok(details) => serde_json::to_string(&details).unwrap_or_else(|_| "{}".to_string()),
+            Err(e) => format!(
+                "{{\"error\":{}}}",
+                serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"unknown error\"".into())
+            ),
+        }
+    });
+
+    env.new_string(json).expect("JNI string").into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_MovieBoxNative_nativeGetStreams(
+    mut env: JNIEnv,
+    _cls: JClass,
+    j_subject_id: JString,
+    se: jni::sys::jint,
+    ep: jni::sys::jint,
+) -> jstring {
+    let subject_id = jstr(&mut env, j_subject_id);
+    let se_u = se.max(1) as u32;
+    let ep_u = ep.max(1) as u32;
+
+    let json = TorrentEngineHandle::get().rt.block_on(async {
+        match moviebox_client::get_streams(&subject_id, se_u, ep_u).await {
+            Ok(r) => serde_json::to_string(&r).unwrap_or_else(|_| "{}".to_string()),
+            Err(e) => format!(
+                "{{\"error\":{}}}",
+                serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"unknown error\"".into())
+            ),
+        }
+    });
+
+    env.new_string(json).expect("JNI string").into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_MovieBoxNative_nativeGetCaptions(
+    mut env: JNIEnv,
+    _cls: JClass,
+    j_subject_id: JString,
+    j_resource_id: JString,
+) -> jstring {
+    let subject_id = jstr(&mut env, j_subject_id);
+    let resource_id = jstr(&mut env, j_resource_id);
+
+    let json = TorrentEngineHandle::get().rt.block_on(async {
+        match moviebox_client::get_captions(&subject_id, &resource_id).await {
+            Ok(c) => serde_json::to_string(&c).unwrap_or_else(|_| "{}".to_string()),
+            Err(e) => format!(
+                "{{\"error\":{}}}",
+                serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"unknown error\"".into())
+            ),
+        }
     });
 
     env.new_string(json).expect("JNI string").into_raw()

@@ -24,6 +24,20 @@ static int         s_surface_w = 0;
 static int         s_surface_h = 0;
 static std::mutex  mpv_mutex;
 
+// ── Playback-failure state (network/HTTP errors — expired MovieBox
+// signed URLs, 403s, connection resets, etc.) ──────────────────────
+// Populated from MPV_EVENT_END_FILE in the event loop when mpv reports
+// a genuine error reason (MPV_END_FILE_REASON_ERROR), as opposed to a
+// normal stop/EOF/quit which needs no user-facing handling. Kotlin
+// polls this via getPropertyStringNative-style getter and clears it
+// itself once handled (see MoviePlayerScreen.kt's error-detection
+// LaunchedEffect). s_error_generation increments on every new error so
+// Kotlin can tell a fresh failure apart from a stale one it already
+// reacted to, without needing mpv_mutex held across the whole check.
+static std::mutex       mpv_error_mutex;
+static std::string      s_last_playback_error;   // empty = no pending error
+static std::atomic<int> s_error_generation{0};
+
 // ── Dynamic decode-compatibility state ──────────────────────────
 // Reset on every play_mpv_video() call (new file).
 static std::string s_current_path;             // last loaded file path, for reload-on-switch
@@ -437,6 +451,14 @@ void set_mpv_surface_size(int w, int h) {
 void play_mpv_video(const char* path) {
     std::lock_guard<std::mutex> lk(mpv_mutex);
     if (!mpv_ctx) { LOGE("play_mpv_video: null ctx"); return; }
+
+    // Reset any pending playback-error state for the new file — a fresh
+    // loadfile() means we're starting over; a stale error from a previous
+    // (possibly different) URL must not leak into this attempt.
+    {
+        std::lock_guard<std::mutex> elk(mpv_error_mutex);
+        s_last_playback_error.clear();
+    }
 
     // Reset dynamic decode-compatibility state for the new file.
     // check_decode_compatibility() (polled from Kotlin every ~250ms)
@@ -1172,6 +1194,24 @@ static void mpv_event_loop() {
 
         if (ev->event_id == MPV_EVENT_SHUTDOWN) break;
 
+        if (ev->event_id == MPV_EVENT_END_FILE) {
+            auto* end = static_cast<mpv_event_end_file*>(ev->data);
+            if (end && end->reason == MPV_END_FILE_REASON_ERROR) {
+                // Genuine playback failure — expired MovieBox signed URL,
+                // HTTP 403/404, connection reset, unreachable host, etc.
+                // MPV_END_FILE_REASON_EOF/STOP/QUIT are normal and must
+                // NOT be surfaced as errors (EOF also fires on ordinary
+                // successful playback completion).
+                const char* reason_str = mpv_error_string(end->error);
+                std::string msg = reason_str ? reason_str : "playback error";
+                LOGE("mpv end-file ERROR: %s (code %d)", msg.c_str(), end->error);
+                std::lock_guard<std::mutex> elk(mpv_error_mutex);
+                s_last_playback_error = msg;
+                s_error_generation.fetch_add(1, std::memory_order_relaxed);
+            }
+            continue;
+        }
+
         if (ev->event_id == MPV_EVENT_LOG_MESSAGE) {
             auto* msg = static_cast<mpv_event_log_message*>(ev->data);
             if (!msg || !msg->text) continue;
@@ -1358,3 +1398,30 @@ std::string get_track_list_mpv(const char* type) {
     }
     return out.str();
 }
+
+// ── Playback-error accessors (for MOVIEBOX/DIRECT retry support) ────
+// See s_last_playback_error's doc comment near its declaration. Uses
+// its own mutex (not mpv_mutex) since these are called every poll tick
+// from Kotlin alongside get_property_string_mpv_safe() calls that DO
+// hold mpv_mutex — a separate lock avoids adding this to that
+// contention path for something that's usually a no-op empty-string
+// check.
+std::string get_last_playback_error() {
+    std::lock_guard<std::mutex> elk(mpv_error_mutex);
+    return s_last_playback_error;
+}
+
+int get_playback_error_generation() {
+    return s_error_generation.load(std::memory_order_relaxed);
+}
+
+// Kotlin calls this once it has reacted to (or decided to ignore) the
+// current error, so the SAME error isn't re-reported forever on every
+// poll tick. Does not touch s_error_generation — that keeps counting
+// up so a NEW error occurring even with the exact same message text
+// is still detected as new.
+void clear_last_playback_error() {
+    std::lock_guard<std::mutex> elk(mpv_error_mutex);
+    s_last_playback_error.clear();
+}
+
