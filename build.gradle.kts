@@ -7,6 +7,10 @@ plugins {
     // AGP 9.0+ has built-in Kotlin — kotlin.android plugin must NOT be applied.
     // Only the Compose compiler plugin is needed separately.
     id("org.jetbrains.kotlin.plugin.compose") version "2.4.0" apply false
+    
+    // ── REGISTER KOTLIN SERIALIZATION PLUGIN (Kotlin 2.4.0) ──
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.4.0" apply false
+    
 
     // Google Services
     id("com.google.gms.google-services") version "4.5.0" apply false

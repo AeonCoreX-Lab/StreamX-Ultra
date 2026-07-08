@@ -16,6 +16,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 android {
@@ -350,6 +351,10 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-scalars:3.0.0")
     implementation("org.jsoup:jsoup:1.22.2")
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
+    
+     // ── KOTLINX SERIALIZATION JSON CORE EXTENSION ──
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
+    
 
     // NewPipeExtractor
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.3") {
