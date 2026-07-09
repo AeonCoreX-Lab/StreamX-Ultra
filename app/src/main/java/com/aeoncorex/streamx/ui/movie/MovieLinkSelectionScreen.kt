@@ -32,8 +32,10 @@ import com.aeoncorex.streamx.streaming.MovieBoxItemDetails
 import com.aeoncorex.streamx.streaming.MovieBoxNative
 import com.aeoncorex.streamx.streaming.MovieBoxStreamResult
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeout
 import java.net.URLDecoder
 import java.net.URLEncoder
 
@@ -74,21 +76,33 @@ private class MovieBoxSectionState {
         get() = streamResult?.hasResource == true && streamResult?.bestPlayableUrl() != null
 }
 
+// The Rust engine already bounds each native call to ~45s internally, but
+// that bound lives entirely on the native side (see moviebox/client.rs's
+// with_deadline). Wrapping the calls again here means the Compose UI is
+// guaranteed to leave its loading state within a fixed, predictable window
+// even if a future native-side change ever regresses that guarantee — the
+// spinner can never hang indefinitely no matter what the JNI call does.
+private const val MOVIEBOX_CALL_TIMEOUT_MS = 60_000L
+
 private suspend fun MovieBoxSectionState.resolveSubject(title: String) {
     isResolvingSubject = true
     subjectNotFound = false
     itemDetails = null
     selectedDub = null
     try {
-        val results = MovieBoxNative.search(title)
-        val best = results.firstOrNull()
-        if (best == null) {
-            subjectNotFound = true
-            return
+        withTimeout(MOVIEBOX_CALL_TIMEOUT_MS) {
+            val results = MovieBoxNative.search(title)
+            val best = results.firstOrNull()
+            if (best == null) {
+                subjectNotFound = true
+                return@withTimeout
+            }
+            val details = MovieBoxNative.getItemDetails(best.subjectId)
+            itemDetails = details
+            selectedDub = details.dubs.firstOrNull { it.original } ?: details.dubs.firstOrNull()
         }
-        val details = MovieBoxNative.getItemDetails(best.subjectId)
-        itemDetails = details
-        selectedDub = details.dubs.firstOrNull { it.original } ?: details.dubs.firstOrNull()
+    } catch (e: TimeoutCancellationException) {
+        subjectNotFound = true
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
@@ -103,11 +117,15 @@ private suspend fun MovieBoxSectionState.checkStreamFor(dub: MovieBoxDub, se: In
     streamError = null
     streamResult = null
     try {
-        val result = MovieBoxNative.getStreams(dub.subjectId, se, ep)
+        val result = withTimeout(MOVIEBOX_CALL_TIMEOUT_MS) {
+            MovieBoxNative.getStreams(dub.subjectId, se, ep)
+        }
         streamResult = result
         if (!result.hasResource || result.bestPlayableUrl() == null) {
             streamError = "No stream available for ${dub.displayName} · S${se}E${ep}"
         }
+    } catch (e: TimeoutCancellationException) {
+        streamError = "Stream lookup timed out for ${dub.displayName} · S${se}E${ep} — please try again"
     } catch (e: CancellationException) {
         throw e
     } catch (e: MovieBoxException) {
