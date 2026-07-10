@@ -54,6 +54,37 @@ impl DubOption {
     }
 }
 
+// ── Seasons (MovieBox's own authoritative episode counts) ──────────────────
+
+/// One season's episode count, straight from MovieBox — NOT from TMDB.
+/// Matches `SeasonItemModel` in the reference lib: `se` (season number),
+/// `maxEp` (episode count for that season under THIS subject_id — matters
+/// because a dub's subject_id can have a different available episode
+/// count than the original). Use this, not TMDB's season metadata, to
+/// decide what episode range to offer when the active subject is a dub.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeasonItem {
+    pub se: u32,
+    #[serde(rename = "maxEp")]
+    pub max_ep: u32,
+    #[serde(rename = "allEp", default)]
+    pub all_ep: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SeasonInfo {
+    #[serde(rename = "subjectId", default)]
+    pub subject_id: Option<String>,
+    #[serde(default)]
+    pub seasons: Vec<SeasonItem>,
+}
+
+impl SeasonInfo {
+    pub fn episode_count_for(&self, season: u32) -> Option<u32> {
+        self.seasons.iter().find(|s| s.se == season).map(|s| s.max_ep)
+    }
+}
+
 // ── Item / subject details ──────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,7 +92,7 @@ pub struct ItemDetails {
     #[serde(rename = "subjectId")]
     pub subject_id: String,
     pub title: String,
-    #[serde(rename = "detailPath")]
+    #[serde(rename = "detailPath", default)]
     pub detail_path: Option<String>,
     #[serde(default)]
     pub dubs: Vec<DubOption>,
@@ -90,6 +121,12 @@ pub struct SearchItem {
     pub subject_type: Option<i32>,
     #[serde(default)]
     pub year: Option<String>,
+    /// Present directly on search results (confirmed field:
+    /// `ResultsSubjectModel.hasResource` in the reference lib) — lets
+    /// callers skip subjects with no playable resource at all without
+    /// needing a separate item-details or stream-resolve call first.
+    #[serde(rename = "hasResource", default)]
+    pub has_resource: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

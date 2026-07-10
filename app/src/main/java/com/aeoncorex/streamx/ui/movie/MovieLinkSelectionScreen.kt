@@ -71,6 +71,12 @@ private class MovieBoxSectionState {
     var streamResult        by mutableStateOf<MovieBoxStreamResult?>(null)
     var isCheckingStream    by mutableStateOf(false)
     var streamError         by mutableStateOf<String?>(null)
+    // Cached per dub subject_id so switching between dubs the user has
+    // already visited doesn't re-fetch season info every time — MovieBox's
+    // own authoritative episode count (NOT TMDB's), since a dub's
+    // subject_id can have a different available episode count than the
+    // original (dubbing coverage varies per language).
+    val seasonInfoCache     = mutableStateMapOf<String, MovieBoxSeasonInfo>()
 
     val isAvailable: Boolean
         get() = streamResult?.hasResource == true && streamResult?.bestPlayableUrl() != null
@@ -92,7 +98,11 @@ private suspend fun MovieBoxSectionState.resolveSubject(title: String) {
     try {
         withTimeout(MOVIEBOX_CALL_TIMEOUT_MS) {
             val results = MovieBoxNative.search(title)
-            val best = results.firstOrNull()
+            // Prefer a result confirmed to have a resource (now that
+            // search returns hasResource directly) — falls back to the
+            // first result if none are marked, since some responses may
+            // omit the field rather than reliably set it false.
+            val best = results.firstOrNull { it.hasResource } ?: results.firstOrNull()
             if (best == null) {
                 subjectNotFound = true
                 return@withTimeout
@@ -117,6 +127,24 @@ private suspend fun MovieBoxSectionState.checkStreamFor(dub: MovieBoxDub, se: In
     streamError = null
     streamResult = null
     try {
+        // Fetch (or reuse cached) MovieBox-authoritative season info for
+        // THIS dub's subject_id before hitting the resource endpoint —
+        // catches "episode doesn't exist for this dub" up front with a
+        // clear message instead of a generic "no stream" after a wasted
+        // call. Best-effort and outside the main timeout: if season-info
+        // itself fails or is slow, we don't block the whole check on a
+        // secondary endpoint — getStreams() below remains the source of
+        // truth either way.
+        val seasonInfo = seasonInfoCache[dub.subjectId] ?: runCatching {
+            withTimeout(MOVIEBOX_CALL_TIMEOUT_MS) { MovieBoxNative.getSeasonInfo(dub.subjectId) }
+        }.getOrNull()?.also { seasonInfoCache[dub.subjectId] = it }
+
+        val knownMaxEp = seasonInfo?.episodeCountFor(se)
+        if (knownMaxEp != null && ep > knownMaxEp) {
+            streamError = "${dub.displayName} only has $knownMaxEp episode(s) for Season $se"
+            return
+        }
+
         val result = withTimeout(MOVIEBOX_CALL_TIMEOUT_MS) {
             MovieBoxNative.getStreams(dub.subjectId, se, ep)
         }

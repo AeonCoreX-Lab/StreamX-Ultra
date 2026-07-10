@@ -42,7 +42,12 @@ data class MovieBoxSearchItem(
     val title: String,
     val subjectId: String,
     val detailPath: String? = null,
-    val year: String? = null
+    val year: String? = null,
+    /** True when this subject has at least one playable resource —
+     *  known directly from the search response, no extra call needed.
+     *  Filter on this before showing a subject as an Instant Play
+     *  candidate to skip dead/resource-less listings up front. */
+    val hasResource: Boolean = false
 )
 
 @Serializable
@@ -91,6 +96,24 @@ data class MovieBoxCaptionResult(
     val subjectId: String? = null
 )
 
+/** MovieBox's OWN season/episode count for one season — authoritative,
+ *  NOT from TMDB. A dub's subject_id can have a different maxEp than the
+ *  original subject_id (dubbing coverage varies per language). */
+@Serializable
+data class MovieBoxSeasonItem(
+    val se: Int,
+    val maxEp: Int,
+    val allEp: String? = null
+)
+
+@Serializable
+data class MovieBoxSeasonInfo(
+    val subjectId: String? = null,
+    val seasons: List<MovieBoxSeasonItem> = emptyList()
+) {
+    fun episodeCountFor(season: Int): Int? = seasons.firstOrNull { it.se == season }?.maxEp
+}
+
 // ── Error wrapper for JNI results that came back as {"error": "..."} ───────
 
 class MovieBoxException(message: String) : Exception(message)
@@ -110,6 +133,7 @@ object MovieBoxNative {
 
     private external fun nativeSearch(query: String, page: Int): String
     private external fun nativeGetItemDetails(subjectId: String): String
+    private external fun nativeGetSeasonInfo(subjectId: String): String
     private external fun nativeGetStreams(subjectId: String, se: Int, ep: Int): String
     private external fun nativeGetCaptions(subjectId: String, resourceId: String): String
 
@@ -135,6 +159,20 @@ object MovieBoxNative {
     suspend fun getItemDetails(subjectId: String): MovieBoxItemDetails =
         withContext(Dispatchers.IO) {
             val raw = nativeGetItemDetails(subjectId)
+            checkError(raw)
+            movieBoxJson.decodeFromString(raw)
+        }
+
+    /**
+     * MovieBox's own authoritative season/episode-count list for
+     * [subjectId] — NOT derived from TMDB. Call this after a dub switch
+     * before trusting a previously-loaded episode count, since a dub's
+     * subject_id can have fewer (or more) episodes available than the
+     * original.
+     */
+    suspend fun getSeasonInfo(subjectId: String): MovieBoxSeasonInfo =
+        withContext(Dispatchers.IO) {
+            val raw = nativeGetSeasonInfo(subjectId)
             checkError(raw)
             movieBoxJson.decodeFromString(raw)
         }

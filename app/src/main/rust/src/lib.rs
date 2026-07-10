@@ -415,6 +415,34 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_MovieBoxNative_nativ
     env.new_string(json).expect("JNI string").into_raw()
 }
 
+/// java: MovieBoxNative.nativeGetSeasonInfo(subjectId: String): String (JSON SeasonInfo)
+///
+/// Returns MovieBox's OWN season/episode-count list for `subjectId` —
+/// authoritative for what episodes actually exist under that subject,
+/// which matters especially after a dub switch (a dub's subject_id can
+/// have a different available episode count than the original). Use this
+/// instead of assuming TMDB's episode count applies to every dub.
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_MovieBoxNative_nativeGetSeasonInfo(
+    mut env: JNIEnv,
+    _cls: JClass,
+    j_subject_id: JString,
+) -> jstring {
+    let subject_id = jstr(&mut env, j_subject_id);
+
+    let json = TorrentEngineHandle::get().rt.block_on(async {
+        match moviebox_client::get_season_info(&subject_id).await {
+            Ok(info) => serde_json::to_string(&info).unwrap_or_else(|_| "{}".to_string()),
+            Err(e) => format!(
+                "{{\"error\":{}}}",
+                serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"unknown error\"".into())
+            ),
+        }
+    });
+
+    env.new_string(json).expect("JNI string").into_raw()
+}
+
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_streaming_MovieBoxNative_nativeGetStreams(
     mut env: JNIEnv,

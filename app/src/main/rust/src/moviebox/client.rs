@@ -49,6 +49,7 @@ const RETRY_STATUS: &[u16] = &[403, 407, 429, 500, 502, 503, 504];
 const MAIN_PAGE_PATH: &str = "/wefeed-mobile-bff/tab-operating";
 const SEARCH_PATH: &str = "/wefeed-mobile-bff/subject-api/search";
 const SUBJECT_GET_PATH: &str = "/wefeed-mobile-bff/subject-api/get";
+const SEASON_INFO_PATH: &str = "/wefeed-mobile-bff/subject-api/season-info";
 const RESOURCE_PATH: &str = "/wefeed-mobile-bff/subject-api/resource";
 const EXT_CAPTIONS_PATH: &str = "/wefeed-mobile-bff/subject-api/get-ext-captions";
 
@@ -157,20 +158,53 @@ async fn signed_request(path_and_query: &str, method: &str) -> Result<Value> {
                     }
                 };
 
-                if let Some(code) = body.get("code").and_then(|c| c.as_i64()) {
-                    if code != 0 {
-                        let msg = body
-                            .get("message")
-                            .and_then(|m| m.as_str())
-                            .unwrap_or("unknown error");
-                        warn!("[moviebox] {base} returned API error code {code}: {msg}");
-                        last_err = Some(anyhow!("MovieBox API error (code {code}): {msg}"));
-                        continue;
-                    }
+                // Success check mirrors the reference Python lib's
+                // `process_api_response` EXACTLY (moviebox_api.v1.helpers,
+                // reused verbatim by v3's http_client for every endpoint):
+                //
+                //     j.get("code", 1) == 0 and j.get("message") == "ok"
+                //
+                // Two things this fixes vs. a naive `code != 0` check:
+                //   1. `code` MUST default to 1 (failure) when the field is
+                //      absent — NOT be treated as success. A response body
+                //      like `{}` or `{"data": null}` (seen in practice on
+                //      rate-limit/geo-block/placeholder responses that still
+                //      return HTTP 200) was previously falling through this
+                //      function as if it succeeded, because `if let Some(code)
+                //      = body.get("code")` simply skipped the whole check when
+                //      the field was missing. That let a null/empty `data`
+                //      propagate all the way to Kotlin, fail JSON decoding
+                //      there, get caught by a broad `catch (e: Exception)`,
+                //      and silently hide the MovieBox card — exactly the
+                //      "network shows 200 but nothing renders" symptom.
+                //   2. `message` must equal "ok", not merely be present.
+                let code = body.get("code").and_then(|c| c.as_i64()).unwrap_or(1);
+                let message = body.get("message").and_then(|m| m.as_str()).unwrap_or("");
+                if code != 0 || message != "ok" {
+                    warn!(
+                        "[moviebox] {base} unsuccessful response — code={code} message={message:?}"
+                    );
+                    last_err = Some(anyhow!(
+                        "MovieBox API error (code {code}): {}",
+                        if message.is_empty() { "no message" } else { message }
+                    ));
+                    continue;
+                }
+
+                let data = body.get("data").cloned().unwrap_or(Value::Null);
+                if data.is_null() {
+                    // Matches the reference lib's dedicated EmptyResponseError
+                    // case: "empty body response received with status code
+                    // 200-OK". code=0/message="ok" but data is null/absent —
+                    // treat as a retryable failure (try the next host) rather
+                    // than returning Value::Null for the caller to choke on.
+                    warn!("[moviebox] {base} returned code=0/message=ok but data was null/absent");
+                    last_err = Some(anyhow!("MovieBox returned an empty response body"));
+                    continue;
                 }
 
                 debug!("[moviebox] {base} succeeded");
-                return Ok(body.get("data").cloned().unwrap_or(body));
+                return Ok(data);
             }
             Err(e) => {
                 warn!("[moviebox] {base} transport error: {e:#}");
@@ -301,7 +335,28 @@ async fn search_inner(query: &str, page: u32) -> Result<Vec<SearchItem>> {
                         continue;
                     }
                 };
-                let data = parsed.get("data").cloned().unwrap_or(parsed);
+
+                // Same success semantics as signed_request() — see the
+                // detailed comment there. `code` defaults to failure (1)
+                // when absent, `message` must equal "ok", and a null/absent
+                // `data` field (HTTP 200 but empty body) is treated as a
+                // retryable failure rather than silently returning zero
+                // results as if the search had genuinely found nothing.
+                let code = parsed.get("code").and_then(|c| c.as_i64()).unwrap_or(1);
+                let message = parsed.get("message").and_then(|m| m.as_str()).unwrap_or("");
+                if code != 0 || message != "ok" {
+                    last_err = Some(anyhow!(
+                        "MovieBox search API error (code {code}): {}",
+                        if message.is_empty() { "no message" } else { message }
+                    ));
+                    continue;
+                }
+
+                let data = parsed.get("data").cloned().unwrap_or(Value::Null);
+                if data.is_null() {
+                    last_err = Some(anyhow!("MovieBox search returned an empty response body"));
+                    continue;
+                }
                 let items = data
                     .get("items")
                     .or_else(|| data.get("list"))
@@ -335,6 +390,22 @@ pub async fn get_item_details(subject_id: &str) -> Result<ItemDetails> {
         let path = format!("{}?subjectId={}", SUBJECT_GET_PATH, subject_id);
         let data = signed_request(&path, "GET").await?;
         serde_json::from_value(data).context("failed to parse ItemDetails")
+    })
+    .await
+}
+
+/// MovieBox's own authoritative season/episode-count list for `subject_id`
+/// (matches `SeasonDetails`/`SeasonsModel` in the reference lib). Call
+/// this — not TMDB's season metadata — before offering an episode picker
+/// for a series, especially after a dub switch: a dub's subject_id can
+/// have a smaller (or larger) available episode count than the original
+/// subject_id, since dubbing/upload coverage varies per language.
+pub async fn get_season_info(subject_id: &str) -> Result<SeasonInfo> {
+    with_deadline("get_season_info", async {
+        ensure_token().await?;
+        let path = format!("{}?subjectId={}", SEASON_INFO_PATH, subject_id);
+        let data = signed_request(&path, "GET").await?;
+        serde_json::from_value(data).context("failed to parse SeasonInfo")
     })
     .await
 }

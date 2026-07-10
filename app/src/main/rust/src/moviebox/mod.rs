@@ -10,4 +10,7 @@ pub mod crypto;
 pub mod helpers;
 pub mod types;
 
-pub use types::{CaptionFile, CaptionResult, DubOption, ItemDetails, SearchItem, StreamFile, StreamResult};
+pub use types::{
+    CaptionFile, CaptionResult, DubOption, ItemDetails, SearchItem, SeasonInfo, SeasonItem,
+    StreamFile, StreamResult,
+};
