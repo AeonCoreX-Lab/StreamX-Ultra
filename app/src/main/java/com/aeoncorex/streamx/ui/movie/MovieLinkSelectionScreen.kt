@@ -30,6 +30,7 @@ import com.aeoncorex.streamx.streaming.MovieBoxDub
 import com.aeoncorex.streamx.streaming.MovieBoxException
 import com.aeoncorex.streamx.streaming.MovieBoxItemDetails
 import com.aeoncorex.streamx.streaming.MovieBoxNative
+import com.aeoncorex.streamx.streaming.MovieBoxSeasonInfo
 import com.aeoncorex.streamx.streaming.MovieBoxStreamResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
