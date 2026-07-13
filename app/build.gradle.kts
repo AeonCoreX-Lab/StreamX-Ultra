@@ -382,7 +382,7 @@ dependencies {
     implementation("com.google.api-client:google-api-client-android:2.7.0") {
         exclude(group = "org.apache.httpcomponents")
     }
-    implementation("com.google.apis:google-api-services-drive:v3-rev20250928-2.0.0")
+    implementation("com.google.apis:google-api-services-drive:v3-rev20260624-2.0.0")
     implementation("com.google.http-client:google-http-client-gson:1.47.0")
     implementation("com.google.protobuf:protobuf-javalite:$protobufVersion")
 
