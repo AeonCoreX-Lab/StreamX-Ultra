@@ -320,8 +320,18 @@ tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configu
 // ═══════════════════════════════════════════════════════════════════
 configurations.all {
     resolutionStrategy {
+        // Protobuf-javalite (Keeping your preferred stable version)
         force("com.google.protobuf:protobuf-javalite:3.25.5")
         force("com.google.protobuf:protobuf-kotlin:3.25.5")
+        
+        // 🚀 Firebase BoM 34.11.0 compatible grpc version 
+        val grpcVersion = "1.68.1"
+        force("io.grpc:grpc-core:$grpcVersion")
+        force("io.grpc:grpc-api:$grpcVersion")
+        force("io.grpc:grpc-android:$grpcVersion")
+        force("io.grpc:grpc-okhttp:$grpcVersion")
+        force("io.grpc:grpc-protobuf-lite:$grpcVersion")
+        force("io.grpc:grpc-stub:$grpcVersion")
     }
     exclude(group = "com.google.protobuf", module = "protobuf-lite")
 }
