@@ -320,8 +320,8 @@ tasks.withType<com.android.build.gradle.tasks.ExternalNativeBuildTask>().configu
 // ═══════════════════════════════════════════════════════════════════
 configurations.all {
     resolutionStrategy {
-        force("com.google.protobuf:protobuf-javalite:3.25.5")
-        force("com.google.protobuf:protobuf-kotlin:3.25.5")
+        force("com.google.protobuf:protobuf-javalite:4.35.1")
+        force("com.google.protobuf:protobuf-kotlin:4.35.1")
     }
     exclude(group = "com.google.protobuf", module = "protobuf-lite")
 }
@@ -331,7 +331,7 @@ dependencies {
 
     val media3Version = "1.10.1"
     val lifecycleVersion  = "2.8.0"
-    val protobufVersion   = "3.25.5"
+    val protobufVersion   = "4.35.1"
 
     // Core & Compose
     implementation("androidx.core:core-ktx:1.15.0")
@@ -353,7 +353,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
     
      // ── KOTLINX SERIALIZATION JSON CORE EXTENSION ──
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     
 
     // NewPipeExtractor
@@ -383,12 +383,12 @@ dependencies {
     // upstream) — google-http-client-gson's NetHttpTransport is the
     // supported replacement and is declared explicitly below since it's
     // referenced directly in code, not just pulled transitively.
-    implementation("com.google.api-client:google-api-client-android:2.7.0") {
+    implementation("com.google.api-client:google-api-client-android:2.9.0") {
         exclude(group = "org.apache.httpcomponents")
     }
     implementation("com.google.apis:google-api-services-drive:v3-rev20260624-2.0.0")
-    implementation("com.google.http-client:google-http-client-gson:1.47.0")
-    implementation("com.google.http-client:google-http-client:1.47.0")
+    implementation("com.google.http-client:google-http-client-gson:2.1.1")
+    implementation("com.google.http-client:google-http-client:2.1.1")
     implementation("com.google.protobuf:protobuf-javalite:$protobufVersion")
 
     // Media3 ExoPlayer
@@ -404,7 +404,7 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.datastore:datastore-preferences:1.2.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:$lifecycleVersion")
-    implementation("com.valentinilk.shimmer:compose-shimmer:1.4.0")
+    implementation("com.valentinilk.shimmer:compose-shimmer:1.5.0")
 
     // MMKV — fast, mmap-based key-value storage with built-in AES
     // encryption support. Used for proxy settings (host/port/username/
@@ -415,5 +415,5 @@ dependencies {
     implementation("com.tencent:mmkv:2.4.0")
 
     // Start.io Ads
-    implementation("com.startapp:inapp-sdk:5.3.1")
+    implementation("com.startapp:inapp-sdk:5.3.2")
 }
