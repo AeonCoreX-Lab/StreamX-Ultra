@@ -370,6 +370,20 @@ dependencies {
     implementation("com.google.firebase:protolite-well-known-types:18.0.1")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0")
+
+    // Google Drive API — used only for the app-private "appdata" backup
+    // folder (BackupManager.kt), reusing the Google Sign-In this app
+    // already had for Firebase Auth (see AuthScreen.kt's added
+    // .requestScopes(DriveScopes.DRIVE_APPDATA)). exclude httpclient
+    // (Apache) since google-api-client pulls in a version that conflicts
+    // with what's already resolved elsewhere in this project; the
+    // android variant + OkHttp transport (used explicitly in
+    // BackupManager.kt) doesn't need it.
+    implementation("com.google.api-client:google-api-client-android:2.7.0") {
+        exclude(group = "org.apache.httpcomponents")
+    }
+    implementation("com.google.apis:google-api-services-drive:v3-rev20250928-2.0.0")
+    implementation("com.google.http-client:google-http-client-gson:1.47.0")
     implementation("com.google.protobuf:protobuf-javalite:$protobufVersion")
 
     // Media3 ExoPlayer
@@ -386,6 +400,14 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.2.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:$lifecycleVersion")
     implementation("com.valentinilk.shimmer:compose-shimmer:1.4.0")
+
+    // MMKV — fast, mmap-based key-value storage with built-in AES
+    // encryption support. Used for proxy settings (host/port/username/
+    // password) and, going forward, private-tracker credentials — both
+    // are small, low-frequency-write settings, but MMKV's encryption
+    // support is used here for at-rest protection of these credentials
+    // (see ProxySettingsStore.kt for the encryption key handling notes).
+    implementation("com.tencent:mmkv:2.4.0")
 
     // Start.io Ads
     implementation("com.startapp:inapp-sdk:5.3.1")

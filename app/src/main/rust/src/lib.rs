@@ -61,6 +61,85 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
     indexer::engine::init_cache_dir(std::path::PathBuf::from(path));
 }
 
+// ── Proxy support (HTTP / SOCKS4 / SOCKS5) ────────────────────────────────────
+//
+// Design mirrors Prowlarr's IndexerProxies (see indexer/proxy/config.rs
+// doc comment for the full rationale — Prowlarr's FlareSolverr proxy
+// type is intentionally NOT ported since it needs an external
+// browser-automation server that can't run on Android).
+//
+// Called from IndexerNative.kt's setProxy()/clearProxy() — the actual
+// host/port/username/password come from the user's own Settings entry,
+// read out of EncryptedSharedPreferences on the Kotlin side and passed
+// here only as plain JNI arguments for this one call (never persisted
+// by Rust, never sent anywhere but directly into the in-memory
+// reqwest::Client — see indexer/proxy/mod.rs).
+//
+// kind: "http" | "socks4" | "socks5" (matches ProxyKind's serde rename)
+// Returns true on success, false if the proxy config was invalid (bad
+// host/port) — the previously active client (proxied or plain) remains
+// in effect either way, so a typo in Settings never breaks search
+// entirely.
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_nativeSetProxy(
+    mut env:     JNIEnv,
+    _cls:        JClass,
+    j_kind:      JString,
+    j_host:      JString,
+    port:        jni::sys::jint,
+    j_username:  JString, // pass "" if no auth
+    j_password:  JString, // pass "" if no auth
+) -> jboolean {
+    let kind_str = jstr(&mut env, j_kind);
+    let host     = jstr(&mut env, j_host);
+    let username = jstr(&mut env, j_username);
+    let password = jstr(&mut env, j_password);
+
+    let kind = match kind_str.as_str() {
+        "http"   => indexer::proxy::config::ProxyKind::Http,
+        "socks4" => indexer::proxy::config::ProxyKind::Socks4,
+        "socks5" => indexer::proxy::config::ProxyKind::Socks5,
+        other => {
+            log::warn!("[proxy] unknown proxy kind '{other}', ignoring");
+            return 0;
+        }
+    };
+
+    let config = indexer::proxy::config::ProxyConfig {
+        kind,
+        host,
+        port: port as u16,
+        username: if username.is_empty() { None } else { Some(username) },
+        password: if password.is_empty() { None } else { Some(password) },
+        enabled: true,
+    };
+
+    match indexer::proxy::set_proxy(config) {
+        Ok(()) => 1,
+        Err(e) => {
+            log::warn!("[proxy] failed to activate: {e}");
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_nativeClearProxy(
+    _env: JNIEnv,
+    _cls: JClass,
+) {
+    let _ = indexer::proxy::clear_proxy();
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_nativeProxyStatus(
+    mut env: JNIEnv,
+    _cls: JClass,
+) -> jni::sys::jstring {
+    let summary = indexer::proxy::status_summary();
+    env.new_string(summary).expect("JNI string").into_raw()
+}
+
 // ── ① TMDB key ───────────────────────────────────────────────────────────────
 // Unchanged from previous lib.rs — StreamXCore.getTmdbKey() still works
 #[no_mangle]

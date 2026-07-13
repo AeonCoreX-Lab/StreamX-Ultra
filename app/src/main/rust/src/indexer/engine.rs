@@ -30,20 +30,17 @@
 
 use once_cell::sync::Lazy;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use super::config::{self, schema::IndexerConfig};
 use super::sites;
 use super::types::TorrentResult;
 
-// Shared reqwest client — reused across all site calls (connection pooling)
-static HTTP: Lazy<reqwest::Client> = Lazy::new(|| {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        .build()
-        .expect("failed to build indexer HTTP client")
-});
+// NOTE: the old static HTTP client (Lazy<reqwest::Client>) has been
+// removed. Every search_*() function below now obtains its client via
+// crate::indexer::proxy::get_client(), which returns either a plain
+// direct client or one routed through the user's configured proxy
+// (see indexer/proxy/mod.rs) — this is what makes proxy support apply
+// uniformly across every site without touching each site module.
 
 /// Where the config cache file lives on disk. Set once at startup from
 /// Kotlin's Context.cacheDir via lib.rs — see indexer::config::init().
@@ -131,7 +128,8 @@ async fn with_1337x_fallback(
 /// is_dubbed() filter correctly discarded all of them since none carried
 /// a Hindi tag.
 pub async fn search_dubbed(query: &str, _imdb_id: Option<&str>) -> Vec<TorrentResult> {
-    let client = &*HTTP;
+    let client_arc = crate::indexer::proxy::get_client();
+    let client = &*client_arc;
     let config = get_config().await;
 
     // Dedicated sources run first, in parallel, via the config-driven
@@ -231,7 +229,8 @@ async fn search_eztvco(client: &reqwest::Client, query: &str) -> Vec<TorrentResu
 /// for the exact same title depending on whether an IMDB ID happened to
 /// be available.
 pub async fn search_all(query: &str) -> Vec<TorrentResult> {
-    let client = &*HTTP;
+    let client_arc = crate::indexer::proxy::get_client();
+    let client = &*client_arc;
     let config = get_config().await;
 
     let dedicated_ids = ["tgx", "kat", "torrentdownload", "extratorrent", "therarbg", "tpb", "kat_ws"];
@@ -305,7 +304,8 @@ pub async fn search_all_json(query: &str) -> String {
 // ── Drama (K-drama / C-drama / Turkish drama) ────────────────────────────────
 
 pub async fn search_drama(query: &str) -> Vec<TorrentResult> {
-    let client = &*HTTP;
+    let client_arc = crate::indexer::proxy::get_client();
+    let client = &*client_arc;
     let config = get_config().await;
 
     let dedicated_ids = ["tgx", "kat", "torrentdownload", "extratorrent", "therarbg", "tpb", "kat_ws"];
@@ -351,7 +351,8 @@ pub async fn search_drama_json(query: &str) -> String {
 // ── Anime ──────────────────────────────────────────────────────────────────
 
 pub async fn search_anime_english(query: &str) -> Vec<TorrentResult> {
-    let client = &*HTTP;
+    let client_arc = crate::indexer::proxy::get_client();
+    let client = &*client_arc;
     let config = get_config().await;
 
     let mut merged = Vec::new();
@@ -384,7 +385,8 @@ pub async fn search_anime_english(query: &str) -> Vec<TorrentResult> {
 }
 
 pub async fn search_anime_other_dub(query: &str) -> Vec<TorrentResult> {
-    let client = &*HTTP;
+    let client_arc = crate::indexer::proxy::get_client();
+    let client = &*client_arc;
     let config = get_config().await;
     if !is_special_site_enabled(&config, "nyaa") {
         return vec![];
@@ -395,7 +397,8 @@ pub async fn search_anime_other_dub(query: &str) -> Vec<TorrentResult> {
 }
 
 pub async fn search_anime_all(query: &str) -> Vec<TorrentResult> {
-    let client = &*HTTP;
+    let client_arc = crate::indexer::proxy::get_client();
+    let client = &*client_arc;
     let config = get_config().await;
     if !is_special_site_enabled(&config, "nyaa") {
         return vec![];

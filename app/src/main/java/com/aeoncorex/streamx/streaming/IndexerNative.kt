@@ -79,6 +79,78 @@ object IndexerNative {
 
     private external fun nativeSetCacheDir(path: String)
 
+    // ── Proxy support (HTTP / SOCKS4 / SOCKS5) ─────────────────────────────────
+    //
+    // Design mirrors Prowlarr's IndexerProxies feature (Settings > Indexers >
+    // Proxies in Prowlarr's own UI) — verified against Prowlarr's actual
+    // source (NzbDrone.Core/IndexerProxies/{Http,Socks4,Socks5}): each is
+    // just a host/port/username/password bundle applied to every outgoing
+    // indexer request. Prowlarr's fourth type, FlareSolverr, is NOT
+    // supported here since it requires an externally-running browser
+    // automation server (a separate Docker container) that can't run on
+    // Android — see the project's proxy research notes for the full
+    // reasoning.
+    //
+    // STORAGE: credentials are the user's own (their VPN/proxy service
+    // login) — this class does not persist them itself. Callers should
+    // read/write the actual host/port/username/password via
+    // EncryptedSharedPreferences (or equivalent) in their own Settings
+    // screen, and call setProxy()/clearProxy() here each time the value
+    // changes AND once on app startup to restore the saved setting (Rust
+    // holds it in memory only — it does not survive a process restart on
+    // its own).
+
+    private external fun nativeSetProxy(
+        kind: String, // "http" | "socks4" | "socks5"
+        host: String,
+        port: Int,
+        username: String, // "" if no auth
+        password: String  // "" if no auth
+    ): Boolean
+
+    private external fun nativeClearProxy()
+    private external fun nativeProxyStatus(): String
+
+    /**
+     * Activates a proxy for all indexer HTTP requests (search only —
+     * this does NOT affect torrent/magnet traffic, which continues
+     * through the existing TorrentEngine unchanged).
+     *
+     * @return true if the proxy was accepted and activated, false if
+     *         the config was invalid (bad host/port) — the previously
+     *         active proxy (or direct connection) remains in effect
+     *         either way, so a typo here never breaks search entirely.
+     */
+    fun setProxy(kind: ProxyKind, host: String, port: Int, username: String? = null, password: String? = null): Boolean {
+        return try {
+            nativeSetProxy(kind.wireValue, host, port, username.orEmpty(), password.orEmpty())
+        } catch (e: Exception) {
+            Log.w(TAG, "setProxy() failed: ${e.message}")
+            false
+        }
+    }
+
+    /** Disables the active proxy — subsequent searches connect directly. */
+    fun clearProxy() {
+        try {
+            nativeClearProxy()
+        } catch (e: Exception) {
+            Log.w(TAG, "clearProxy() failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Human-readable current proxy state for a status line in Settings,
+     * e.g. "SOCKS5 12.34.56.78:1080" or "Direct (no proxy)". Never
+     * includes credentials.
+     */
+    fun proxyStatus(): String = try {
+        nativeProxyStatus()
+    } catch (e: Exception) {
+        Log.w(TAG, "proxyStatus() failed: ${e.message}")
+        "Unknown"
+    }
+
     /**
      * Searches all indexer sites for dubbed/dual-audio releases.
      *
@@ -236,6 +308,19 @@ object IndexerNative {
  * `magnet` is passed DIRECTLY to TorrentEngine.startNative(magnet, saveDir) —
  * no conversion needed, same as an existing YTS magnet link.
  */
+/**
+ * Proxy protocol for indexer HTTP requests — mirrors Prowlarr's proxy
+ * type selector (minus FlareSolverr, see IndexerNative's proxy section
+ * doc comment for why). [wireValue] is what gets passed across the JNI
+ * boundary to Rust's ProxyKind (indexer/proxy/config.rs), which expects
+ * exactly these lowercase strings.
+ */
+enum class ProxyKind(val wireValue: String) {
+    HTTP("http"),
+    SOCKS4("socks4"),
+    SOCKS5("socks5")
+}
+
 data class IndexerResult(
     val title:     String,
     val magnet:    String,

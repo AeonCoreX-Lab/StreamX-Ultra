@@ -49,6 +49,8 @@ import androidx.navigation.NavController
 import com.aeoncorex.streamx.R
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.Scope
+import com.google.api.services.drive.DriveScopes
 import com.google.firebase.auth.*
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
@@ -412,9 +414,22 @@ fun AuthFooter(promptText: String, actionText: String, onActionClick: () -> Unit
     ) { res -> scope.launch { handleGoogleSignInResult(res, onSuccess, onError) } }
 
     val googleClient = remember {
+        // ADDED: Drive appdata scope, alongside the existing Firebase
+        // Auth sign-in this app already had. This reuses the SAME OAuth
+        // client (google-services.json / Firebase project) already
+        // configured for sign-in — no separate Google Cloud Console
+        // setup was needed, since Firebase Auth's Google provider is
+        // backed by the same underlying OAuth client ID. The
+        // drive.appdata scope grants access ONLY to a hidden,
+        // app-private folder in the user's Drive (not visible in their
+        // regular Drive UI, not readable by other apps) — used to back
+        // up proxy settings (and future settings, e.g. private-tracker
+        // credentials) across devices. See BackupManager.kt.
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestIdToken(context.getString(R.string.default_web_client_id))
-            .requestEmail().build()
+            .requestEmail()
+            .requestScopes(Scope(DriveScopes.DRIVE_APPDATA))
+            .build()
         GoogleSignIn.getClient(context, gso)
     }
 

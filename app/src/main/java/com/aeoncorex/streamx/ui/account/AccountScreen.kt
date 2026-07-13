@@ -193,6 +193,7 @@ fun AccountScreen(navController: NavController) {
                 }
                 InfoCard("Connected Email",  email,        Icons.Default.Email)
                 InfoCard("Auth Provider",    providerName, Icons.Default.VpnKey)
+                BackupStatusCard()
 
                 // ── Copyable Firebase UID (for Gumroad custom field) ──
                 user?.uid?.let { uid ->
@@ -480,6 +481,44 @@ private fun InfoCard(title: String, subtitle: String, icon: ImageVector) {
             Spacer(Modifier.width(16.dp))
             Column {
                 Text(title.uppercase(),  fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                Text(subtitle, fontSize = 16.sp, color = Color.White.copy(0.7f), fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
+// ── Real-time Google Drive backup status ───────────────────────────
+// Reflects com.aeoncorex.streamx.backup.BackupManager.status, updated
+// automatically whenever ProxySettingsStore.save() (or any future
+// settings store wired the same way) triggers a background sync — see
+// BackupManager.kt's doc comment for the full design. This card needs
+// no manual refresh; it's driven live by the StateFlow.
+@Composable
+private fun BackupStatusCard() {
+    val status by com.aeoncorex.streamx.backup.BackupManager.status.collectAsState()
+
+    val (subtitle, icon, tint) = when (val s = status) {
+        is com.aeoncorex.streamx.backup.BackupStatus.Idle ->
+            Triple("Not yet synced", Icons.Default.CloudOff, Color.Gray)
+        is com.aeoncorex.streamx.backup.BackupStatus.Syncing ->
+            Triple("Syncing…", Icons.Default.Sync, Color(0xFFFFC107))
+        is com.aeoncorex.streamx.backup.BackupStatus.Synced -> {
+            val time = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(s.atMillis))
+            Triple("Synced · $time", Icons.Default.CloudDone, Color(0xFF4CAF50))
+        }
+        is com.aeoncorex.streamx.backup.BackupStatus.Failed ->
+            Triple("Sync failed: ${s.reason}", Icons.Default.CloudOff, Color(0xFFFF5252))
+    }
+
+    Box(
+        Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(16.dp))
+            .background(Color.White.copy(0.03f)).border(1.dp, Color.White.copy(0.05f), RoundedCornerShape(16.dp)).padding(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = tint, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.width(16.dp))
+            Column {
+                Text("SETTINGS BACKUP", fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
                 Text(subtitle, fontSize = 16.sp, color = Color.White.copy(0.7f), fontWeight = FontWeight.Medium)
             }
         }
