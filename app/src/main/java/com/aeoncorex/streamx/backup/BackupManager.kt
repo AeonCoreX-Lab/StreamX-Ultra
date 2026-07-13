@@ -4,9 +4,9 @@ import android.accounts.Account
 import android.content.Context
 import android.util.Log
 import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.api.client.extensions.android.http.AndroidHttp
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.http.ByteArrayContent
+import com.google.api.client.http.javanet.NetHttpTransport
 import com.google.api.client.json.gson.GsonFactory
 import com.google.api.services.drive.Drive
 import com.google.api.services.drive.DriveScopes
@@ -193,7 +193,7 @@ object BackupManager {
         ).apply { selectedAccount = account as Account }
 
         return Drive.Builder(
-            AndroidHttp.newCompatibleTransport(),
+            NetHttpTransport(),
             GsonFactory.getDefaultInstance(),
             credential
         ).setApplicationName("StreamX Ultra").build()

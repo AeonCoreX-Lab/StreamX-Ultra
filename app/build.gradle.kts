@@ -377,13 +377,18 @@ dependencies {
     // .requestScopes(DriveScopes.DRIVE_APPDATA)). exclude httpclient
     // (Apache) since google-api-client pulls in a version that conflicts
     // with what's already resolved elsewhere in this project; the
-    // android variant + OkHttp transport (used explicitly in
-    // BackupManager.kt) doesn't need it.
+    // android variant + java.net (NetHttpTransport, used explicitly in
+    // BackupManager.kt) doesn't need it. NOTE: google-api-client-android
+    // 2.x no longer ships extensions.android.http.AndroidHttp (removed
+    // upstream) — google-http-client-gson's NetHttpTransport is the
+    // supported replacement and is declared explicitly below since it's
+    // referenced directly in code, not just pulled transitively.
     implementation("com.google.api-client:google-api-client-android:2.7.0") {
         exclude(group = "org.apache.httpcomponents")
     }
     implementation("com.google.apis:google-api-services-drive:v3-rev20260624-2.0.0")
     implementation("com.google.http-client:google-http-client-gson:1.47.0")
+    implementation("com.google.http-client:google-http-client:1.47.0")
     implementation("com.google.protobuf:protobuf-javalite:$protobufVersion")
 
     // Media3 ExoPlayer
