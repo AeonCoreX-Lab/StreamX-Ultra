@@ -25,9 +25,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.google.firebase.Firebase
+import com.aeoncorex.streamx.data.FirestoreDb
 import com.google.firebase.firestore.Query
-import com.google.firebase.firestore.firestore
 
 data class Announcement(
     val id:          String  = "",
@@ -50,12 +49,16 @@ fun AnnouncementBanner() {
     val now = remember { System.currentTimeMillis() }
 
     DisposableEffect(Unit) {
-        val listener = Firebase.firestore
+        val listener = FirestoreDb.instance
             .collection("announcements")
             .whereEqualTo("active", true)
             .orderBy("ts", Query.Direction.DESCENDING)
             .limit(5)
-            .addSnapshotListener { snapshot, _ ->
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    android.util.Log.e("AnnouncementBanner", "Firestore listen failed", error)
+                    return@addSnapshotListener
+                }
                 announcements = snapshot?.documents?.mapNotNull { doc ->
                     try {
                         Announcement(

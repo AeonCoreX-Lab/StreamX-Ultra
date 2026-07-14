@@ -27,10 +27,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.aeoncorex.streamx.data.FirestoreDb
 import com.aeoncorex.streamx.ui.announcement.Announcement
-import com.google.firebase.Firebase
 import com.google.firebase.firestore.Query
-import com.google.firebase.firestore.firestore
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -77,14 +76,27 @@ fun NotificationsScreen() {
         prefs.edit().putStringSet("read_ids", allIds).apply()
     }
 
+    var loadError    by remember { mutableStateOf<String?>(null) }
+
     // Real-time Firestore — all announcements (active + inactive), newest first
     DisposableEffect(Unit) {
-        val listener = Firebase.firestore
+        val currentUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+        android.util.Log.d("NotificationsScreen", "Attaching listener. authUid=${currentUser?.uid ?: "NULL (not signed in)"}")
+
+        val listener = FirestoreDb.instance
             .collection("announcements")
             .orderBy("ts", Query.Direction.DESCENDING)
             .limit(50)
-            .addSnapshotListener { snapshot, _ ->
+            .addSnapshotListener { snapshot, error ->
                 isLoading = false
+                if (error != null) {
+                    android.util.Log.e("NotificationsScreen", "Firestore listener error: ${error.code} — ${error.message}", error)
+                    loadError = "${error.code}: ${error.message}"
+                    notifications = emptyList()
+                    return@addSnapshotListener
+                }
+                loadError = null
+                android.util.Log.d("NotificationsScreen", "Snapshot received. docCount=${snapshot?.size() ?: 0}")
                 notifications = snapshot?.documents?.mapNotNull { doc ->
                     try {
                         Announcement(
@@ -100,7 +112,10 @@ fun NotificationsScreen() {
                             expiresAt   = doc.getLong("expiresAt"),
                             ts          = doc.getLong("ts")            ?: 0L,
                         )
-                    } catch (_: Exception) { null }
+                    } catch (e: Exception) {
+                        android.util.Log.e("NotificationsScreen", "Failed to parse doc ${doc.id}: ${e.message}")
+                        null
+                    }
                 } ?: emptyList()
             }
         onDispose { listener.remove() }
@@ -462,10 +477,14 @@ fun rememberUnreadCount(): State<Int> {
     var count   by remember { mutableIntStateOf(0) }
 
     DisposableEffect(Unit) {
-        val listener = Firebase.firestore
+        val listener = FirestoreDb.instance
             .collection("announcements")
             .whereEqualTo("active", true)
-            .addSnapshotListener { snapshot, _ ->
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    android.util.Log.e("NotificationsScreen", "Unread count listener error", error)
+                    return@addSnapshotListener
+                }
                 val readIds = prefs.getStringSet("read_ids", emptySet()) ?: emptySet()
                 count = snapshot?.documents?.count { doc -> !readIds.contains(doc.id) } ?: 0
             }

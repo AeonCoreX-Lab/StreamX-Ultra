@@ -28,7 +28,7 @@ android {
         applicationId = "com.aeoncorex.streamx"
         minSdk = 28
         targetSdk = 35
-        versionCode = 5
+        versionCode = 4
         versionName = "1.2.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }

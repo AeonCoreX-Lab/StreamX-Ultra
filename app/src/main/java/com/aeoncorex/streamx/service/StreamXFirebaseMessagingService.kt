@@ -9,9 +9,9 @@ import android.graphics.Color
 import androidx.core.app.NotificationCompat
 import com.aeoncorex.streamx.MainActivity
 import com.aeoncorex.streamx.R
+import com.aeoncorex.streamx.data.FirestoreDb
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
-import com.google.firebase.firestore.firestore
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 
@@ -41,7 +41,7 @@ class StreamXFirebaseMessagingService : FirebaseMessagingService() {
         super.onNewToken(token)
         // Save FCM token to Firestore for user targeting
         val uid = Firebase.auth.currentUser?.uid ?: return
-        Firebase.firestore.collection("users").document(uid)
+        FirestoreDb.instance.collection("users").document(uid)
             .update(mapOf("fcmToken" to token, "fcmUpdatedAt" to System.currentTimeMillis()))
             .addOnFailureListener { /* ignore — non-critical */ }
     }
