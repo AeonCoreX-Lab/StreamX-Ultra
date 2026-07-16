@@ -26,10 +26,12 @@ add_library(streamx_core STATIC IMPORTED)
 set_target_properties(streamx_core PROPERTIES IMPORTED_LOCATION "${RUST_LIB_FILE}")
 
 # ── TMDB key injection ────────────────────────────────────────────────
-if (DEFINED TMDB_API_KEY)
-    add_definitions(-DTMDB_API_KEY="${TMDB_API_KEY}")
-    message(STATUS "TMDB API Key injected into CMake")
-endif()
+# REMOVED (metadata-cache Worker migration): this was already dead code
+# before today — no .cpp/.hpp file in this project ever read the
+# TMDB_API_KEY preprocessor macro this defined. The app's real TMDB key
+# handling was entirely on the Rust/Kotlin side (also removed — see
+# lib.rs and MoviePlayerScreen.kt). Left as a comment so it's clear this
+# wasn't accidentally dropped.
 
 # ── MPV and Internal Include Paths ────────────────────────────────────
 set(MPV_INCLUDE_BASE "${CMAKE_SOURCE_DIR}/include")

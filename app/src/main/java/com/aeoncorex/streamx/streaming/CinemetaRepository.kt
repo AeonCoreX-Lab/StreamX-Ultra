@@ -8,18 +8,23 @@ import org.json.JSONObject
 // ═════════════════════════════════════════════════════════════════════════════
 //  CinemetaRepository.kt
 //  ─────────────────────────────────────────────────────────────────────────
-//  Free Stremio metadata API — no API key required.
-//  Endpoint: https://v3-cinemeta.strem.io/meta/{type}/{imdbId}.json
+//  Cinemeta metadata, now routed through the StreamX metadata-cache Worker
+//  instead of hitting v3-cinemeta.strem.io directly. Same rationale as the
+//  TMDB migration in MovieRepository.kt: every user sharing one Worker-side
+//  KV cache means far fewer (and far more resilient) upstream calls than
+//  each device calling Cinemeta independently with only a local, per-session
+//  in-memory cache.
 //
-//  NEW: Added getPerson() method for person/actor metadata fallback
-//  Endpoint: https://v3-cinemeta.strem.io/search?type=person&query={name}
+//  Worker routes used:
+//    GET /cinemeta/meta/{type}/{imdbId}
+//    GET /cinemeta/person?name={name}
 // ═════════════════════════════════════════════════════════════════════════════
 object CinemetaRepository {
 
     private const val TAG      = "CinemetaRepo"
-    private const val BASE_URL = "https://v3-cinemeta.strem.io/meta"
-    private const val SEARCH_URL = "https://v3-cinemeta.strem.io/search"
-    private const val TTL_MS   = 30 * 60 * 1_000L   // 30 min in-memory
+    private val WORKER_BASE get() =
+        com.aeoncorex.streamx.BuildConfig.METADATA_WORKER_URL.trimEnd('/')
+    private const val TTL_MS   = 30 * 60 * 1_000L   // 30 min in-memory (in ADDITION to Worker's KV cache — avoids a network round-trip entirely for repeat views within one app session)
 
     // In-memory cache: imdbId → (data, timestamp)
     private val cache = HashMap<String, Pair<CinemetaMeta, Long>>()
@@ -29,7 +34,7 @@ object CinemetaRepository {
     // ── Public API ────────────────────────────────────────────────────────────
 
     /**
-     * Fetch enriched metadata from Cinemeta by IMDB ID.
+     * Fetch enriched metadata from Cinemeta by IMDB ID (via the metadata Worker).
      */
     suspend fun get(imdbId: String, type: String): CinemetaMeta? = withContext(Dispatchers.IO) {
         if (imdbId.isBlank() || !imdbId.startsWith("tt")) return@withContext null
@@ -42,12 +47,11 @@ object CinemetaRepository {
         }
 
         val typeStr = if (type.equals("movie", true)) "movie" else "series"
-        val url     = "$BASE_URL/$typeStr/$imdbId.json"
+        val url     = "$WORKER_BASE/cinemeta/meta/$typeStr/$imdbId"
 
         Log.d(TAG, "Fetching: $url")
         val json = HttpClient.getJson(url, mapOf(
-            "Referer"    to "https://web.strem.io/",
-            "Origin"     to "https://web.strem.io"
+            "X-App-Auth" to com.aeoncorex.streamx.BuildConfig.WORKER_AUTH_SECRET
         )) ?: return@withContext null
 
         val parsed = parse(json) ?: return@withContext null
@@ -57,7 +61,7 @@ object CinemetaRepository {
     }
 
     /**
-     * NEW: Search person by name on Cinemeta.
+     * Search person by name (via the metadata Worker).
      * Returns basic person info + their known movies from search results.
      */
     suspend fun getPerson(name: String): CinemetaPerson? = withContext(Dispatchers.IO) {
@@ -70,14 +74,12 @@ object CinemetaRepository {
             return@withContext cached.first
         }
 
-        // Search for person via Cinemeta search
         val encodedName = java.net.URLEncoder.encode(name, "UTF-8")
-        val url = "$SEARCH_URL?type=person&query=$encodedName"
+        val url = "$WORKER_BASE/cinemeta/person?name=$encodedName"
 
         Log.d(TAG, "Fetching person: $url")
         val json = HttpClient.getJson(url, mapOf(
-            "Referer" to "https://web.strem.io/",
-            "Origin"  to "https://web.strem.io"
+            "X-App-Auth" to com.aeoncorex.streamx.BuildConfig.WORKER_AUTH_SECRET
         )) ?: return@withContext null
 
         val parsed = parsePerson(json, name) ?: return@withContext null

@@ -218,12 +218,18 @@ jobs:
 
       # ── Gradle build: auto-triggers CargoBuildTask → cargo ndk ─────────────
       # CargoBuildTask reads VCPKG_ROOT and sets OPENSSL_DIR automatically
+      #
+      # NOTE: TMDB_API_KEY is no longer read by the app (metadata-cache Worker
+      # migration — see cf-worker/). It's intentionally left out here; the
+      # GitHub secret can be deleted once you've confirmed the Worker is live
+      # and no build path still depends on it.
       - name: Build Debug APK
         env:
-          VCPKG_ROOT:       ${{ github.workspace }}/vcpkg
-          TMDB_API_KEY:     ${{ secrets.TMDB_API_KEY }}
-          STARTAPP_APP_ID:  ${{ secrets.STARTAPP_APP_ID }}
-          BACKEND_BASE_URL: ${{ secrets.BACKEND_BASE_URL}}
+          VCPKG_ROOT:           ${{ github.workspace }}/vcpkg
+          STARTAPP_APP_ID:      ${{ secrets.STARTAPP_APP_ID }}
+          BACKEND_BASE_URL:     ${{ secrets.BACKEND_BASE_URL }}
+          METADATA_WORKER_URL:  ${{ secrets.METADATA_WORKER_URL }}
+          WORKER_AUTH_SECRET:   ${{ secrets.WORKER_AUTH_SECRET }}
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload Debug APK

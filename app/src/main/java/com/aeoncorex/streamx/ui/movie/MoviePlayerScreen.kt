@@ -154,7 +154,9 @@ object StreamXCore {
         }
     }
 
-    @JvmStatic external fun getTmdbKey(): String
+    // getTmdbKey() removed — TMDB requests now go through the metadata-cache
+    // Worker (see MovieRepository.kt), which holds the TMDB key server-side.
+    // The app no longer needs a local key vault.
     @JvmStatic external fun initMpvEngine(appctx: Any?)
     @JvmStatic external fun playMpvVideo(path: String)
     @JvmStatic external fun setMpvSurface(surface: Surface?)

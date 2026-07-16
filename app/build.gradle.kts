@@ -33,13 +33,23 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
 
-        val tmdbApiKey   = System.getenv("TMDB_API_KEY")       ?: "api_key_not_found"
         val startappId   = System.getenv("STARTAPP_APP_ID")    ?: "0"
         val vercelUrl    = System.getenv("BACKEND_BASE_URL")   ?: ""
+        // Metadata-cache Worker (replaces direct TMDB/Cinemeta calls — see
+        // cf-worker/ project). Trailing slash required since Retrofit's
+        // baseUrl must end with "/".
+        //
+        // TMDB_API_KEY removed from here: it's no longer read by any Kotlin
+        // or Rust code (previously StreamXCore.getTmdbKey() / MovieRepository's
+        // Retrofit calls). The real TMDB key now lives ONLY as a Cloudflare
+        // Worker secret (never compiled into the APK) — see cf-worker/README.md.
+        val workerUrl    = System.getenv("METADATA_WORKER_URL") ?: ""
+        val workerAuth   = System.getenv("WORKER_AUTH_SECRET")  ?: ""
 
-        buildConfigField("String", "TMDB_API_KEY",    "\"$tmdbApiKey\"")
         buildConfigField("String", "STARTAPP_APP_ID", "\"$startappId\"")
         buildConfigField("String", "BACKEND_BASE_URL","\"$vercelUrl\"")
+        buildConfigField("String", "METADATA_WORKER_URL", "\"$workerUrl\"")
+        buildConfigField("String", "WORKER_AUTH_SECRET",  "\"$workerAuth\"")
 
         externalNativeBuild {
             cmake {
@@ -72,8 +82,9 @@ android {
                     "-DANDROID_STL=c++_shared",
                     "-DANDROID_PLATFORM=android-28",
                     "-D_FORTIFY_SOURCE=0",
-                    "-DRUST_BUILD_DIR=$rustBuildDir",
-                    "-DTMDB_API_KEY=$tmdbApiKey"
+                    "-DRUST_BUILD_DIR=$rustBuildDir"
+                    // -DTMDB_API_KEY removed: dead CMake variable, never read
+                    // by any .cpp/.hpp file (see CMakeLists.txt comment).
                 ) + opensslRootArgs
             }
         }
@@ -196,7 +207,10 @@ abstract class CargoBuildTask @Inject constructor(
     private val execOps: ExecOperations
 ) : DefaultTask() {
 
-    @get:Input abstract val tmdbApiKey:    Property<String>
+    // tmdbApiKey removed (metadata-cache Worker migration): the Rust build
+    // no longer needs TMDB_API_KEY injected as a compile-time env var,
+    // since lib.rs's getTmdbKey() JNI function was removed — TMDB requests
+    // now go through the metadata-cache Worker instead of a local key vault.
     @get:Input abstract val rustRootPath:  Property<String>
     @get:Input abstract val releaseBuild:  Property<Boolean>
     @get:OutputDirectory abstract val outputDir: DirectoryProperty
@@ -266,7 +280,6 @@ abstract class CargoBuildTask @Inject constructor(
 
             execOps.exec {
                 workingDir = rustRoot
-                environment("TMDB_API_KEY", tmdbApiKey.get())
                 environment("OPENSSL_DIR", opensslDir)
                 environment("OPENSSL_STATIC", "0")  // ← SHARED: avoids duplicate symbols with CMake
                 commandLine(buildList {
@@ -293,7 +306,6 @@ abstract class CargoBuildTask @Inject constructor(
 val cargoBuildDebugTask = tasks.register<CargoBuildTask>("cargoBuildDebug") {
     group       = "build"
     description = "Rust JNI — debug profile, arm64-v8a only (fast). Requires VCPKG_ROOT env var."
-    tmdbApiKey.set(System.getenv("TMDB_API_KEY") ?: "api_key_not_found")
     rustRootPath.set(file("src/main/rust").absolutePath)
     releaseBuild.set(false)
     outputDir.set(layout.buildDirectory.dir("rust/targets"))
@@ -303,7 +315,6 @@ val cargoBuildDebugTask = tasks.register<CargoBuildTask>("cargoBuildDebug") {
 val cargoBuildReleaseTask = tasks.register<CargoBuildTask>("cargoBuildRelease") {
     group       = "build"
     description = "Rust JNI — release profile, all 4 ABIs. Requires VCPKG_ROOT env var."
-    tmdbApiKey.set(System.getenv("TMDB_API_KEY") ?: "api_key_not_found")
     rustRootPath.set(file("src/main/rust").absolutePath)
     releaseBuild.set(true)
     outputDir.set(layout.buildDirectory.dir("rust/targets"))

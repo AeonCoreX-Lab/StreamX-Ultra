@@ -4,71 +4,57 @@ import android.util.Log
 import com.aeoncorex.streamx.streaming.CinemetaMeta
 import com.aeoncorex.streamx.streaming.CinemetaPerson
 import com.aeoncorex.streamx.streaming.CinemetaRepository
-import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.tasks.await
-import org.json.JSONObject
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
-import java.net.HttpURLConnection
-import java.net.URL
 
 // ── TMDB Retrofit interface ────────────────────────────────────────────────────
+// NOTE: as of the metadata-cache Worker migration, this interface no longer
+// talks to api.themoviedb.org directly. It talks to our Cloudflare Worker
+// (see WORKER_BASE_URL below), which caches responses in KV and forwards
+// cache misses to TMDB using a server-side-only key. No api_key query param
+// here anymore — the Worker injects it, the app never holds a TMDB key.
 interface TmdbApi {
-    @GET("3/trending/all/day")
-    suspend fun getTrending(@Query("api_key") apiKey: String): TmdbResponse
+    @GET("tmdb/trending")
+    suspend fun getTrending(): TmdbResponse
 
-    @GET("3/movie/popular")
-    suspend fun getPopularMovies(@Query("api_key") apiKey: String): TmdbResponse
+    @GET("tmdb/movies/popular")
+    suspend fun getPopularMovies(): TmdbResponse
 
-    @GET("3/tv/top_rated")
-    suspend fun getTopRatedSeries(@Query("api_key") apiKey: String): TmdbResponse
+    @GET("tmdb/series/top-rated")
+    suspend fun getTopRatedSeries(): TmdbResponse
 
-    @GET("3/discover/movie")
-    suspend fun getActionMovies(
-        @Query("api_key") apiKey: String,
-        @Query("with_genres") genre: String = "28"
-    ): TmdbResponse
+    @GET("tmdb/movies/action")
+    suspend fun getActionMovies(): TmdbResponse
 
-    @GET("3/discover/movie")
-    suspend fun getSciFiMovies(
-        @Query("api_key") apiKey: String,
-        @Query("with_genres") genre: String = "878"
-    ): TmdbResponse
+    @GET("tmdb/movies/scifi")
+    suspend fun getSciFiMovies(): TmdbResponse
 
-    @GET("3/search/multi")
-    suspend fun searchMulti(
-        @Query("api_key") apiKey: String,
-        @Query("query") query: String
-    ): TmdbResponse
+    @GET("tmdb/search")
+    suspend fun searchMulti(@Query("q") query: String): TmdbResponse
 
-    @GET("3/{type}/{id}")
+    @GET("tmdb/details/{type}/{id}")
     suspend fun getDetails(
         @Path("type") type: String,
-        @Path("id") id: Int,
-        @Query("api_key") apiKey: String,
-        @Query("append_to_response") append: String =
-            "credits,videos,recommendations,external_ids,seasons"
+        @Path("id") id: Int
     ): MovieDetailResponse
 
-    @GET("3/tv/{id}/season/{season_number}")
+    @GET("tmdb/season/{id}/{season_number}")
     suspend fun getSeasonDetails(
         @Path("id") seriesId: Int,
-        @Path("season_number") seasonNumber: Int,
-        @Query("api_key") apiKey: String
+        @Path("season_number") seasonNumber: Int
     ): SeasonDetailResponse
 
-    @GET("3/person/{person_id}")
+    @GET("tmdb/person/{person_id}")
     suspend fun getPersonDetails(
-        @Path("person_id") personId: Int,
-        @Query("api_key") apiKey: String,
-        @Query("append_to_response") appendTo: String = "combined_credits,external_ids"
+        @Path("person_id") personId: Int
     ): PersonApiResponse
 }
+
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  MovieRepository — v4   Dual Engine: TMDB primary + Cinemeta enrichment
@@ -105,14 +91,6 @@ object MovieRepository {
     private const val TAG               = "MovieRepo"
     private const val IMAGE_BASE_URL    = "https://image.tmdb.org/t/p/w500"
     private const val BACKDROP_BASE_URL = "https://image.tmdb.org/t/p/original"
-    private const val CACHE_TTL_MS      = 3_600_000L   // 1 hour
-
-    private val VERCEL_TMDB_ENDPOINT get() =
-        "${com.aeoncorex.streamx.BuildConfig.BACKEND_BASE_URL}/api/tmdb-key"
-
-    // ── Key cache ──────────────────────────────────────────────────────────
-    private var cachedKey:     String = ""
-    private var cacheLoadedAt: Long   = 0L
 
     // ── Cross-session lookup caches ────────────────────────────────────────
     // movieId → imdbId (so episode fallback can find imdbId without re-fetching)
@@ -120,56 +98,36 @@ object MovieRepository {
     // personId → name (so Cinemeta person fallback can search by name)
     private val tmdbPersonNameCache  = mutableMapOf<Int, String>()
 
+    // ══════════════════════════════════════════════════════════════════════
+    //  Metadata Worker — replaces direct TMDB calls
+    //  ─────────────────────────────────────────────
+    //  All TMDB traffic now goes through our Cloudflare Worker
+    //  (streamx-metadata-cache), which caches responses in KV and holds
+    //  the real TMDB API key server-side only. The app never sees a TMDB
+    //  key anymore — the old 3-layer key resolution (Rust vault → Vercel
+    //  backend → fail) is gone, replaced by a single shared-secret header
+    //  that just proves requests are coming from our app (not a scraper).
+    //
+    //  BuildConfig.METADATA_WORKER_URL   e.g. "https://streamx-metadata-cache.YOUR-SUBDOMAIN.workers.dev/"
+    //  BuildConfig.WORKER_AUTH_SECRET     must match the Worker's WORKER_AUTH_SECRET secret
+    // ══════════════════════════════════════════════════════════════════════
+    private val authInterceptor = okhttp3.Interceptor { chain ->
+        val request = chain.request().newBuilder()
+            .addHeader("X-App-Auth", com.aeoncorex.streamx.BuildConfig.WORKER_AUTH_SECRET)
+            .build()
+        chain.proceed(request)
+    }
+
+    private val okHttpClient = okhttp3.OkHttpClient.Builder()
+        .addInterceptor(authInterceptor)
+        .build()
+
     private val api = Retrofit.Builder()
-        .baseUrl("https://api.themoviedb.org/")
+        .baseUrl(com.aeoncorex.streamx.BuildConfig.METADATA_WORKER_URL)
+        .client(okHttpClient)
         .addConverterFactory(GsonConverterFactory.create())
         .build()
         .create(TmdbApi::class.java)
-
-    // ══════════════════════════════════════════════════════════════════════
-    //  API Key — 3-layer resolution
-    //  Layer 1: Rust JNI vault (.so, obfuscated, instant)
-    //  Layer 2: Vercel /api/tmdb-key (Firebase token auth)
-    //  Layer 3: Failure — return empty, degrade gracefully
-    // ══════════════════════════════════════════════════════════════════════
-    private suspend fun getApiKey(): String = withContext(Dispatchers.IO) {
-        val now = System.currentTimeMillis()
-        if (cachedKey.isNotEmpty() && cachedKey != "api_key_not_found"
-            && now - cacheLoadedAt < CACHE_TTL_MS) return@withContext cachedKey
-
-        val rustKey = try { StreamXCore.getTmdbKey() }
-                      catch (e: Throwable) { Log.w(TAG, "Rust vault: ${e.message}"); "" }
-
-        if (rustKey.isNotEmpty() && rustKey != "api_key_not_found") {
-            cachedKey = rustKey; cacheLoadedAt = now
-            return@withContext cachedKey
-        }
-
-        val vercelKey = fetchKeyFromVercel()
-        if (vercelKey.isNotEmpty()) {
-            cachedKey = vercelKey; cacheLoadedAt = now
-            return@withContext cachedKey
-        }
-
-        Log.e(TAG, "All key sources failed — running in Cinemeta-only mode")
-        ""
-    }
-
-    private suspend fun fetchKeyFromVercel(): String = withContext(Dispatchers.IO) {
-        try {
-            val idToken = FirebaseAuth.getInstance().currentUser
-                ?.getIdToken(false)?.await()?.token ?: return@withContext ""
-            val conn = (URL(VERCEL_TMDB_ENDPOINT).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                setRequestProperty("Authorization", "Bearer $idToken")
-                connectTimeout = 8_000; readTimeout = 8_000
-            }
-            if (conn.responseCode == 200)
-                JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-                    .optString("key").ifBlank { "" }
-            else { Log.w(TAG, "Vercel key: HTTP ${conn.responseCode}"); "" }
-        } catch (e: Exception) { Log.e(TAG, "Vercel key: ${e.message}"); "" }
-    }
 
     // ── DTO → Movie helper ─────────────────────────────────────────────────
     private fun mapToMovie(dto: MovieDto) = Movie(
@@ -184,35 +142,30 @@ object MovieRepository {
     )
 
     private suspend fun safeApiCall(
-        call: suspend (String) -> TmdbResponse
+        call: suspend () -> TmdbResponse
     ): List<Movie> = withContext(Dispatchers.IO) {
-        val key = getApiKey()
-        if (key.isEmpty()) return@withContext emptyList()
-        try { call(key).results.filter { it.posterPath != null }.map { mapToMovie(it) } }
+        try { call().results.filter { it.posterPath != null }.map { mapToMovie(it) } }
         catch (e: Exception) { Log.e(TAG, "API call: ${e.message}"); emptyList() }
     }
 
     // ── Public listing API ─────────────────────────────────────────────────
-    suspend fun getTrending()           = safeApiCall { api.getTrending(it) }
-    suspend fun getPopularMovies()      = safeApiCall { api.getPopularMovies(it) }
-    suspend fun getTopSeries()          = safeApiCall { api.getTopRatedSeries(it) }
-    suspend fun getActionMovies()       = safeApiCall { api.getActionMovies(it) }
-    suspend fun getSciFiMovies()        = safeApiCall { api.getSciFiMovies(it) }
-    suspend fun searchMovies(q: String) = safeApiCall { api.searchMulti(it, q) }
+    suspend fun getTrending()           = safeApiCall { api.getTrending() }
+    suspend fun getPopularMovies()      = safeApiCall { api.getPopularMovies() }
+    suspend fun getTopSeries()          = safeApiCall { api.getTopRatedSeries() }
+    suspend fun getActionMovies()       = safeApiCall { api.getActionMovies() }
+    suspend fun getSciFiMovies()        = safeApiCall { api.getSciFiMovies() }
+    suspend fun searchMovies(q: String) = safeApiCall { api.searchMulti(q) }
 
     // ══════════════════════════════════════════════════════════════════════
     //  getFullDetails — dual engine merge
     // ══════════════════════════════════════════════════════════════════════
     suspend fun getFullDetails(movieId: Int, type: MovieType): FullMovieDetails? =
         withContext(Dispatchers.IO) {
-            val key     = getApiKey()
             val typeStr = if (type == MovieType.MOVIE) "movie" else "tv"
 
-            // ── 1. TMDB fetch (may be null if key empty or network fail) ──
-            val tmdb = if (key.isNotEmpty()) {
-                try { api.getDetails(typeStr, movieId, key) }
-                catch (e: Exception) { Log.e(TAG, "TMDB detail: ${e.message}"); null }
-            } else null
+            // ── 1. TMDB fetch (via Worker; may be null on network/upstream fail) ──
+            val tmdb = try { api.getDetails(typeStr, movieId) }
+                       catch (e: Exception) { Log.e(TAG, "TMDB detail: ${e.message}"); null }
 
             // ── 2. Cache imdbId from TMDB response ────────────────────────
             val imdbId = tmdb?.external_ids?.imdbId
@@ -411,16 +364,12 @@ object MovieRepository {
     // ══════════════════════════════════════════════════════════════════════
     suspend fun getEpisodes(seriesId: Int, seasonNumber: Int): List<EpisodeDto> =
         withContext(Dispatchers.IO) {
-            val key = getApiKey()
-
-            // Try TMDB first
-            if (key.isNotEmpty()) {
-                try {
-                    val resp = api.getSeasonDetails(seriesId, seasonNumber, key)
-                    if (!resp.episodes.isNullOrEmpty()) return@withContext resp.episodes
-                } catch (e: Exception) {
-                    Log.e(TAG, "TMDB episodes: ${e.localizedMessage}")
-                }
+            // Try TMDB first (via Worker)
+            try {
+                val resp = api.getSeasonDetails(seriesId, seasonNumber)
+                if (!resp.episodes.isNullOrEmpty()) return@withContext resp.episodes
+            } catch (e: Exception) {
+                Log.e(TAG, "TMDB episodes: ${e.localizedMessage}")
             }
 
             // Cinemeta fallback using cached imdbId
@@ -462,19 +411,15 @@ object MovieRepository {
                 return@withContext null
             }
 
-            val key = getApiKey()
-
-            // ── 1. TMDB ───────────────────────────────────────────────────
-            val tmdbPerson = if (key.isNotEmpty()) {
-                try {
-                    val r = api.getPersonDetails(personId, key)
-                    tmdbPersonNameCache[personId] = r.name   // cache for Cinemeta fallback
-                    r
-                } catch (e: Exception) {
-                    Log.e(TAG, "TMDB person $personId: ${e.localizedMessage}")
-                    null
-                }
-            } else null
+            // ── 1. TMDB (via Worker) ─────────────────────────────────────
+            val tmdbPerson = try {
+                val r = api.getPersonDetails(personId)
+                tmdbPersonNameCache[personId] = r.name   // cache for Cinemeta fallback
+                r
+            } catch (e: Exception) {
+                Log.e(TAG, "TMDB person $personId: ${e.localizedMessage}")
+                null
+            }
 
             // ── 2. Build from TMDB ────────────────────────────────────────
             if (tmdbPerson != null) {

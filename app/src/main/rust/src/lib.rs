@@ -6,7 +6,7 @@
 //  torrent functions. TorrentEngine.kt and StreamXCore don't change.
 //
 //  Functions provided:
-//    ① TMDB key (already existed)
+//    ① (removed) TMDB key — now served by the metadata-cache Worker instead
 //    ② Torrent JNI  → replaces C++ TorrentSystem / torrent-engine.cpp
 //    ③ Addon HTTP transport → nativeAddonFetchStreams
 //    ④ JS provider engine (QuickJS) → nativeExecuteJsStream (NEW)
@@ -141,15 +141,19 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
 }
 
 // ── ① TMDB key ───────────────────────────────────────────────────────────────
-// Unchanged from previous lib.rs — StreamXCore.getTmdbKey() still works
-#[no_mangle]
-pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getTmdbKey<'a>(
-    env: JNIEnv<'a>,
-    _class: JClass<'a>,
-) -> jstring {
-    let key = option_env!("TMDB_API_KEY").unwrap_or("api_key_not_found");
-    env.new_string(key).expect("JNI string").into_raw()
-}
+// REMOVED (metadata-cache Worker migration): the app no longer calls TMDB
+// directly, so it no longer needs a local key vault. TMDB requests now go
+// through the streamx-metadata-cache Cloudflare Worker, which holds the
+// real TMDB key as a server-side secret (never compiled into the APK).
+// This is also a security improvement — the old approach embedded the key
+// in this .so at compile time, which is recoverable via reverse engineering
+// (strings/objdump on the .so); a server-side-only key isn't.
+//
+// StreamXCore.getTmdbKey() has been removed from the Kotlin side (see
+// MoviePlayerScreen.kt) — if you're looking for the old function, this is
+// where it used to live. Kept as a comment intentionally, not deleted
+// outright, so future readers of `git blame`/this file understand why a
+// second key delivery mechanism doesn't exist here anymore.
 
 // ── ② Torrent JNI — same names as C++ native-lib.cpp ────────────────────────
 
