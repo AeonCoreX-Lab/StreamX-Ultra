@@ -241,6 +241,13 @@ jobs:
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS:         ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD:      ${{ secrets.RELEASE_KEY_PASSWORD }}
+          
+          run: |
+          ./gradlew assembleRelease \
+            -PRELEASE_KEYSTORE_FILE=${{ env.RELEASE_KEYSTORE_FILE }} \
+            -PRELEASE_KEYSTORE_PASSWORD=${{ env.RELEASE_KEYSTORE_PASSWORD }} \
+            -PRELEASE_KEY_ALIAS=${{ env.RELEASE_KEY_ALIAS }} \
+            -PRELEASE_KEY_PASSWORD=${{ env.RELEASE_KEY_PASSWORD }}
 
       - name: Upload Release APK as Artifact
         uses: actions/upload-artifact@v4
