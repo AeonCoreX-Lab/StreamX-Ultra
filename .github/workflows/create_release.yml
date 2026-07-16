@@ -230,10 +230,6 @@ jobs:
       # ── Gradle build: auto-triggers CargoBuildTask → cargo ndk ─────────────
       # CargoBuildTask reads VCPKG_ROOT and sets OPENSSL_DIR automatically.
       # Rust feature fix (sha1-crypto-hash) lives in Cargo.toml — no change here.
-      #
-      # NOTE: TMDB_API_KEY is no longer read by the app (metadata-cache Worker
-      # migration — see cf-worker/). Delete the GitHub secret once you've
-      # confirmed the Worker is live and stable.
       - name: Build Signed Release APK
         env:
           VCPKG_ROOT:                ${{ github.workspace }}/vcpkg
@@ -245,12 +241,6 @@ jobs:
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS:         ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD:      ${{ secrets.RELEASE_KEY_PASSWORD }}
-        run: |
-          ./gradlew assembleRelease \
-            -PRELEASE_KEYSTORE_FILE=${{ env.RELEASE_KEYSTORE_FILE }} \
-            -PRELEASE_KEYSTORE_PASSWORD=${{ env.RELEASE_KEYSTORE_PASSWORD }} \
-            -PRELEASE_KEY_ALIAS=${{ env.RELEASE_KEY_ALIAS }} \
-            -PRELEASE_KEY_PASSWORD=${{ env.RELEASE_KEY_PASSWORD }}
 
       - name: Upload Release APK as Artifact
         uses: actions/upload-artifact@v4
