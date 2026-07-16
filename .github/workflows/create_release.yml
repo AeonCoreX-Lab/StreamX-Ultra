@@ -241,8 +241,7 @@ jobs:
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS:         ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD:      ${{ secrets.RELEASE_KEY_PASSWORD }}
-          
-          run: |
+        run: |
           ./gradlew assembleRelease \
             -PRELEASE_KEYSTORE_FILE=${{ env.RELEASE_KEYSTORE_FILE }} \
             -PRELEASE_KEYSTORE_PASSWORD=${{ env.RELEASE_KEYSTORE_PASSWORD }} \
@@ -284,3 +283,4 @@ jobs:
           body:     ${{ steps.build_changelog.outputs.changelog }}
         env:
           GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
+          
