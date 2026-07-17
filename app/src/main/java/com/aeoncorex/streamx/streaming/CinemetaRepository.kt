@@ -18,6 +18,9 @@ import org.json.JSONObject
 //  Worker routes used:
 //    GET /cinemeta/meta/{type}/{imdbId}
 //    GET /cinemeta/person?name={name}
+//
+//  AUTH: same Firebase ID token scheme as MovieRepository — see
+//  network/FirebaseTokenProvider.kt and the Worker's src/firebase-auth.js.
 // ═════════════════════════════════════════════════════════════════════════════
 object CinemetaRepository {
 
@@ -32,6 +35,34 @@ object CinemetaRepository {
     private val personCache = HashMap<String, Pair<CinemetaPerson, Long>>()
 
     // ── Public API ────────────────────────────────────────────────────────────
+
+    /**
+     * GET against the metadata Worker with a Firebase ID token attached,
+     * retrying once with a forced token refresh on a 401 — mirrors the
+     * retry policy in MovieRepository's OkHttp authInterceptor. Kept as
+     * a plain suspend helper here (rather than an OkHttp interceptor)
+     * since CinemetaRepository goes through the shared HttpClient.getJson,
+     * not its own Retrofit/OkHttp client.
+     */
+    private suspend fun authedGetJson(url: String): String? {
+        val token = com.aeoncorex.streamx.network.FirebaseTokenProvider.getIdToken()
+        val headers = if (token != null) mapOf("Authorization" to "Bearer $token") else emptyMap()
+
+        // HttpClient.getJson returns null both on network failure AND on a
+        // non-2xx response, so we can't distinguish "401" from "no network"
+        // from this call alone. Rather than widen HttpClient's return type
+        // (shared by scrapers/JS engine — out of scope here), we just retry
+        // once with a forced-fresh token whenever the first attempt failed
+        // and we had a token to refresh. A forced refresh is cheap (one
+        // Firebase call) and this only fires on the failure path, so it
+        // doesn't add cost to the normal success case.
+        val result = HttpClient.getJson(url, headers)
+        if (result != null || token == null) return result
+
+        val freshToken = com.aeoncorex.streamx.network.FirebaseTokenProvider.getIdToken(forceRefresh = true)
+            ?: return null
+        return HttpClient.getJson(url, mapOf("Authorization" to "Bearer $freshToken"))
+    }
 
     /**
      * Fetch enriched metadata from Cinemeta by IMDB ID (via the metadata Worker).
@@ -50,9 +81,7 @@ object CinemetaRepository {
         val url     = "$WORKER_BASE/cinemeta/meta/$typeStr/$imdbId"
 
         Log.d(TAG, "Fetching: $url")
-        val json = HttpClient.getJson(url, mapOf(
-            "X-App-Auth" to com.aeoncorex.streamx.BuildConfig.WORKER_AUTH_SECRET
-        )) ?: return@withContext null
+        val json = authedGetJson(url) ?: return@withContext null
 
         val parsed = parse(json) ?: return@withContext null
         cache[cacheKey] = Pair(parsed, System.currentTimeMillis())
@@ -78,9 +107,7 @@ object CinemetaRepository {
         val url = "$WORKER_BASE/cinemeta/person?name=$encodedName"
 
         Log.d(TAG, "Fetching person: $url")
-        val json = HttpClient.getJson(url, mapOf(
-            "X-App-Auth" to com.aeoncorex.streamx.BuildConfig.WORKER_AUTH_SECRET
-        )) ?: return@withContext null
+        val json = authedGetJson(url) ?: return@withContext null
 
         val parsed = parsePerson(json, name) ?: return@withContext null
         personCache[name] = Pair(parsed, System.currentTimeMillis())

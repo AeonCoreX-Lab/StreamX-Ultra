@@ -43,13 +43,18 @@ android {
         // or Rust code (previously StreamXCore.getTmdbKey() / MovieRepository's
         // Retrofit calls). The real TMDB key now lives ONLY as a Cloudflare
         // Worker secret (never compiled into the APK) — see cf-worker/README.md.
+        //
+        // WORKER_AUTH_SECRET removed (AUTH UPGRADE): the Worker no longer
+        // checks a static shared secret. Every request now carries a
+        // per-user Firebase ID token (Authorization: Bearer <token>),
+        // fetched at request time via FirebaseTokenProvider — nothing
+        // secret is compiled into the APK for this anymore. See
+        // network/FirebaseTokenProvider.kt and cf-worker/src/firebase-auth.js.
         val workerUrl    = System.getenv("METADATA_WORKER_URL") ?: ""
-        val workerAuth   = System.getenv("WORKER_AUTH_SECRET")  ?: ""
 
         buildConfigField("String", "STARTAPP_APP_ID", "\"$startappId\"")
         buildConfigField("String", "BACKEND_BASE_URL","\"$vercelUrl\"")
         buildConfigField("String", "METADATA_WORKER_URL", "\"$workerUrl\"")
-        buildConfigField("String", "WORKER_AUTH_SECRET",  "\"$workerAuth\"")
 
         externalNativeBuild {
             cmake {

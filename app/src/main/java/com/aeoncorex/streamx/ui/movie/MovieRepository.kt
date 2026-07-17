@@ -104,18 +104,54 @@ object MovieRepository {
     //  All TMDB traffic now goes through our Cloudflare Worker
     //  (streamx-metadata-cache), which caches responses in KV and holds
     //  the real TMDB API key server-side only. The app never sees a TMDB
-    //  key anymore — the old 3-layer key resolution (Rust vault → Vercel
-    //  backend → fail) is gone, replaced by a single shared-secret header
-    //  that just proves requests are coming from our app (not a scraper).
+    //  key anymore.
+    //
+    //  AUTH UPGRADE: the old static WORKER_AUTH_SECRET header (baked into
+    //  every APK build, never expires, can't be revoked without a new
+    //  release) is replaced with a per-request Firebase ID token:
+    //      Authorization: Bearer <firebase-id-token>
+    //  The Worker verifies this token's signature against Google's public
+    //  certs and validates its issuer/audience/expiry — see the Worker's
+    //  src/firebase-auth.js. Nothing secret ships inside the APK anymore.
     //
     //  BuildConfig.METADATA_WORKER_URL   e.g. "https://streamx-metadata-cache.YOUR-SUBDOMAIN.workers.dev/"
-    //  BuildConfig.WORKER_AUTH_SECRET     must match the Worker's WORKER_AUTH_SECRET secret
     // ══════════════════════════════════════════════════════════════════════
     private val authInterceptor = okhttp3.Interceptor { chain ->
-        val request = chain.request().newBuilder()
-            .addHeader("X-App-Auth", com.aeoncorex.streamx.BuildConfig.WORKER_AUTH_SECRET)
-            .build()
-        chain.proceed(request)
+        // OkHttp interceptors run on a background thread already (never the
+        // main thread — Retrofit's suspend calls dispatch through OkHttp's
+        // own dispatcher), so blocking here with runBlocking is safe and
+        // does not freeze the UI.
+        val token = kotlinx.coroutines.runBlocking {
+            com.aeoncorex.streamx.network.FirebaseTokenProvider.getIdToken()
+        }
+
+        val original = chain.request()
+        val requestWithAuth = if (token != null) {
+            original.newBuilder().addHeader("Authorization", "Bearer $token").build()
+        } else {
+            original // no signed-in user / token fetch failed — let it 401 naturally
+        }
+
+        val response = chain.proceed(requestWithAuth)
+
+        // Retry once with a forced token refresh if the Worker rejected us
+        // as unauthorized — covers the token-expired-mid-flight case
+        // (tokens live ~1h; a request that races the boundary shouldn't
+        // just fail outright) without retrying every other error type.
+        if (response.code == 401 && token != null) {
+            response.close()
+            val freshToken = kotlinx.coroutines.runBlocking {
+                com.aeoncorex.streamx.network.FirebaseTokenProvider.getIdToken(forceRefresh = true)
+            }
+            if (freshToken != null) {
+                val retryRequest = original.newBuilder()
+                    .addHeader("Authorization", "Bearer $freshToken")
+                    .build()
+                return@Interceptor chain.proceed(retryRequest)
+            }
+        }
+
+        response
     }
 
     private val okHttpClient = okhttp3.OkHttpClient.Builder()
