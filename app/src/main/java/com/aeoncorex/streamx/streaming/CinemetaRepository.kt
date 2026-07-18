@@ -25,9 +25,17 @@ import org.json.JSONObject
 object CinemetaRepository {
 
     private const val TAG      = "CinemetaRepo"
-    private val WORKER_BASE get() =
-        com.aeoncorex.streamx.BuildConfig.METADATA_WORKER_URL.trimEnd('/')
+    // NOTE: no longer a static val — see resolveBaseUrl() below. The
+    // Worker's actual URL is resolved once per session via
+    // MetadataConfig (which itself falls back to
+    // BuildConfig.METADATA_WORKER_URL if /config can't be reached),
+    // rather than reading BuildConfig.METADATA_WORKER_URL directly here.
+    // This is what lets the Worker's real URL change in the future
+    // without needing an app update — see MetadataConfig.kt.
     private const val TTL_MS   = 30 * 60 * 1_000L   // 30 min in-memory (in ADDITION to Worker's KV cache — avoids a network round-trip entirely for repeat views within one app session)
+
+    private suspend fun resolveBaseUrl(): String =
+        com.aeoncorex.streamx.network.MetadataConfig.getMetadataBaseUrl().trimEnd('/')
 
     // In-memory cache: imdbId → (data, timestamp)
     private val cache = HashMap<String, Pair<CinemetaMeta, Long>>()
@@ -78,7 +86,7 @@ object CinemetaRepository {
         }
 
         val typeStr = if (type.equals("movie", true)) "movie" else "series"
-        val url     = "$WORKER_BASE/cinemeta/meta/$typeStr/$imdbId"
+        val url     = "${resolveBaseUrl()}/cinemeta/meta/$typeStr/$imdbId"
 
         Log.d(TAG, "Fetching: $url")
         val json = authedGetJson(url) ?: return@withContext null
@@ -104,7 +112,7 @@ object CinemetaRepository {
         }
 
         val encodedName = java.net.URLEncoder.encode(name, "UTF-8")
-        val url = "$WORKER_BASE/cinemeta/person?name=$encodedName"
+        val url = "${resolveBaseUrl()}/cinemeta/person?name=$encodedName"
 
         Log.d(TAG, "Fetching person: $url")
         val json = authedGetJson(url) ?: return@withContext null

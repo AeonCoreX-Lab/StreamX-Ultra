@@ -6,6 +6,7 @@ import com.aeoncorex.streamx.streaming.CinemetaPerson
 import com.aeoncorex.streamx.streaming.CinemetaRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
@@ -114,6 +115,15 @@ object MovieRepository {
     //  certs and validates its issuer/audience/expiry — see the Worker's
     //  src/firebase-auth.js. Nothing secret ships inside the APK anymore.
     //
+    //  URL INDIRECTION: Retrofit is built once with
+    //  BuildConfig.METADATA_WORKER_URL as its baseUrl (required — Retrofit
+    //  needs *some* valid absolute URL at construction time). But this
+    //  interceptor rewrites every outgoing request to the ACTUAL current
+    //  Worker URL resolved via MetadataConfig (which calls /config once
+    //  per session — see MetadataConfig.kt for the full rationale). This
+    //  means the Worker's real URL can change in the future without an
+    //  app update — only the fixed bootstrap URL below is permanent.
+    //
     //  BuildConfig.METADATA_WORKER_URL   e.g. "https://streamx-metadata-cache.YOUR-SUBDOMAIN.workers.dev/"
     // ══════════════════════════════════════════════════════════════════════
     private val authInterceptor = okhttp3.Interceptor { chain ->
@@ -125,12 +135,22 @@ object MovieRepository {
             com.aeoncorex.streamx.network.FirebaseTokenProvider.getIdToken()
         }
 
-        val original = chain.request()
-        val requestWithAuth = if (token != null) {
-            original.newBuilder().addHeader("Authorization", "Bearer $token").build()
-        } else {
-            original // no signed-in user / token fetch failed — let it 401 naturally
+        // Resolve the actual Worker URL (cached after the first call this
+        // session — see MetadataConfig) and rewrite this request's
+        // host/base-path to point there instead of the hardcoded bootstrap
+        // URL Retrofit was constructed with.
+        val actualBaseUrl = kotlinx.coroutines.runBlocking {
+            com.aeoncorex.streamx.network.MetadataConfig.getMetadataBaseUrl()
         }
+
+        val original = chain.request()
+        val rewrittenUrl = rewriteBaseUrl(original.url, actualBaseUrl)
+
+        val requestBuilder = original.newBuilder().url(rewrittenUrl)
+        if (token != null) {
+            requestBuilder.addHeader("Authorization", "Bearer $token")
+        }
+        val requestWithAuth = requestBuilder.build()
 
         val response = chain.proceed(requestWithAuth)
 
@@ -144,14 +164,52 @@ object MovieRepository {
                 com.aeoncorex.streamx.network.FirebaseTokenProvider.getIdToken(forceRefresh = true)
             }
             if (freshToken != null) {
-                val retryRequest = original.newBuilder()
-                    .addHeader("Authorization", "Bearer $freshToken")
+                val retryRequest = requestWithAuth.newBuilder()
+                    .header("Authorization", "Bearer $freshToken")
                     .build()
                 return@Interceptor chain.proceed(retryRequest)
             }
         }
 
         response
+    }
+
+    /**
+     * Rewrites [original]'s scheme/host/port/base-path to match
+     * [actualBaseUrl], while keeping the original request's path segments
+     * (beyond Retrofit's configured baseUrl) and query parameters intact.
+     * This lets Retrofit be built once against a fixed bootstrap baseUrl,
+     * while every real request actually goes to the current resolved URL.
+     */
+    private fun rewriteBaseUrl(original: okhttp3.HttpUrl, actualBaseUrl: String): okhttp3.HttpUrl {
+        val actual = actualBaseUrl.toHttpUrlOrNull() ?: return original
+        val bootstrap = com.aeoncorex.streamx.BuildConfig.METADATA_WORKER_URL.toHttpUrlOrNull()
+
+        // Path segments belonging to Retrofit's bootstrap baseUrl (usually
+        // none, since the base URL is just "https://host/") are stripped
+        // off, then the actual base's own path segments (if any — e.g. if
+        // the resolved URL includes a subpath) are prepended instead.
+        val bootstrapPathSegments = bootstrap?.pathSegments.orEmpty().filter { it.isNotEmpty() }
+        val originalAllSegments = original.pathSegments.filter { it.isNotEmpty() }
+        val requestSpecificSegments =
+            if (originalAllSegments.size >= bootstrapPathSegments.size &&
+                originalAllSegments.take(bootstrapPathSegments.size) == bootstrapPathSegments
+            ) {
+                originalAllSegments.drop(bootstrapPathSegments.size)
+            } else {
+                originalAllSegments
+            }
+
+        val builder = actual.newBuilder()
+        // Replace path entirely with actual's base path + the request-specific segments
+        val actualBaseSegments = actual.pathSegments.filter { it.isNotEmpty() }
+        builder.encodedPath("/")
+        for (segment in actualBaseSegments + requestSpecificSegments) {
+            builder.addPathSegment(segment)
+        }
+        builder.encodedQuery(original.encodedQuery)
+
+        return builder.build()
     }
 
     private val okHttpClient = okhttp3.OkHttpClient.Builder()
