@@ -224,6 +224,7 @@ jobs:
           STARTAPP_APP_ID:      ${{ secrets.STARTAPP_APP_ID }}
           BACKEND_BASE_URL:     ${{ secrets.BACKEND_BASE_URL }}
           METADATA_WORKER_URL:  ${{ secrets.METADATA_WORKER_URL }}
+          STREAM_WORKER_URL:           ${{ secrets.STREAM_WORKER_URL }}
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload Debug APK

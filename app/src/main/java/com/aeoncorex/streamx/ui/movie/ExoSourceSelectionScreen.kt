@@ -33,13 +33,13 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.aeoncorex.streamx.ads.AdManager
-import com.aeoncorex.streamx.streaming.AddonStorage
 import com.aeoncorex.streamx.streaming.ProviderRequest
 import com.aeoncorex.streamx.streaming.StreamCache
 import com.aeoncorex.streamx.streaming.StreamProviderEngine
 import com.aeoncorex.streamx.streaming.StreamResult
 import com.aeoncorex.streamx.streaming.StreamType
 import com.aeoncorex.streamx.streaming.SubtitleAddonClient  // ← IMPORT
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -61,7 +61,7 @@ private val DUB_OPTIONS = listOf(
     DubOption("Dual Audio", "Dual",       "🎵",  Color(0xFF558B2F)),
 )
 
-private enum class FetchState { IDLE, LOADING, STREAMING, DONE, ERROR, NO_ADDONS }
+private enum class FetchState { IDLE, LOADING, STREAMING, DONE, ERROR, NOT_SIGNED_IN }
 
 @Composable
 fun ExoSourceSelectionScreen(
@@ -100,10 +100,12 @@ fun ExoSourceSelectionScreen(
         0f, 360f, infiniteRepeatable(tween(1000, easing = LinearEasing)), "d"
     )
 
+    // Display labels for the spinner while streams are resolving. These are
+    // the fixed providers the streamx-stream-resolver Worker resolves
+    // through — no on-device addon installation needed anymore (see
+    // WorkerStreamProviderEngine).
     val sourceSites = remember {
-        val bundle = AddonStorage.getInstalled().filter { !it.disabled }.map { it.displayName }
-        val http   = AddonStorage.getHttpAddons().map { it.manifest.name }
-        (bundle + http).ifEmpty { listOf("addons") }
+        listOf("autoEmbed", "animetsu", "flixhq", "multi")
     }
 
     LaunchedEffect(tmdbId) {
@@ -129,8 +131,15 @@ fun ExoSourceSelectionScreen(
         isStale       = false
         addonSubtitles = emptyList()
 
-        val totalAddons = AddonStorage.getInstalled().size + AddonStorage.getHttpAddons().size
-        if (totalAddons == 0) { fetchState = FetchState.NO_ADDONS; return@LaunchedEffect }
+        // The Worker requires a Firebase ID token on every /resolve call
+        // (see StreamResolverClient / streamx-stream-resolver's auth.js) —
+        // without it every provider silently returns empty, which would
+        // otherwise show a confusing "No sources found" instead of
+        // pointing at the actual fix.
+        if (FirebaseAuth.getInstance().currentUser == null) {
+            fetchState = FetchState.NOT_SIGNED_IN
+            return@LaunchedEffect
+        }
 
         fetchState = FetchState.LOADING
         val req = buildReq()
@@ -298,8 +307,8 @@ fun ExoSourceSelectionScreen(
 
             // ── Content ───────────────────────────────────────────────────────
             when {
-                fetchState == FetchState.NO_ADDONS ->
-                    NoAddonsState { navController.navigate("addons") }
+                fetchState == FetchState.NOT_SIGNED_IN ->
+                    NotSignedInState { navController.navigate("auth") }
                 fetchState == FetchState.LOADING && sources.isEmpty() ->
                     LoadingState(selectedDub, analysingLabel)
                 fetchState == FetchState.ERROR && sources.isEmpty() ->
@@ -345,7 +354,7 @@ private fun StatusBadge(state: FetchState, count: Int, spinDeg: Float) {
         FetchState.STREAMING -> Triple("$count sources",      Color(0xFF1565C0), true)
         FetchState.DONE      -> Triple("$count sources found", Color(0xFF2E7D32), false)
         FetchState.ERROR     -> Triple("No sources",          Color(0xFFC62828), false)
-        FetchState.NO_ADDONS -> Triple("No addons",           Color(0xFFFF6F00), false)
+        FetchState.NOT_SIGNED_IN -> Triple("Sign in required",   Color(0xFFFF6F00), false)
         else                 -> return
     }
     Row(
@@ -380,26 +389,26 @@ private fun DubChip(dub: DubOption, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-// ── NoAddonsState ─────────────────────────────────────────────────────────────
+// ── NotSignedInState ──────────────────────────────────────────────────────────
 @Composable
-private fun NoAddonsState(onManageAddons: () -> Unit) {
+private fun NotSignedInState(onSignIn: () -> Unit) {
     Box(Modifier.fillMaxWidth().padding(32.dp), Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Rounded.ExtensionOff, null, tint = Color(0xFFFF6F00),
                 modifier = Modifier.size(52.dp))
             Spacer(Modifier.height(16.dp))
-            Text("No addons installed", color = Color.White, fontSize = 16.sp,
+            Text("Sign in required", color = Color.White, fontSize = 16.sp,
                 fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
-            Text("Install addons to stream content.\nAny Stremio addon works too.",
+            Text("Streaming sources are fetched through your account.\nSign in to continue.",
                 color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center)
             Spacer(Modifier.height(20.dp))
-            Button(onClick = onManageAddons,
+            Button(onClick = onSignIn,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A3A1A))) {
                 Icon(Icons.Rounded.Extension, null, tint = Color(0xFF81C784),
                     modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Manage Addons", color = Color(0xFF81C784))
+                Text("Sign In", color = Color(0xFF81C784))
             }
         }
     }

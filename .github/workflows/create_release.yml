@@ -236,6 +236,7 @@ jobs:
           BACKEND_BASE_URL:          ${{ secrets.BACKEND_BASE_URL }}
           STARTAPP_APP_ID:           ${{ secrets.STARTAPP_APP_ID }}
           METADATA_WORKER_URL:       ${{ secrets.METADATA_WORKER_URL }}
+          STREAM_WORKER_URL:   ${{ secrets.STREAM_WORKER_URL }}
           RELEASE_KEYSTORE_FILE:     ${{ github.workspace }}/release.keystore
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS:         ${{ secrets.RELEASE_KEY_ALIAS }}

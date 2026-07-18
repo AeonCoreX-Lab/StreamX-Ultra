@@ -52,9 +52,17 @@ android {
         // network/FirebaseTokenProvider.kt and cf-worker/src/firebase-auth.js.
         val workerUrl    = System.getenv("METADATA_WORKER_URL") ?: ""
 
+        // Stream-resolver Worker (streamx-stream-resolver repo) — resolves
+        // addon stream.js links server-side and returns signed, short-lived
+        // playback URLs. Same bootstrap/"/config" indirection pattern as
+        // METADATA_WORKER_URL above; see network/StreamResolverConfig.kt and
+        // streamx-stream-resolver/README.md.
+        val streamWorkerUrl = System.getenv("STREAM_WORKER_URL") ?: ""
+
         buildConfigField("String", "STARTAPP_APP_ID", "\"$startappId\"")
         buildConfigField("String", "BACKEND_BASE_URL","\"$vercelUrl\"")
         buildConfigField("String", "METADATA_WORKER_URL", "\"$workerUrl\"")
+        buildConfigField("String", "STREAM_WORKER_URL", "\"$streamWorkerUrl\"")
 
         externalNativeBuild {
             cmake {
