@@ -1,4 +1,4 @@
-package com.aeoncorex.navigation
+package com.aeoncorex.streamx.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
