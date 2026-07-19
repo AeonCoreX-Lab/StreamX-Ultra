@@ -14,38 +14,39 @@ import org.json.JSONObject
 // ═════════════════════════════════════════════════════════════════════════════
 //  StreamResolverClient
 //  ─────────────────────────────────────────────────────────────────────────
-//  Talks to the streamx-stream-resolver Cloudflare Worker's POST /resolve —
-//  replaces on-device execution of addon stream.js bundles
-//  (StreamXNative.executeJsStream / QuickJS). The Worker runs the addon
-//  code itself, caches results, and hands back short-lived SIGNED playback
-//  URLs — see streamx-stream-resolver/README.md for the full contract.
+//  Talks to the streamx-stream-resolver Cloudflare Worker's POST /resolve.
 //
-//  Auth: same Firebase ID token flow as MovieRepository/CinemetaRepository
-//  (FirebaseTokenProvider) — the Worker rejects anything without a valid
-//  "Authorization: Bearer <token>" header, then rate-limits per uid.
-//
-//  One request per provider — the caller (WorkerStreamProviderEngine)
-//  decides which providers to try and runs them in parallel.
+//  Changed from the previous version: resolve() now returns ResolveResult
+//  instead of List<StreamResult> directly, so the wafBlockedDomain field
+//  from the Worker's response can reach WorkerStreamProviderEngine's WAF
+//  retry logic without changing the public List<StreamResult> contract that
+//  ExoSourceSelectionScreen and StreamProviderEngine see (those still see
+//  only the final merged List<StreamResult> from the engine — this wrapper
+//  type is engine-internal only).
 // ═════════════════════════════════════════════════════════════════════════════
 object StreamResolverClient {
 
     private const val TAG = "StreamResolverClient"
 
     /**
-     * @param provider  one of the Worker's ENABLED_PROVIDERS (e.g. "autoEmbed",
-     *                  "animetsu", "flixhq", "multi")
-     * @param title     content title — used server-side for the
-     *                  search→meta resolution chain on providers that need
-     *                  it (animetsu/flixhq/multi); autoEmbed ignores it and
-     *                  resolves directly from tmdbId/imdbId.
-     * @param type      "movie" or "series"
-     * @param tmdbId    TMDB id, used by autoEmbed
-     * @param imdbId    IMDB id ("tt..."), used by autoEmbed
-     * @param season    required when type == "series"
-     * @param episode   required when type == "series"
-     * @return          empty list on any failure — never throws, matching
-     *                  the existing engine contract so the safe() wrapper
-     *                  in WorkerStreamProviderEngine still works unchanged.
+     * Engine-internal wrapper so the Worker's wafBlockedDomain signal can
+     * travel from the HTTP layer up to WorkerStreamProviderEngine's retry
+     * logic without leaking into the public StreamProviderEngine API or
+     * requiring ExoSourceSelectionScreen to change.
+     */
+    data class ResolveResult(
+        val streams: List<StreamResult>,
+        // Non-null when the Worker's response included a wafBlockedDomain
+        // field — meaning the provider got a 403/WAF challenge on that
+        // domain and returned 0 streams as a result. The engine uses this
+        // to decide whether to trigger an on-device WebView solve + retry.
+        val wafBlockedDomain: String?
+    )
+
+    /**
+     * Resolves one provider via the Worker.
+     * Never throws — returns ResolveResult(emptyList(), null) on any failure
+     * so the safe() wrapper in WorkerStreamProviderEngine still works.
      */
     suspend fun resolve(
         provider: String,
@@ -55,12 +56,12 @@ object StreamResolverClient {
         imdbId:   String? = null,
         season:   Int?    = null,
         episode:  Int?    = null
-    ): List<StreamResult> = withContext(Dispatchers.IO) {
+    ): ResolveResult = withContext(Dispatchers.IO) {
         try {
             val token = FirebaseTokenProvider.getIdToken()
             if (token == null) {
                 Log.w(TAG, "$provider: no Firebase ID token — user not signed in, skipping resolve")
-                return@withContext emptyList()
+                return@withContext empty()
             }
 
             val baseUrl = StreamResolverConfig.getStreamWorkerBaseUrl()
@@ -76,31 +77,31 @@ object StreamResolverClient {
                 val responseBody = response.body?.string()
 
                 if (response.code == 401) {
-                    // Token expired mid-flight or was rejected — retry once
-                    // with a forced refresh, same pattern as MovieRepository's
-                    // authInterceptor. Not worth a generic retry wrapper for
-                    // a single call site.
                     Log.d(TAG, "$provider: 401, retrying with forceRefresh")
-                    return@withContext retryWithFreshToken(provider, title, tmdbId, imdbId, type, season, episode, baseUrl)
+                    return@withContext retryWithFreshToken(
+                        provider, title, tmdbId, imdbId, type, season, episode, baseUrl
+                    )
                 }
 
                 if (response.code == 429) {
                     Log.w(TAG, "$provider: rate limited by Worker")
-                    return@withContext emptyList()
+                    return@withContext empty()
                 }
 
                 if (!response.isSuccessful || responseBody == null) {
                     Log.w(TAG, "$provider: HTTP ${response.code} — ${responseBody?.take(200)}")
-                    return@withContext emptyList()
+                    return@withContext empty()
                 }
 
                 parseResolveResponse(responseBody, provider)
             }
         } catch (e: Exception) {
             Log.w(TAG, "$provider: resolve failed: ${e.message}")
-            emptyList()
+            empty()
         }
     }
+
+    private fun empty() = ResolveResult(emptyList(), null)
 
     private fun buildRequestBody(
         provider: String, title: String, tmdbId: Int?, imdbId: String?,
@@ -120,8 +121,9 @@ object StreamResolverClient {
     private suspend fun retryWithFreshToken(
         provider: String, title: String, tmdbId: Int?, imdbId: String?,
         type: String, season: Int?, episode: Int?, baseUrl: String
-    ): List<StreamResult> {
-        val freshToken = FirebaseTokenProvider.getIdToken(forceRefresh = true) ?: return emptyList()
+    ): ResolveResult {
+        val freshToken = FirebaseTokenProvider.getIdToken(forceRefresh = true)
+            ?: return empty()
         val body = buildRequestBody(provider, title, tmdbId, imdbId, type, season, episode)
 
         val request = Request.Builder()
@@ -135,14 +137,14 @@ object StreamResolverClient {
                 val responseBody = response.body?.string()
                 if (!response.isSuccessful || responseBody == null) {
                     Log.w(TAG, "$provider: retry HTTP ${response.code}")
-                    emptyList()
+                    empty()
                 } else {
                     parseResolveResponse(responseBody, provider)
                 }
             }
         } catch (e: Exception) {
             Log.w(TAG, "$provider: retry failed: ${e.message}")
-            emptyList()
+            empty()
         }
     }
 
@@ -151,19 +153,25 @@ object StreamResolverClient {
     // Worker response shape (see streamx-stream-resolver/src/index.js):
     // {
     //   "provider": "autoEmbed",
-    //   "streams": [
-    //     { "server": "hindicast-1080p", "quality": "1080p", "type": "m3u8",
-    //       "language": "hi", "playUrl": "https://.../play?sig=...",
-    //       "subtitles": [...] },
-    //     ...
-    //   ]
+    //   "streams": [ { "server":..., "quality":..., "type":..., "playUrl":..., ... } ],
+    //   "wafBlockedDomain": "mostraguarda.stream"   ← NEW: null when no WAF block
     // }
 
-    private fun parseResolveResponse(json: String, provider: String): List<StreamResult> {
+    private fun parseResolveResponse(json: String, provider: String): ResolveResult {
         return try {
             val root = JSONObject(json)
+
+            // wafBlockedDomain is null/absent when the provider ran cleanly —
+            // either it returned streams or it returned [] for normal reasons
+            // (site down, no search match, dead domain). Only non-null when
+            // the Worker specifically detected a WAF/bot-challenge response
+            // (403/503 with WAF-fingerprint body) — see wafDetect.js on the
+            // Worker side.
+            val wafDomain = root.optString("wafBlockedDomain", "")
+                .takeIf { it.isNotBlank() }
+
             val arr = root.optJSONArray("streams") ?: JSONArray()
-            (0 until arr.length()).mapNotNull { i ->
+            val streams = (0 until arr.length()).mapNotNull { i ->
                 val o = arr.optJSONObject(i) ?: return@mapNotNull null
                 val playUrl = o.optString("playUrl", "")
                 if (playUrl.isBlank()) return@mapNotNull null
@@ -176,16 +184,15 @@ object StreamResolverClient {
                     language  = mapLanguageLabel(o.optString("language", "en")),
                     label     = o.optString("server", provider),
                     subtitles = parseSubtitles(o.optJSONArray("subtitles")),
-                    // No headers here deliberately — the Worker already
-                    // applied any Referer/Origin/Cookie the origin needs
-                    // before handing back playUrl (see /play in the
-                    // Worker's index.js). MPV just plays the URL as-is.
                     headers   = emptyMap()
                 )
-            }.also { Log.d(TAG, "$provider → ${it.size} streams via resolver") }
+            }.also { Log.d(TAG, "$provider → ${it.size} streams via resolver" +
+                if (wafDomain != null) " [waf-blocked: $wafDomain]" else "") }
+
+            ResolveResult(streams, wafDomain)
         } catch (e: Exception) {
             Log.w(TAG, "$provider: failed to parse resolve response: ${e.message}")
-            emptyList()
+            empty()
         }
     }
 
@@ -211,9 +218,6 @@ object StreamResolverClient {
         else          -> StreamType.MP4
     }
 
-    // Worker's guessLanguage() returns short codes (hi/bn/ta/te/dub/sub/en) —
-    // shown as a badge/label in the UI rather than fed to anything that
-    // needs a strict BCP-47 tag, so a friendly display string is fine here.
     private fun mapLanguageLabel(code: String): String = when (code.lowercase()) {
         "hi"  -> "Hindi"
         "bn"  -> "Bengali"

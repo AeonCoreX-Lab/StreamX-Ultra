@@ -1,4 +1,4 @@
-package com.aeoncorex.streamx.navigation
+package com.aeoncorex.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,6 +35,11 @@ import com.aeoncorex.streamx.ui.notifications.NotificationsScreen
 import com.aeoncorex.streamx.ui.movie.PersonDetailScreen
 import java.net.URLEncoder
 
+// NOTE: WAF-challenge UI is embedded directly inside ExoSourceSelectionScreen
+// (see WafChallengeSection there) — that's the only screen that triggers
+// WorkerStreamProviderEngine's provider fan-out and the only place a WAF
+// prompt is contextually meaningful (the user can see exactly which
+// title/source it's unlocking). There is no global overlay mounted here.
 @Composable
 fun AppNavigation(
     themeViewModel:    ThemeViewModel,
@@ -42,13 +47,10 @@ fun AppNavigation(
 ) {
     val navController = rememberNavController()
 
-    // ── Navigate to addon install screen when deeplink is received ─────────────
     LaunchedEffect(pendingInstallUrl) {
         if (!pendingInstallUrl.isNullOrEmpty()) {
             val enc = URLEncoder.encode(pendingInstallUrl, "UTF-8")
-            // Navigate to addons screen with pre-filled install URL
             navController.navigate("addons?installUrl=$enc") {
-                // Don't add to back stack if we're on splash
                 launchSingleTop = true
             }
         }
@@ -61,7 +63,6 @@ fun AppNavigation(
         composable("home")        { MainScreen(navController) }
 
         // ── Addon Management ──────────────────────────────────────────────────
-        // Accepts optional installUrl from deeplink
         composable(
             route = "addons?installUrl={installUrl}",
             arguments = listOf(
@@ -76,8 +77,6 @@ fun AppNavigation(
                 ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
             AddonScreen(navController = navController, autoInstallUrl = installUrl)
         }
-
-        // Simple addons route (no install URL)
         composable("addons") { AddonScreen(navController) }
 
         // ── Live TV ───────────────────────────────────────────────────────────
@@ -98,8 +97,8 @@ fun AppNavigation(
             )
         ) { back ->
             EventPlayerScreen(navController = navController,
-                eventId      = back.arguments?.getString("eventId")     ?: "",
-                streamIndex  = back.arguments?.getInt("streamIndex")    ?: 0,
+                eventId      = back.arguments?.getString("eventId")      ?: "",
+                streamIndex  = back.arguments?.getInt("streamIndex")     ?: 0,
                 encodedTitle = back.arguments?.getString("encodedTitle") ?: "")
         }
 
@@ -193,13 +192,6 @@ fun AppNavigation(
             arguments = listOf(
                 navArgument("encodedUrl")   { type = NavType.StringType },
                 navArgument("imdbId")       { type = NavType.StringType; defaultValue = "" },
-                // Original MovieBox identifiers, present ONLY when this
-                // navigation came from MovieBoxInstantPlayCard. Lets
-                // MoviePlayerScreen re-call MovieBoxNative.getStreams()
-                // and fetch a fresh signed URL if the one it was given
-                // expires mid-playback, instead of failing with no
-                // recovery path. Empty/0 for torrent and plain-DIRECT
-                // playback — those modes ignore these args entirely.
                 navArgument("mbSubjectId")  { type = NavType.StringType; defaultValue = "" },
                 navArgument("mbSe")         { type = NavType.IntType;    defaultValue = 0 },
                 navArgument("mbEp")         { type = NavType.IntType;    defaultValue = 0 }

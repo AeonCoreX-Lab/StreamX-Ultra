@@ -30,6 +30,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.aeoncorex.streamx.ads.AdManager
@@ -39,6 +40,7 @@ import com.aeoncorex.streamx.streaming.StreamProviderEngine
 import com.aeoncorex.streamx.streaming.StreamResult
 import com.aeoncorex.streamx.streaming.StreamType
 import com.aeoncorex.streamx.streaming.SubtitleAddonClient  // ← IMPORT
+import com.aeoncorex.streamx.streaming.WafCookieResolver
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -90,6 +92,16 @@ fun ExoSourceSelectionScreen(
     var isStale        by remember { mutableStateOf(false) }
     var adLoading      by remember { mutableStateOf(false) }
     var backdropUrl    by remember { mutableStateOf("") }
+
+    // ── WAF challenge state ─────────────────────────────────────────────────
+    // WafCookieResolver.resolve() is triggered from a background coroutine
+    // inside WorkerStreamProviderEngine whenever a provider hits a WAF block
+    // during the fetch above. We observe the same global StateFlow here so
+    // the challenge renders in-context (inside this screen's content area)
+    // rather than as an app-wide overlay. Since this screen is the only
+    // caller of StreamProviderEngine.fetchStreaming, any non-null state here
+    // is guaranteed to belong to *this* title's fetch.
+    val wafState by WafCookieResolver.state.collectAsState()
 
     // ── Subtitle addon results ────────────────────────────────────────────────
     // Fetched in parallel with streams using SubtitleAddonClient
@@ -305,8 +317,29 @@ fun ExoSourceSelectionScreen(
                 }
             }
 
+            // ── WAF Phase 1: invisible auto-solve pill ──────────────────────────
+            // Non-blocking — sits between the language chips and the content
+            // area so it doesn't interrupt whatever's already showing
+            // (loading spinner, partial source list, etc).
+            AnimatedVisibility(
+                visible = wafState != null && wafState?.needsUserAction == false,
+                enter   = fadeIn() + expandVertically(),
+                exit    = fadeOut() + shrinkVertically()
+            ) {
+                wafState?.domain?.let { domain -> WafVerifyingPill(domain) }
+            }
+
             // ── Content ───────────────────────────────────────────────────────
             when {
+                // WAF Phase 2 takes over the whole content area — the user
+                // needs to actually solve the challenge before anything else
+                // here is useful, so we replace rather than overlay.
+                wafState?.needsUserAction == true ->
+                    WafChallengeSection(
+                        state     = wafState!!,
+                        accent    = selectedDub.color,
+                        onDismiss = { wafState?.onDismiss?.invoke() }
+                    )
                 fetchState == FetchState.NOT_SIGNED_IN ->
                     NotSignedInState { navController.navigate("auth") }
                 fetchState == FetchState.LOADING && sources.isEmpty() ->
@@ -368,6 +401,145 @@ private fun StatusBadge(state: FetchState, count: Int, spinDeg: Float) {
             modifier = Modifier.size(10.dp).rotate(spinDeg))
         else Box(Modifier.size(6.dp).background(color, CircleShape))
         Text(text, color = color, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+// ── WafVerifyingPill ─────────────────────────────────────────────────────────
+// Phase 1 — invisible auto-solve in progress. Small, non-blocking pill shown
+// between the language chips and the content area. The WebView itself is
+// off-screen (1×1) at this point; this is purely a "something's happening"
+// indicator so the user isn't confused by an otherwise-unexplained delay.
+@Composable
+private fun WafVerifyingPill(domain: String) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF141420))
+            .border(1.dp, Color(0xFF4A90D9).copy(.25f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        CircularProgressIndicator(
+            color       = Color(0xFF4A90D9),
+            strokeWidth = 2.dp,
+            modifier    = Modifier.size(13.dp)
+        )
+        Text(
+            text     = "🔐 Verifying $domain…",
+            color    = Color(0xFFB0B0C0),
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+// ── WafChallengeSection ──────────────────────────────────────────────────────
+// Phase 2 — user-interactive solve. Replaces the screen's content area (in
+// place of LoadingState/SourceList/etc) with a card containing the actual
+// challenge WebView, so the user understands exactly which source/title
+// they're unlocking without leaving this screen or seeing an app-wide modal.
+//
+// The WebView instance is the same one WafCookieResolver has been running
+// since Phase 1 — we don't reload it here, just mount it into the Compose
+// hierarchy so it becomes visible and touchable.
+@Composable
+private fun WafChallengeSection(
+    state:     WafCookieResolver.ChallengeState,
+    accent:    Color,
+    onDismiss: () -> Unit
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // ── Header ───────────────────────────────────────────────────────
+        Row(
+            verticalAlignment      = Alignment.CenterVertically,
+            horizontalArrangement  = Arrangement.spacedBy(10.dp),
+            modifier                = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+        ) {
+            Icon(
+                imageVector        = Icons.Rounded.Security,
+                contentDescription = null,
+                tint     = accent,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text       = "Verification Required",
+                color      = Color.White,
+                fontSize   = 15.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        Text(
+            text       = "${state.domain} requires a quick security check.\nComplete it below to unlock this source.",
+            color      = Color(0xFF888899),
+            fontSize   = 12.sp,
+            textAlign  = TextAlign.Center,
+            lineHeight = 17.sp
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        // ── WebView card ─────────────────────────────────────────────────
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(380.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF141422))
+                .border(1.dp, accent.copy(.25f), RoundedCornerShape(12.dp))
+        ) {
+            val wv = state.webView
+            if (wv != null) {
+                AndroidView(
+                    factory = {
+                        // A WebView can only have one parent at a time —
+                        // detach from wherever it was (off-screen holder
+                        // from Phase 1) before attaching here.
+                        (wv.parent as? android.view.ViewGroup)?.removeView(wv)
+                        wv
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                // Shouldn't happen — state said needsUserAction but no
+                // WebView attached. Show a spinner instead of a blank card.
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = accent, modifier = Modifier.size(32.dp))
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Text(
+            text      = "Complete the check above — this will continue automatically.",
+            color     = Color(0xFF55556A),
+            fontSize  = 11.sp,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        OutlinedButton(
+            onClick  = onDismiss,
+            modifier = Modifier.fillMaxWidth(),
+            colors   = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF888899)),
+            border   = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF333344)),
+            shape    = RoundedCornerShape(10.dp)
+        ) {
+            Text("Skip this source", fontSize = 13.sp)
+        }
+
+        Spacer(Modifier.height(16.dp))
     }
 }
 
