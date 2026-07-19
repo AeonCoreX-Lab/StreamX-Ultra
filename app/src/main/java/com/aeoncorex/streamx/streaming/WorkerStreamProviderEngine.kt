@@ -1,6 +1,7 @@
 package com.aeoncorex.streamx.streaming
 
 import android.util.Log
+import com.aeoncorex.streamx.network.StreamResolverConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.async
@@ -8,7 +9,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  WorkerStreamProviderEngine.kt
@@ -35,19 +36,31 @@ import kotlinx.coroutines.withTimeout
 // ═════════════════════════════════════════════════════════════════════════════
 object WorkerStreamProviderEngine {
 
-    private const val TAG        = "WorkerStreamEngine"
-    private const val TIMEOUT_MS = 35_000L
-    private const val HARD_CAP   = 20
+    private const val TAG = "WorkerStreamEngine"
 
-    // Providers enabled on the Worker side. Kept here too (rather than
-    // asking the Worker's /config every call) so a per-request provider
-    // list doesn't add a network round trip to every single search —
-    // /config is only consulted for the base URL. If the Worker's
-    // ENABLED_PROVIDERS ever diverges from this list, the Worker itself
-    // is still the source of truth: it rejects any provider name that
-    // isn't actually enabled, so a stale entry here just wastes one
-    // failed call rather than serving something wrong.
-    private val PROVIDERS = listOf("autoEmbed", "animetsu", "flixhq", "multi")
+    // Per-provider timeout — NOT the timeout for the whole fetch. Providers
+    // run in parallel (see fetchFromWorker), so this bounds how long ANY
+    // single slow provider can hold up the merge; it does not add up across
+    // providers.
+    //
+    // autoEmbed gets a longer budget than everything else: its Worker-side
+    // getRiveStream fans out to 11 services in parallel with an 8s cap each
+    // (see streamx-stream-resolver's autoEmbed.stream.txt) — under real
+    // network conditions (not all 11 responding instantly, Worker's own
+    // outbound connection setup) that can genuinely take longer than a
+    // single-request provider. Giving it more room lets its full result set
+    // (including hindicast/asiacloud dub servers, which are LAST in that
+    // service list) actually come back instead of being cut off mid-fan-out.
+    // Every other provider is a single Worker call (posts→meta→stream, all
+    // server-side) and shouldn't normally need anywhere near this long — if
+    // one does, timing it out and moving on is correct so it doesn't hold up
+    // the 33 providers that already finished.
+    private const val DEFAULT_PROVIDER_TIMEOUT_MS   = 12_000L
+    private const val AUTOEMBED_PROVIDER_TIMEOUT_MS = 25_000L
+    private const val HARD_CAP                      = 20
+
+    private fun timeoutFor(provider: String): Long =
+        if (provider == "autoEmbed") AUTOEMBED_PROVIDER_TIMEOUT_MS else DEFAULT_PROVIDER_TIMEOUT_MS
 
     // ── Public API — mirrors JsStreamProviderEngine exactly ────────────────────
 
@@ -92,12 +105,27 @@ object WorkerStreamProviderEngine {
         coroutineScope {
             val type = if (req.isSeries) "series" else "movie"
 
-            Log.d(TAG, "'${req.title}': resolving via ${PROVIDERS.size} Worker providers")
+            // Pulled from the Worker's own /config (cached after first call —
+            // see StreamResolverConfig) instead of a hardcoded list here.
+            // The Worker's enabled-provider set has grown well past a fixed
+            // handful and can change independently of an app release (a
+            // provider can be disabled Worker-side without an app update),
+            // so hardcoding it here just guarantees drift — this is exactly
+            // what caused animetsu (removed Worker-side) to still be called
+            // from here, and 33 newer providers to never be called at all.
+            val providers = StreamResolverConfig.getEnabledProviders()
 
-            val jobs = PROVIDERS.map { provider ->
+            Log.d(TAG, "'${req.title}': resolving via ${providers.size} Worker providers")
+
+            val jobs = providers.map { provider ->
                 async(Dispatchers.IO) {
                     safe(provider) {
-                        withTimeout(TIMEOUT_MS) {
+                        // withTimeoutOrNull, not withTimeout: a single slow
+                        // provider should degrade to "no results from this
+                        // one" and let the rest of the parallel batch keep
+                        // going, not throw a TimeoutCancellationException
+                        // that awaitAll() would otherwise have to deal with.
+                        withTimeoutOrNull(timeoutFor(provider)) {
                             StreamResolverClient.resolve(
                                 provider = provider,
                                 title    = req.title,
@@ -107,6 +135,8 @@ object WorkerStreamProviderEngine {
                                 season   = if (req.isSeries) req.season else null,
                                 episode  = if (req.isSeries) req.episode else null
                             )
+                        } ?: emptyList<StreamResult>().also {
+                            Log.w(TAG, "$provider: timed out after ${timeoutFor(provider)}ms")
                         }
                     }
                 }
