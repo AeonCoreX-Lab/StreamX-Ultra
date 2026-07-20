@@ -3,6 +3,8 @@ package com.aeoncorex.streamx.streaming
 import android.app.Application
 import android.content.Context
 import android.util.Log
+import android.view.ContextThemeWrapper
+import com.aeoncorex.streamx.R
 import com.aeoncorex.streamx.network.StreamResolverConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -37,7 +39,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 //
 //  WafCookieResolver needs an Android Context (WebView requires one). This
 //  engine stores it via init(context) called from StreamXApplication.onCreate()
-//  — the Application context, which is always available and never leaks.
+//  — wrapped in a ContextThemeWrapper (see init()'s doc comment for why a
+//  raw Application Context isn't enough on its own), so it's always
+//  available and never leaks an Activity reference.
 //
 //  One retry maximum per provider per fetchFromWorker() call. If the retry
 //  also returns 0 (the site is genuinely down, or the challenge didn't
@@ -49,7 +53,17 @@ object WorkerStreamProviderEngine {
     private const val TAG = "WorkerStreamEngine"
 
     private const val DEFAULT_PROVIDER_TIMEOUT_MS   = 12_000L
-    private const val AUTOEMBED_PROVIDER_TIMEOUT_MS = 25_000L
+    // autoEmbed used to need a much longer budget when its Worker-side
+    // getRiveStream fanned out to 11 parallel services (8s cap each) — that
+    // was trimmed to 5 dub-priority services (hindicast, asiacloud, animez,
+    // flowcast, ophim) on 2026-07-19 after Cloudflare's Free-plan 10ms CPU
+    // limit was regularly killing /resolve mid-fan-out (processing 11
+    // parallel responses' worth of JSON + the custom secret-key hash
+    // function pushed it over budget — see streamx-stream-resolver's
+    // autoEmbed.stream.txt). With only 5 services now, autoEmbed doesn't
+    // need dramatically more room than any other single-call provider, so
+    // this is close to DEFAULT rather than more than double it.
+    private const val AUTOEMBED_PROVIDER_TIMEOUT_MS = 15_000L
     // Extra budget for the WAF solve + retry: the WebView gets up to 15s
     // (see WafCookieResolver.CHALLENGE_TIMEOUT_MS), plus one extra Worker
     // round-trip. This gives WAF-retry providers an overall cap of the
@@ -63,9 +77,29 @@ object WorkerStreamProviderEngine {
     /**
      * Must be called once from StreamXApplication.onCreate() before any
      * fetch() call. Safe to call multiple times (idempotent after the first).
+     *
+     * IMPORTANT: WebView(context) requires a themed UI Context — a raw
+     * Application Context is NOT sufficient and reliably crashes on
+     * WebView construction (NPE inside WebView's internal
+     * getSettings()/factory init on API 28+, since it can't resolve a
+     * theme to inflate its internal chrome from). This was the actual
+     * cause of every single WAF-retry attempt failing in production
+     * (see the 2026-07-20 adb log audit — 100% of WafCookieResolver
+     * calls threw the same
+     * "WebSettings WebView.getSettings() on a null object reference").
+     *
+     * The fix: wrap the Application context in a ContextThemeWrapper
+     * carrying the app's own theme before storing it. This gives WebView
+     * everything it needs to inflate without requiring an Activity —
+     * the WebView itself is still never attached to any Activity's view
+     * hierarchy (it lives only in WafCookieResolver's off-screen/dialog
+     * usage), so this doesn't risk an Activity leak the way holding an
+     * actual Activity reference here would.
      */
     fun init(context: Context) {
-        if (appContext == null) appContext = context.applicationContext
+        if (appContext == null) {
+            appContext = ContextThemeWrapper(context.applicationContext, R.style.Theme_StreamXUltra)
+        }
     }
 
     private fun timeoutFor(provider: String): Long =

@@ -161,14 +161,31 @@ object StreamResolverClient {
         return try {
             val root = JSONObject(json)
 
-            // wafBlockedDomain is null/absent when the provider ran cleanly —
-            // either it returned streams or it returned [] for normal reasons
-            // (site down, no search match, dead domain). Only non-null when
-            // the Worker specifically detected a WAF/bot-challenge response
-            // (403/503 with WAF-fingerprint body) — see wafDetect.js on the
-            // Worker side.
-            val wafDomain = root.optString("wafBlockedDomain", "")
-                .takeIf { it.isNotBlank() }
+            // wafBlockedDomain is JSON null (present, value null) when the
+            // provider ran cleanly — either it returned streams or it
+            // returned [] for normal reasons (site down, no search match,
+            // dead domain). Only a real string when the Worker specifically
+            // detected a WAF/bot-challenge response (403/503 with
+            // WAF-fingerprint body) — see wafDetect.js on the Worker side.
+            //
+            // IMPORTANT: root.optString("wafBlockedDomain", "") does NOT
+            // safely handle this. org.json's optString(key, fallback) only
+            // returns the fallback when the key is ABSENT — when the key IS
+            // present with a JSON null value (which is exactly what the
+            // Worker sends: `{ ..., wafBlockedDomain: null }` serializes to
+            // `"wafBlockedDomain": null`, not an absent key), optString
+            // returns the literal string "null" instead. That string then
+            // passed isNotBlank() and got treated as a real domain, which
+            // sent WafCookieResolver off trying to solve a WAF challenge
+            // for the literal host "null" on every single non-WAF failure
+            // (confirmed in the 2026-07-20 adb log — every WAF-retry
+            // attempt, real domain or not, was tripped by this). isNull()
+            // is the correct check for "key present but JSON null".
+            val wafDomain = if (root.isNull("wafBlockedDomain")) {
+                null
+            } else {
+                root.optString("wafBlockedDomain", "").takeIf { it.isNotBlank() }
+            }
 
             val arr = root.optJSONArray("streams") ?: JSONArray()
             val streams = (0 until arr.length()).mapNotNull { i ->
