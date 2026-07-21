@@ -75,6 +75,16 @@ object WorkerStreamProviderEngine {
     @Volatile private var appContext: Context? = null
 
     /**
+     * Exposes the themed context this engine wraps and stores in init() —
+     * used by StreamXApplication so WafCookieResolver.proactiveWarmup()
+     * (background WAF-domain warming at app startup, not tied to any live
+     * resolve() call) can reuse the SAME properly-themed Context instead
+     * of needing its own copy of the ContextThemeWrapper logic. Returns
+     * null if init() hasn't been called yet.
+     */
+    fun getThemedContext(): Context? = appContext
+
+    /**
      * Must be called once from StreamXApplication.onCreate() before any
      * fetch() call. Safe to call multiple times (idempotent after the first).
      *
@@ -160,7 +170,20 @@ object WorkerStreamProviderEngine {
 
             jobs.awaitAll()
                 .flatten()
-                .distinctBy { it.url.split("?").first().trimEnd('/') }
+                // Dedup by provider+server+quality+language, NOT by URL.
+                // Every stream's `url` is a Worker-signed `/play?sig=<token>`
+                // link (see index.js) — the path is identical for every
+                // single stream from every provider, only the sig token
+                // differs. A URL-based distinctBy (even stripping the query
+                // string first) collapses ALL streams down to one, since
+                // they all normalize to the same bare path. This was a real
+                // bug (fixed 2026-07-21): autoEmbed would successfully
+                // resolve 9 streams (different languages/qualities/servers,
+                // confirmed via StreamResolverClient's "→ 9 streams" log)
+                // and this dedup would silently drop 8 of them, which is
+                // also why alternate dubs (Hindi etc.) appeared to be
+                // missing — they were resolved, then deduped away here.
+                .distinctBy { "${it.source}|${it.quality}|${it.language}" }
                 .filter   { it.url.startsWith("http") }
                 .sortedWith(resultComparator())
                 .take(HARD_CAP)
@@ -175,34 +198,86 @@ object WorkerStreamProviderEngine {
         provider: String,
         req:      ProviderRequest,
         type:     String
-    ): List<StreamResult> {
-        // First attempt — within normal per-provider timeout
-        val first = safe(provider) {
-            withTimeoutOrNull(timeoutFor(provider)) {
-                StreamResolverClient.resolve(
-                    provider = provider,
-                    title    = req.title,
-                    tmdbId   = req.tmdbId,
-                    imdbId   = req.imdbId,
-                    type     = type,
-                    season   = if (req.isSeries) req.season else null,
-                    episode  = if (req.isSeries) req.episode else null
-                )
-            } ?: StreamResolverClient.ResolveResult(emptyList(), null)
-                .also { Log.w(TAG, "$provider: timed out after ${timeoutFor(provider)}ms") }
-        } ?: return emptyList()
+    ): List<StreamResult> = coroutineScope {
+        // First attempt — within normal per-provider timeout.
+        //
+        // IMPORTANT: this used to be `withTimeoutOrNull(ms) { resolve(...) }`,
+        // which has a race at the exact deadline boundary: if resolve()
+        // finishes and returns its value in the same instant the timeout
+        // fires, withTimeoutOrNull can still cancel the coroutine and
+        // discard the already-produced result, returning null instead of
+        // the real (successful!) ResolveResult. That's not a hypothetical —
+        // the 2026-07-21 adb log audit caught it happening repeatedly:
+        // "autoEmbed → 9 streams via resolver" (StreamResolverClient
+        // successfully parsed 9 streams) immediately followed by
+        // "autoEmbed: timed out after 15000ms" / "autoEmbed → 0 streams"
+        // in the SAME millisecond — the 9 streams were real and already
+        // in hand, but got thrown away by the cancellation race.
+        //
+        // This got much more likely to trigger once Cloudflare's CPU
+        // limit started being hit on nearly every provider call (see the
+        // "error code: 1102" flood in that log — a resource-limit error
+        // from Cloudflare itself, not from this Worker's own code): every
+        // resolve() now runs close to its full timeout budget instead of
+        // finishing early, so far more requests land right at the
+        // deadline where this race can fire.
+        //
+        // Fix: run resolve() in its own async, and after the timeout
+        // window, check whether it actually completed instead of letting
+        // cancellation silently swallow a real result. isCompleted is
+        // checked BEFORE calling await() to avoid triggering
+        // cancellation on a deferred that finished microseconds after the
+        // delay but before we got to it — either way, a completed result
+        // is used if one exists, and only a genuinely-still-running call
+        // gets cancelled.
+        val deferred = async {
+            StreamResolverClient.resolve(
+                provider = provider,
+                title    = req.title,
+                tmdbId   = req.tmdbId,
+                imdbId   = req.imdbId,
+                type     = type,
+                season   = if (req.isSeries) req.season else null,
+                episode  = if (req.isSeries) req.episode else null
+            )
+        }
+
+        val timeoutMs = timeoutFor(provider)
+        val raced = withTimeoutOrNull(timeoutMs) { deferred.await() }
+
+        val first = if (raced != null) {
+            raced
+        } else if (deferred.isCompleted) {
+            // Genuinely completed right at the boundary — withTimeoutOrNull
+            // returned null from the cancellation race, but the deferred
+            // itself finished. Recover its real result instead of
+            // discarding it. getCompleted() is safe here precisely because
+            // isCompleted just confirmed it's done (no suspension risk).
+            try {
+                deferred.getCompleted()
+            } catch (e: Exception) {
+                Log.w(TAG, "$provider: completed with exception at boundary: ${e.message}")
+                StreamResolverClient.ResolveResult(emptyList(), null)
+            }
+        } else {
+            // Actually still running past its budget — a real timeout,
+            // not a boundary race. Cancel it and move on.
+            deferred.cancel()
+            Log.w(TAG, "$provider: timed out after ${timeoutMs}ms")
+            StreamResolverClient.ResolveResult(emptyList(), null)
+        }
 
         // Got streams — no WAF issue, done
-        if (first.streams.isNotEmpty()) return first.streams
+        if (first.streams.isNotEmpty()) return@coroutineScope first.streams
 
         // Got 0 streams but no WAF signal — normal empty result (site down,
         // no match, dead domain etc.) — nothing we can do, return empty
-        val blockedDomain = first.wafBlockedDomain ?: return emptyList()
+        val blockedDomain = first.wafBlockedDomain ?: return@coroutineScope emptyList()
 
         // WAF block detected. Need a Context for the WebView.
         val ctx = appContext ?: run {
             Log.w(TAG, "$provider: waf-blocked on $blockedDomain but no Context — call init() from Application.onCreate()")
-            return emptyList()
+            return@coroutineScope emptyList()
         }
 
         Log.d(TAG, "$provider: WAF block on $blockedDomain — attempting on-device solve + retry")
@@ -239,7 +314,7 @@ object WorkerStreamProviderEngine {
         }
 
         Log.d(TAG, "$provider: WAF retry → ${retryStreams.size} streams")
-        return retryStreams
+        retryStreams
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

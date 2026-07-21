@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import com.aeoncorex.streamx.backup.BackupManager
 import com.aeoncorex.streamx.streaming.IndexerNative
+import com.aeoncorex.streamx.streaming.WafCookieResolver
 import com.aeoncorex.streamx.streaming.WorkerStreamProviderEngine
 import com.aeoncorex.streamx.ui.movie.ProxySettingsStore
 import com.tencent.mmkv.MMKV
@@ -41,6 +42,21 @@ class StreamXApplication : Application() {
         // engine itself is a singleton with no access to one otherwise.
         WorkerStreamProviderEngine.init(this)
         Log.d(TAG, "WorkerStreamProviderEngine initialized")
+
+        // Proactively warm known-WAF-protected domains in the background
+        // (fetches the Worker's known-domain list, solves any that don't
+        // already have a fresh cookie) and starts the ongoing
+        // refresh-before-expiry loop for the rest of the app's process
+        // lifetime — see WafCookieResolver.kt's header comment for the
+        // full "ultimate power" design. Fire-and-forget: this must never
+        // block app startup, and getThemedContext() may briefly return
+        // null on a very first cold call if somehow invoked before the
+        // init() above completes, but since this runs synchronously right
+        // after that line, appContext is already set by this point.
+        WorkerStreamProviderEngine.getThemedContext()?.let { themedContext ->
+            WafCookieResolver.proactiveWarmup(themedContext)
+            Log.d(TAG, "WafCookieResolver proactive warmup started")
+        } ?: Log.w(TAG, "Skipping WAF proactive warmup — themed context unavailable")
     }
 
     companion object {
