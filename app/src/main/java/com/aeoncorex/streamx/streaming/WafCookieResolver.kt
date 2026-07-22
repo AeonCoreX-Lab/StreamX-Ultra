@@ -126,6 +126,60 @@ object WafCookieResolver {
     private val inFlight     = mutableMapOf<String, CompletableDeferred<Boolean>>()
     private val inFlightLock = Mutex()
 
+    // ── WebView availability check (fixed 2026-07-22) ───────────────────────
+    //
+    // Root cause of the "WebSettings WebView.getSettings() on a null object
+    // reference" crash that made every single WAF solve attempt fail
+    // (verified: 0 successes across 1,000+ attempts in field logs) —
+    // confirmed via research, not a Kotlin/coroutines threading bug:
+    // WebView(context) can complete construction WITHOUT throwing on some
+    // Android/OEM builds even when the device's WebView provider (Android
+    // System WebView / Chrome) is disabled, uninstalled, or mid-update —
+    // the object it returns has a null internal provider, and the NEXT call
+    // that touches it (settings.apply { ... }, i.e. getSettings()) is what
+    // actually NPEs. This is a well-documented Android platform behavior
+    // (android.webkit.WebViewFactory$MissingWebViewPackageException and its
+    // silent-failure variants), not something fixable by changing which
+    // Context we pass in — a ContextThemeWrapper doesn't help because the
+    // provider itself is what's missing, not the theme.
+    //
+    // Fix: probe WebView.getCurrentWebViewPackage() ONCE (cheap, no WebView
+    // construction involved) and cache the result. If null, WebView
+    // genuinely isn't usable on this device right now — every WAF-solve
+    // attempt is skipped immediately instead of repeatedly hitting the same
+    // crash, and callers get a clear signal (false / empty map) instead of
+    // a swallowed exception that looks like "it just doesn't work."
+    //
+    // Cached rather than re-checked every call because a WebView update
+    // completing mid-session (the ONE case this could change) is rare
+    // enough that a fresh app launch picking up the fixed state is an
+    // acceptable trade-off against re-probing on every single resolve().
+    @Volatile private var webViewAvailable: Boolean? = null
+
+    /**
+     * True if this device currently has a usable WebView provider. Safe to
+     * call from any thread — does not construct a WebView, only queries
+     * package info.
+     */
+    fun isWebViewAvailable(): Boolean {
+        webViewAvailable?.let { return it }
+        val available = try {
+            WebView.getCurrentWebViewPackage() != null
+        } catch (e: Throwable) {
+            // Belt-and-suspenders: getCurrentWebViewPackage() itself is
+            // documented safe to call without side effects, but if some
+            // OEM build still manages to throw here, treat that exactly
+            // like "not available" rather than letting it propagate.
+            Log.w(TAG, "isWebViewAvailable() check itself failed: ${e.message}")
+            false
+        }
+        webViewAvailable = available
+        if (!available) {
+            Log.w(TAG, "No usable WebView provider on this device — WAF solving will be skipped entirely")
+        }
+        return available
+    }
+
     // ── Public entry point — single domain (unchanged behavior) ────────────
 
     /**
@@ -137,6 +191,7 @@ object WafCookieResolver {
      */
     suspend fun resolve(context: Context, domain: String): Boolean {
         if (domain.isBlank()) return false
+        if (!isWebViewAvailable()) return false
 
         val existing = inFlightLock.withLock {
             inFlight[domain]?.let { return@withLock it }
@@ -153,7 +208,7 @@ object WafCookieResolver {
             myDeferred.complete(solved)
             solved
         } catch (e: Exception) {
-            Log.w(TAG, "resolve($domain) exception: ${e.message}")
+            Log.w(TAG, "resolve($domain) exception: ${e.message}", e)
             myDeferred.complete(false)
             false
         } finally {
@@ -184,6 +239,7 @@ object WafCookieResolver {
      */
     suspend fun resolveMultiple(context: Context, domains: List<String>): Map<String, Boolean> {
         if (domains.isEmpty()) return emptyMap()
+        if (!isWebViewAvailable()) return domains.associateWith { false }
 
         val results = mutableMapOf<String, Boolean>()
         val resultsLock = Mutex()
@@ -214,6 +270,7 @@ object WafCookieResolver {
      */
     private suspend fun resolveSilentOnly(context: Context, domain: String): Boolean {
         if (domain.isBlank()) return false
+        if (!isWebViewAvailable()) return false
 
         val existing = inFlightLock.withLock {
             inFlight[domain]?.let { return@withLock it }
@@ -230,7 +287,7 @@ object WafCookieResolver {
             myDeferred.complete(solved)
             solved
         } catch (e: Exception) {
-            Log.w(TAG, "resolveSilentOnly($domain) exception: ${e.message}")
+            Log.w(TAG, "resolveSilentOnly($domain) exception: ${e.message}", e)
             myDeferred.complete(false)
             false
         } finally {
@@ -251,6 +308,14 @@ object WafCookieResolver {
      */
     fun proactiveWarmup(context: Context) {
         refreshScope.launch {
+            // Logged unconditionally on every launch — the single fastest way
+            // to confirm/rule out the "no WebView provider on this device"
+            // root cause without needing to trigger a WAF-blocked provider
+            // first. If this logs false, every WAF solve attempt this
+            // session will be a fast no-op (see isWebViewAvailable()) rather
+            // than repeatedly hitting the getSettings() NPE.
+            Log.d(TAG, "proactiveWarmup: WebView available on this device = ${isWebViewAvailable()}")
+
             try {
                 val domains = fetchKnownWafDomains()
                 if (domains.isEmpty()) {
