@@ -450,12 +450,27 @@ object WafCookieResolver {
         val cookieResult = CompletableDeferred<Boolean>()
         val cookieManager = CookieManager.getInstance().also {
             it.setAcceptCookie(true)
-            it.setAcceptThirdPartyCookies(null, true)
             it.setCookie(url, "")
         }
 
         val webView = withContext(Dispatchers.Main) {
-            buildWebView(context, url, cookieManager, cookieResult)
+            buildWebView(context, url, cookieManager, cookieResult).also { wv ->
+                // FIXED: setAcceptThirdPartyCookies(WebView, boolean) needs a
+                // real WebView instance as its first argument — it was
+                // previously called as setAcceptThirdPartyCookies(null, true)
+                // BEFORE the WebView existed (there was nothing else to pass
+                // at that point in the old code), which crashed on every
+                // single call with "Attempt to invoke virtual method
+                // 'WebSettings WebView.getSettings()' on a null object
+                // reference" deep inside Android's CookieManagerAdapter —
+                // this was a 100% reproducible logic bug, not a
+                // device/environment issue (confirmed via production logs:
+                // failure rate was 100% regardless of device or WebView
+                // provider version). Must be called AFTER buildWebView, on
+                // the WebView it actually configures, and — like all
+                // WebView/CookieManager calls — on the main thread.
+                cookieManager.setAcceptThirdPartyCookies(wv, true)
+            }
         }
 
         _state.value = ChallengeState(domain = domain, needsUserAction = false)
@@ -495,12 +510,17 @@ object WafCookieResolver {
         val cookieResult = CompletableDeferred<Boolean>()
         val cookieManager = CookieManager.getInstance().also {
             it.setAcceptCookie(true)
-            it.setAcceptThirdPartyCookies(null, true)
             it.setCookie(url, "")
         }
 
         val webView = withContext(Dispatchers.Main) {
-            buildWebView(context, url, cookieManager, cookieResult)
+            // FIXED: same bug as runTwoPhase — setAcceptThirdPartyCookies
+            // needs the actual WebView, called after it's built, not null
+            // called before it exists. See the comment in runTwoPhase for
+            // the full root-cause explanation.
+            buildWebView(context, url, cookieManager, cookieResult).also { wv ->
+                cookieManager.setAcceptThirdPartyCookies(wv, true)
+            }
         }
 
         // Deliberately no _state.value update here — background
