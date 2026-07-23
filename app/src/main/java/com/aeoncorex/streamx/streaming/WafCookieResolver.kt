@@ -251,7 +251,7 @@ object WafCookieResolver {
             coroutineScope {
                 chunk.map { domain ->
                     launch {
-                        val solved = resolveSilentOnly(context, domain)
+                        val solved = resolveForLiveRetry(context, domain)
                         resultsLock.withLock { results[domain] = solved }
                     }
                 }.forEach { it.join() }
@@ -261,14 +261,46 @@ object WafCookieResolver {
     }
 
     /**
-     * Like resolve(), but Phase-1-only (invisible auto-solve) — never
-     * escalates to the user-visible dialog. Used exclusively by background
-     * warming/refresh paths (see resolveMultiple()'s doc comment for why).
-     * Still participates in the same in-flight coalescing as resolve(), so
-     * a domain being background-refreshed and a domain being live-resolved
-     * at the same moment don't spawn duplicate WebViews.
+     * Phase-1-only (invisible auto-solve, never escalates to the
+     * user-visible dialog). Two distinct callers rely on this:
+     *
+     *   1. resolveMultiple() — background warming/refresh, where any
+     *      escalation to a user-visible dialog would be an unwanted
+     *      surprise popup while the user is just browsing (see that
+     *      function's doc comment).
+     *
+     *   2. WorkerStreamProviderEngine's live-resolve WAF retry (fixed
+     *      2026-07-22) — previously called the public two-phase
+     *      resolve(), which:
+     *        - could escalate to Phase 2's 120s user-visible dialog
+     *          in the middle of the user just trying to load a movie
+     *          source — confusing UX, and
+     *        - this function (then private, under the name
+     *          resolveSilentOnly) shared in-flight coalescing with the
+     *          public resolve() (see the shared `inFlight` map
+     *          retry's outer timeout (WorkerStreamProviderEngine's
+     *          WAF_RETRY_EXTRA_MS, 18s) could cancel a DIFFERENT,
+     *          already-escalated-to-Phase-2 solve that a background
+     *          warmup pass had started for the same domain —
+     *          confirmed in production logs (2026-07-23): every
+     *          single WAF-retry attempt for domains actively being
+     *          warmed/refreshed died with "Timed out waiting for
+     *          18000 ms" within seconds of Phase 2 starting, even
+     *          though USER_TIMEOUT_MS gives Phase 2 a full 120s.
+     *      Using this Phase-1-only function for live retries fixes
+     *      both: it never escalates (so a live retry is fast, bounded,
+     *      and never blindsides the user with a captcha popup mid-load),
+     *      and it's still coalesced correctly against OTHER Phase-1-only
+     *      callers (warmup/refresh) without ever competing against a
+     *      Phase-2 wait that has a fundamentally different timeout budget.
+     *
+     * Still participates in the same in-flight coalescing as itself
+     * across calls, so a domain being background-refreshed and a
+     * domain being live-resolved at the same moment don't spawn
+     * duplicate WebViews — they just both get the Phase-1-only result,
+     * which is the correct behavior for both callers now.
      */
-    private suspend fun resolveSilentOnly(context: Context, domain: String): Boolean {
+    suspend fun resolveForLiveRetry(context: Context, domain: String): Boolean {
         if (domain.isBlank()) return false
         if (!isWebViewAvailable()) return false
 
@@ -287,7 +319,7 @@ object WafCookieResolver {
             myDeferred.complete(solved)
             solved
         } catch (e: Exception) {
-            Log.w(TAG, "resolveSilentOnly($domain) exception: ${e.message}", e)
+            Log.w(TAG, "resolveForLiveRetry($domain) exception: ${e.message}", e)
             myDeferred.complete(false)
             false
         } finally {

@@ -24,18 +24,37 @@ import kotlinx.coroutines.withTimeoutOrNull
 //  provider is resolved server-side by the streamx-stream-resolver
 //  Cloudflare Worker — see StreamResolverClient.kt for the HTTP layer.
 //
-//  WAF retry flow (new in this version):
+//  WAF retry flow:
 //  ───────────────────────────────────────
 //  When the Worker returns wafBlockedDomain for a provider (meaning it got
 //  a Cloudflare/WAF challenge on that domain and returned 0 streams), this
 //  engine:
-//    1. Calls WafCookieResolver.resolve(domain) — runs an on-device WebView
-//       against https://<domain>/, which is a real Chromium browser and CAN
-//       solve the challenge. The resolver also POSTs the resulting cookie to
-//       the Worker's POST /waf-cookie endpoint (see wafCookieStore.js) so the
-//       Worker's next fetch() to that domain injects the cookie automatically.
+//    1. Calls WafCookieResolver.resolveForLiveRetry(domain) — runs an
+//       on-device, invisible-only WebView against https://<domain>/, which
+//       is a real Chromium browser and CAN solve the challenge. The
+//       resolver also POSTs the resulting cookie to the Worker's POST
+//       /waf-cookie endpoint (see wafCookieStore.js) so the Worker's next
+//       fetch() to that domain injects the cookie automatically.
 //    2. Retries the same /resolve call once. If the cookie is now valid on
 //       the Worker side, this retry returns the actual streams.
+//
+//  IMPORTANT (fixed 2026-07-22): this deliberately calls
+//  resolveForLiveRetry(), NOT WafCookieResolver's public two-phase
+//  resolve(). resolve() can escalate to a 120-second user-visible dialog
+//  (Phase 2, for interactive challenges the invisible WebView can't solve
+//  alone) — appropriate when the user explicitly triggers a solve, but
+//  wrong here: this WAF retry fires automatically mid-/resolve-call while
+//  the user is just trying to load a movie source, so surfacing an
+//  unrequested captcha popup would be confusing, and the two calls used to
+//  SHARE in-flight coalescing (same domain, same underlying WebView
+//  attempt) — meaning THIS function's short outer timeout could cancel a
+//  DIFFERENT, already-escalated-to-Phase-2 solve that a background warmup
+//  pass had started for the same domain. Confirmed in production logs
+//  (2026-07-23): every WAF-retry attempt for domains under active
+//  background warming died within ~10s of Phase 2 starting, well short of
+//  Phase 2's real 120s budget. resolveForLiveRetry() is Phase-1-only
+//  (invisible auto-solve, never escalates) — see its doc comment in
+//  WafCookieResolver.kt for the full explanation.
 //
 //  WafCookieResolver needs an Android Context (WebView requires one). This
 //  engine stores it via init(context) called from StreamXApplication.onCreate()
@@ -64,12 +83,19 @@ object WorkerStreamProviderEngine {
     // need dramatically more room than any other single-call provider, so
     // this is close to DEFAULT rather than more than double it.
     private const val AUTOEMBED_PROVIDER_TIMEOUT_MS = 15_000L
-    // Extra budget for the WAF solve + retry: the WebView gets up to 15s
-    // (see WafCookieResolver.CHALLENGE_TIMEOUT_MS), plus one extra Worker
-    // round-trip. This gives WAF-retry providers an overall cap of the
-    // per-provider timeout + this constant — still bounded, still can't
-    // hang the whole fan-out indefinitely.
-    private const val WAF_RETRY_EXTRA_MS            = 18_000L
+    // Extra budget for the WAF solve + retry. resolveForLiveRetry() is
+    // Phase-1-only (invisible auto-solve, WafCookieResolver.SILENT_TIMEOUT_MS
+    // = 8s internally), so this only needs to cover that plus round-trip
+    // overhead (WebView setup, the cookie-report POST, and the follow-up
+    // /resolve call) — NOT WafCookieResolver's separate 120s interactive
+    // Phase 2 budget, since that path is never reached from here anymore
+    // (see the WAF retry flow comment above for why). Previously this was
+    // 18_000L while the call site used the two-phase resolve() — too short
+    // for Phase 2 if it ever got reached via in-flight coalescing, which is
+    // exactly what production logs caught happening. 12s gives the 8s
+    // silent-phase timeout a comfortable ~4s of headroom for the actual
+    // network round-trips around it.
+    private const val WAF_RETRY_EXTRA_MS            = 12_000L
     private const val HARD_CAP                      = 20
 
     @Volatile private var appContext: Context? = null
@@ -283,12 +309,16 @@ object WorkerStreamProviderEngine {
         Log.d(TAG, "$provider: WAF block on $blockedDomain — attempting on-device solve + retry")
 
         // WAF solve runs within an extra time budget on top of what the
-        // provider already used. withTimeoutOrNull here rather than
-        // inside WafCookieResolver because the resolver has its own
-        // internal CHALLENGE_TIMEOUT_MS cap — this outer cap guards
-        // against the WebView + POST + Worker round-trip together.
+        // provider already used. withTimeoutOrNull here rather than inside
+        // WafCookieResolver because resolveForLiveRetry() has its own
+        // internal SILENT_TIMEOUT_MS cap — this outer cap guards against
+        // the WebView + POST + Worker round-trip together. Uses
+        // resolveForLiveRetry() specifically (not the public two-phase
+        // resolve()) — see this file's WAF retry flow header comment and
+        // that function's doc comment in WafCookieResolver.kt for why
+        // calling the two-phase version here was a confirmed production bug.
         val retryStreams = withTimeoutOrNull(WAF_RETRY_EXTRA_MS) {
-            val solved = WafCookieResolver.resolve(ctx, blockedDomain)
+            val solved = WafCookieResolver.resolveForLiveRetry(ctx, blockedDomain)
             if (!solved) {
                 Log.w(TAG, "$provider: WAF solve failed for $blockedDomain — giving up")
                 return@withTimeoutOrNull emptyList<StreamResult>()
