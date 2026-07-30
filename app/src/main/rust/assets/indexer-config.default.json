@@ -10,9 +10,11 @@
       "search_path": "/search/{query}/{page}/",
       "pages": 2,
       "selectors": {
-        "row": "table.table-list tbody tr",
+        "row": "tr:has(a[href^=\"/torrent/\"])",
         "title": "td.coll-1 a:last-of-type[href^=\"/torrent/\"]",
         "title_attr": "text",
+        "title_fallback_href_selector": "td.coll-1 a:last-of-type[href^=\"/torrent/\"]",
+        "title_fallback_href_segment": 3,
         "magnet_location": "detail",
         "detail_link": "td.coll-1 a:last-of-type[href^=\"/torrent/\"]",
         "detail_link_attr": "href",
@@ -209,7 +211,8 @@
         "size": "size",
         "seeds": "seeders",
         "peers": "leechers",
-        "imdb": "imdb"
+        "imdb": "imdb",
+        "apply_tpb_query_cleanup": true
       },
       "request": {
         "headers": { "Accept": "application/json" },

@@ -85,6 +85,7 @@ async fn parse_html(
     let magnet_sel = sel.magnet.as_deref().map(parse_selector).transpose()?;
     let detail_link_sel = sel.detail_link.as_deref().map(parse_selector).transpose()?;
     let category_sel = sel.category.as_deref().map(parse_selector).transpose()?;
+    let title_fallback_sel = sel.title_fallback_href_selector.as_deref().map(parse_selector).transpose()?;
 
     // Collect lightweight row metadata first; detail-page fetches (if
     // needed) happen afterward and concurrently, same pattern the old
@@ -106,7 +107,24 @@ async fn parse_html(
 
     for row in doc.select(&row_sel) {
         let title_el = match row.select(&title_sel).next() { Some(e) => e, None => continue };
-        let title = read_field(&title_el, &sel.title_attr);
+        let mut title = read_field(&title_el, &sel.title_attr);
+
+        // 1337x-style truncation fallback (Jackett's title_optional):
+        // when the visible title ends in "...", the site cut it off and
+        // the FULL title lives URL-encoded in the same/a related
+        // anchor's href instead (e.g. detail link slug). Decode that
+        // instead of keeping the truncated text, when the config
+        // provides a selector for it.
+        if title.ends_with("...") {
+            if let Some(fallback_sel) = &title_fallback_sel {
+                if let Some(full) = row.select(fallback_sel).next()
+                    .and_then(|e| e.value().attr("href"))
+                    .and_then(|href| decode_title_from_href(href, sel.title_fallback_href_segment))
+                {
+                    title = full;
+                }
+            }
+        }
         if title.trim().is_empty() { continue; }
 
         let size  = row.select(&size_sel).next()
@@ -254,6 +272,21 @@ async fn fetch_detail_magnet(
         }
     }
     anyhow::bail!("no magnet found on detail page {url}")
+}
+
+/// Recovers a truncated title from a detail-page href, mirroring
+/// Jackett's title_optional field filters: `urldecode` then
+/// `split("/", segment)`. 1337x hrefs look like
+/// "/torrent/1234567/Movie-Name-2024-1080p-BluRay-x264-GROUP/" — after
+/// URL-decoding, splitting on "/" and taking the configured segment
+/// (default index 3) yields the slug, which the caller then still runs
+/// through the same dash-to-space title cleanup as any other title
+/// (TorrentResult::parse_tags / existing title normalization), so this
+/// only needs to recover the raw slug, not fully clean it.
+fn decode_title_from_href(href: &str, segment: usize) -> Option<String> {
+    let decoded = urlencoding::decode(href).ok()?.into_owned();
+    let parts: Vec<&str> = decoded.split('/').collect();
+    parts.get(segment).map(|s| s.replace('-', " ").trim().to_string())
 }
 
 fn extract_indexed_number(row: &ElementRef, sel: &Selector, index: usize) -> u32 {

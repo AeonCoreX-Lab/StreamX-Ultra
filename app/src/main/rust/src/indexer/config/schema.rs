@@ -109,6 +109,23 @@ pub struct HtmlSelectors {
     #[serde(default)]
     pub peers_index: usize,
 
+    /// Optional: when the visible title text is truncated by the site
+    /// (1337x renders long titles ending in "..." and expects you to
+    /// visit the detail page for the full name — see Jackett's
+    /// 1337x.yml title_optional field), this selector points at the
+    /// SAME anchor's href instead, from which the real title is decoded
+    /// via title_fallback_href_segment. Only used when the title read
+    /// via `title`/`title_attr` ends in the literal string "...".
+    #[serde(default)]
+    pub title_fallback_href_selector: Option<String>,
+    /// 0-indexed path segment (split on "/") of the href to treat as
+    /// the URL-encoded full title. 1337x's detail links look like
+    /// "/torrent/1234567/Movie-Name-2024-1080p-BluRay-x264-GROUP/" —
+    /// the title is segment 3 (0: "", 1: "torrent", 2: "1234567",
+    /// 3: the slug). Matches Jackett's `split` filter args: ["/", 3].
+    #[serde(default = "default_title_fallback_segment")]
+    pub title_fallback_href_segment: usize,
+
     /// Optional: site's own category label selector, folded into
     /// audio_tags if it hints at a dub/region we'd otherwise miss
     /// (e.g. ExtraTorrent's "in Bollywood" category span).
@@ -118,6 +135,7 @@ pub struct HtmlSelectors {
 
 fn default_text() -> String { "text".to_string() }
 fn default_listing() -> String { "listing".to_string() }
+fn default_title_fallback_segment() -> usize { 3 }
 
 /// Field-name map for a JSON-API site (TheRARBG-style). Values are the
 /// JSON key names in that site's own response shape.
@@ -140,6 +158,15 @@ pub struct JsonFields {
     pub category: Option<String>,
     #[serde(default)]
     pub imdb: Option<String>,
+    /// If true, apply Jackett-equivalent query cleanup before encoding
+    /// the query into the search path: strip standalone "it's", collapse
+    /// runs of CJK (Chinese/Japanese/Korean) characters (plus any
+    /// adjacent non-word punctuation) into a single ".", and lowercase
+    /// the result. Mirrors thepiratebay.yml's keywordsfilters — apibay's
+    /// search engine handles both cases poorly untreated. Opt-in per
+    /// site (not every JSON site necessarily needs or wants this).
+    #[serde(default)]
+    pub apply_tpb_query_cleanup: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

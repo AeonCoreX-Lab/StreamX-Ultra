@@ -50,10 +50,84 @@ fn build_path(config: &SiteConfig, query: &str, imdb_id: Option<&str>) -> String
             config.imdb_path.as_ref().unwrap().replace("{imdb_id}", id)
         }
         _ => {
-            let q = urlencoding::encode(query);
+            let cleaned = if config.json_fields.as_ref()
+                .map(|f| f.apply_tpb_query_cleanup)
+                .unwrap_or(false)
+            {
+                clean_tpb_query(query)
+            } else {
+                query.to_string()
+            };
+            let q = urlencoding::encode(&cleaned);
             config.search_path.replace("{query}", &q)
         }
     }
+}
+
+/// Port of thepiratebay.yml's keywordsfilters — apibay's search engine
+/// handles both cases (a bare "it's" and CJK text) poorly, per Jackett's
+/// own filter comments:
+///   1. re_replace \bit's\b -> ""   (case-insensitive, standalone word only)
+///   2. re_replace ([\p{IsCJKUnifiedIdeographs}\W]+) -> "."
+///      (any run of CJK ideographs, optionally mixed with adjacent
+///      non-word punctuation, collapses to a single ".")
+///   3. tolower
+fn clean_tpb_query(query: &str) -> String {
+    // Step 1: strip standalone "it's" (word-boundary, case-insensitive).
+    // Rust's regex crate has no \b Unicode word-boundary surprises here
+    // since "it's" is plain ASCII — a simple case-insensitive literal
+    // replace bounded by non-alphanumeric neighbors is sufficient and
+    // avoids pulling in a heavier regex dependency for one filter.
+    let no_its = strip_standalone_its(query);
+
+    // Step 2: collapse CJK-ideograph runs (+ adjacent punctuation) to ".".
+    let mut collapsed = String::with_capacity(no_its.len());
+    let mut in_cjk_run = false;
+    for ch in no_its.chars() {
+        if is_cjk_unified_ideograph(ch) || (in_cjk_run && !ch.is_alphanumeric() && ch != ' ') {
+            if !in_cjk_run {
+                collapsed.push('.');
+            }
+            in_cjk_run = true;
+        } else {
+            in_cjk_run = false;
+            collapsed.push(ch);
+        }
+    }
+
+    // Step 3: lowercase.
+    collapsed.to_lowercase()
+}
+
+fn strip_standalone_its(s: &str) -> String {
+    let lower = s.to_lowercase();
+    let mut result = String::with_capacity(s.len());
+    let bytes: Vec<char> = s.chars().collect();
+    let lower_bytes: Vec<char> = lower.chars().collect();
+    let mut i = 0;
+    while i < bytes.len() {
+        // Look for "it's" (4 chars) at this position, case-insensitively,
+        // with a non-alphanumeric (or start/end of string) boundary on
+        // both sides — matching \bit's\b.
+        let is_match = i + 4 <= lower_bytes.len()
+            && lower_bytes[i..i + 4] == ['i', 't', '\'', 's']
+            && (i == 0 || !bytes[i - 1].is_alphanumeric())
+            && (i + 4 == bytes.len() || !bytes[i + 4].is_alphanumeric());
+        if is_match {
+            i += 4;
+            continue;
+        }
+        result.push(bytes[i]);
+        i += 1;
+    }
+    result
+}
+
+/// Same ranges as regex's \p{IsCJKUnifiedIdeographs} — the main CJK
+/// Unified Ideographs block (U+4E00–U+9FFF). Jackett's filter uses the
+/// .NET Unicode category of the same name, which covers this block.
+fn is_cjk_unified_ideograph(ch: char) -> bool {
+    matches!(ch as u32, 0x4E00..=0x9FFF)
 }
 
 async fn fetch_and_parse(
