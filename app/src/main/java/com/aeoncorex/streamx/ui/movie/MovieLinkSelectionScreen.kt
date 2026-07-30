@@ -797,6 +797,15 @@ fun TorrentCard(link: StreamLink, onClick: () -> Unit) {
                         .border(1.dp, Color.Cyan.copy(0.2f), RoundedCornerShape(4.dp))
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) { Text(link.source.take(8), color = Color.Cyan.copy(0.8f), fontSize = 9.sp) }
+                link.audioTag?.let { tag ->
+                    Box(
+                        Modifier.background(Color(0xFF1A0A1A), RoundedCornerShape(4.dp))
+                            .border(1.dp, Color(0xFFFF4FD8).copy(0.3f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(tag.label, color = Color(0xFFFF4FD8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
                 if (link.size.isNotEmpty()) {
                     Text(link.size, color = Color.Gray, fontSize = 10.sp,
                         modifier = Modifier.align(Alignment.CenterVertically))

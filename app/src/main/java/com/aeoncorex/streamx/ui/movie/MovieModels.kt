@@ -28,7 +28,47 @@ data class StreamLink(
      * have this distinction — they either found a match or didn't.
      */
     val isConfirmedDub: Boolean = true
-)
+) {
+    /**
+     * Best-effort "Dual Audio" / "Multi Audio" detector run against the raw
+     * torrent release title.
+     *
+     * BUG FIX: previously nothing scanned `title` for this at all — the
+     * link-selection screen only ever showed `quality` + `source` badges,
+     * so a result titled e.g. "Movie.2024.1080p.Dual.Audio.Hindi-English"
+     * never surfaced a Dual/Multi badge even though the raw title clearly
+     * had it.
+     *
+     * Release titles use dots/underscores/hyphens/brackets as word
+     * separators instead of spaces (e.g. "Dual.Audio", "[Multi]",
+     * "Multi-Audio"), so we can't just do a plain `.contains("dual audio")`
+     * on the raw string — that only matches the rare title using literal
+     * spaces. Normalize non-alphanumeric separators to spaces first, then
+     * match on word boundaries so we don't false-positive on unrelated
+     * substrings (e.g. "Multiplex" shouldn't match "Multi").
+     */
+    val audioTag: AudioTag? by lazy { AudioTag.detect(title) }
+}
+
+enum class AudioTag(val label: String) {
+    DUAL("Dual Audio"),
+    MULTI("Multi Audio");
+
+    companion object {
+        private val normalizeRegex = Regex("[._\\-\\[\\]()]+")
+        private val dualRegex  = Regex("\\bdual(\\s+audio)?\\b", RegexOption.IGNORE_CASE)
+        private val multiRegex = Regex("\\bmulti(\\s+audio)?\\b", RegexOption.IGNORE_CASE)
+
+        fun detect(rawTitle: String): AudioTag? {
+            val normalized = rawTitle.replace(normalizeRegex, " ")
+            return when {
+                dualRegex.containsMatchIn(normalized)  -> DUAL
+                multiRegex.containsMatchIn(normalized) -> MULTI
+                else -> null
+            }
+        }
+    }
+}
 
 // ── TMDB list/search response ─────────────────────────────────────────────────
 data class TmdbResponse(val results: List<MovieDto>)

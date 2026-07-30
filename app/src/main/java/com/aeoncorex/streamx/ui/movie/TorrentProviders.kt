@@ -1,6 +1,7 @@
 package com.aeoncorex.streamx.ui.movie
 
 import android.util.Log
+import com.aeoncorex.streamx.streaming.TorrentWafInterceptor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -133,10 +134,19 @@ object DubQueryBuilder {
 object TorrentProviders {
 
     // ── Shared HTTP client ────────────────────────────────────────
+    //
+    // TorrentWafInterceptor added here (2026-07-30): domain-agnostic WAF
+    // challenge detection + on-device solve, same detection philosophy as
+    // the Worker's wafDetect.js — no per-site allowlist, purely
+    // response-driven (status code + body pattern). Any provider using
+    // THIS client (or a Retrofit instance built on top of it, see
+    // nyaaApi/bitSearchApi below) is automatically covered — a new
+    // provider added later needs no additional WAF wiring of its own.
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .followRedirects(true)
+        .addInterceptor(TorrentWafInterceptor)
         .build()
 
     // ── EZTV mirrors ─────────────────────────────────────────────
@@ -149,18 +159,21 @@ object TorrentProviders {
 
     private val eztvApi = Retrofit.Builder()
         .baseUrl("https://eztv.re/")
+        .client(httpClient)
         .addConverterFactory(GsonConverterFactory.create())
         .build()
         .create(TorrentApi::class.java)
 
     private val nyaaApi = Retrofit.Builder()
         .baseUrl("https://nyaa.si/")
+        .client(httpClient)
         .addConverterFactory(ScalarsConverterFactory.create())
         .build()
         .create(TorrentApi::class.java)
 
     private val bitSearchApi = Retrofit.Builder()
         .baseUrl("https://bitsearch.to/")
+        .client(httpClient)
         .addConverterFactory(ScalarsConverterFactory.create())
         .build()
         .create(TorrentApi::class.java)

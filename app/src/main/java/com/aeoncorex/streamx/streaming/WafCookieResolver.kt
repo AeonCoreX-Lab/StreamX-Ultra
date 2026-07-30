@@ -300,7 +300,43 @@ object WafCookieResolver {
      * duplicate WebViews — they just both get the Phase-1-only result,
      * which is the correct behavior for both callers now.
      */
-    suspend fun resolveForLiveRetry(context: Context, domain: String): Boolean {
+    suspend fun resolveForLiveRetry(context: Context, domain: String): Boolean =
+        resolveSilentInternal(context, domain, reportToWorker = true)
+
+    // ── NEW: local-only solve, no Worker involved ───────────────────────────
+
+    /**
+     * Same Phase-1-only, invisible-WebView solve as [resolveForLiveRetry] —
+     * reuses [runSilentPhaseOnly] directly, no duplicated WebView logic —
+     * but deliberately skips [reportCookieToWorker].
+     *
+     * For callers where there is no Worker in the request path at all (e.g.
+     * the torrent providers in TorrentWafInterceptor, which hit torrent
+     * sites directly from the device — no streamx-stream-resolver Worker
+     * involved for that traffic). Reporting a torrent-site cookie to the
+     * Worker would be pure waste: the Worker never fetches those domains,
+     * so the POST would only bloat its waf-known-domains KV registry with
+     * entries it will never use, for no benefit. Use [resolveForLiveRetry]
+     * instead for any flow where the Worker DOES proxy that domain and
+     * needs the cookie to replay itself.
+     *
+     * Shares the same in-flight coalescing map as [resolveForLiveRetry] —
+     * both are keyed by domain and only need to agree on "was a cookie
+     * obtained", not on what happens after. Whichever call actually
+     * initiates the solve for a given domain is the one whose
+     * report-or-not choice applies; a caller that merely coalesces onto an
+     * already-in-flight solve started by the OTHER function doesn't
+     * trigger (or skip) a report itself — that decision was already made
+     * by whoever started it.
+     */
+    suspend fun resolveLocalOnly(context: Context, domain: String): Boolean =
+        resolveSilentInternal(context, domain, reportToWorker = false)
+
+    private suspend fun resolveSilentInternal(
+        context:        Context,
+        domain:         String,
+        reportToWorker: Boolean
+    ): Boolean {
         if (domain.isBlank()) return false
         if (!isWebViewAvailable()) return false
 
@@ -315,11 +351,11 @@ object WafCookieResolver {
         val myDeferred = inFlight.getValue(domain)
         return try {
             val solved = runSilentPhaseOnly(context, domain)
-            if (solved) reportCookieToWorker(context, domain)
+            if (solved && reportToWorker) reportCookieToWorker(context, domain)
             myDeferred.complete(solved)
             solved
         } catch (e: Exception) {
-            Log.w(TAG, "resolveForLiveRetry($domain) exception: ${e.message}", e)
+            Log.w(TAG, "resolveSilentInternal($domain) exception: ${e.message}", e)
             myDeferred.complete(false)
             false
         } finally {
