@@ -16,7 +16,7 @@
 
 mod torrent;
 mod jsengine;
-mod indexer;
+mod registry;
 mod moviebox;
 
 use jni::JNIEnv;
@@ -43,10 +43,11 @@ pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_initNat
     info!("StreamX Rust core initialised");
 }
 
-// Sets the on-disk cache directory the indexer's remote-config loader
-// uses to persist indexer-config.json between launches. Kotlin should
-// call this once, right after initNative(), passing
-// context.cacheDir.absolutePath — see IndexerNative.kt's init block.
+// Sets the on-disk cache directory the indexer registry's fetch-cache-
+// fallback loader (src/registry.rs) uses to persist the last-known-good
+// registry.json between launches. Kotlin should call this once, right
+// after initNative(), passing context.cacheDir.absolutePath — see
+// IndexerNative.kt's init block.
 // Safe to skip: if never called, the loader falls back to the system
 // temp dir, which still works but won't survive an app restart as
 // reliably as the real cache dir.
@@ -58,7 +59,7 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
 ) {
     let path = jstr(&mut env, j_path);
     info!("Indexer cache dir set: {path}");
-    indexer::engine::init_cache_dir(std::path::PathBuf::from(path));
+    registry::init_cache_dir(std::path::PathBuf::from(path));
 }
 
 // ── Proxy support (HTTP / SOCKS4 / SOCKS5) ────────────────────────────────────
@@ -96,16 +97,16 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
     let password = jstr(&mut env, j_password);
 
     let kind = match kind_str.as_str() {
-        "http"   => indexer::proxy::config::ProxyKind::Http,
-        "socks4" => indexer::proxy::config::ProxyKind::Socks4,
-        "socks5" => indexer::proxy::config::ProxyKind::Socks5,
+        "http"   => streamx_indexer::proxy::config::ProxyKind::Http,
+        "socks4" => streamx_indexer::proxy::config::ProxyKind::Socks4,
+        "socks5" => streamx_indexer::proxy::config::ProxyKind::Socks5,
         other => {
             log::warn!("[proxy] unknown proxy kind '{other}', ignoring");
             return 0;
         }
     };
 
-    let config = indexer::proxy::config::ProxyConfig {
+    let config = streamx_indexer::proxy::config::ProxyConfig {
         kind,
         host,
         port: port as u16,
@@ -114,7 +115,7 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
         enabled: true,
     };
 
-    match indexer::proxy::set_proxy(config) {
+    match streamx_indexer::proxy::set_proxy(config) {
         Ok(()) => 1,
         Err(e) => {
             log::warn!("[proxy] failed to activate: {e}");
@@ -128,7 +129,7 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
     _env: JNIEnv,
     _cls: JClass,
 ) {
-    let _ = indexer::proxy::clear_proxy();
+    let _ = streamx_indexer::proxy::clear_proxy();
 }
 
 #[no_mangle]
@@ -136,7 +137,7 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
     mut env: JNIEnv,
     _cls: JClass,
 ) -> jni::sys::jstring {
-    let summary = indexer::proxy::status_summary();
+    let summary = streamx_indexer::proxy::status_summary();
     env.new_string(summary).expect("JNI string").into_raw()
 }
 
@@ -344,8 +345,13 @@ fn percent_encode(s: &str) -> String {
 // ── ⑤ Indexer — Jackett-style multi-site torrent search ──────────────────────
 //
 // Called from IndexerNative.kt (new, mirrors StreamXNative.kt's pattern).
-// Searches 1337x, TorrentGalaxy, KickassTorrents, TorrentDownload in parallel
-// for dubbed/dual-audio releases and returns them as a JSON array.
+// Site selection (1337x, TorrentGalaxy, KickassTorrents, TorrentDownload,
+// etc.) is no longer hardcoded here — it comes from whatever registry
+// registry::get_registry() resolves at call time (hosted GitHub Release,
+// falling back to the crate's embedded snapshot — see src/registry.rs
+// and streamx-torrent-indexer's docs/CONSUMING.md). Searches every
+// enabled site in that registry in parallel for dubbed/dual-audio
+// releases and returns them as a JSON array.
 //
 // IMPORTANT: this function ONLY searches and returns magnet URIs — it does
 // NOT start playback. Kotlin takes the chosen result's `magnet` field and
@@ -367,7 +373,9 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
     let imdb_opt: Option<&str> = if imdb_id.is_empty() { None } else { Some(&imdb_id) };
 
     let json = TorrentEngineHandle::get().rt.block_on(async {
-        indexer::engine::search_dubbed_json(&query, imdb_opt).await
+        let reg = registry::get_registry().await;
+        let client = streamx_indexer::proxy::get_client();
+        streamx_indexer::engine::search_dubbed_json(&client, &reg, &query, imdb_opt).await
     });
 
     env.new_string(json).expect("JNI string").into_raw()
@@ -385,7 +393,9 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
     let query = jstr(&mut env, j_query);
 
     let json = TorrentEngineHandle::get().rt.block_on(async {
-        indexer::engine::search_all_json(&query).await
+        let reg = registry::get_registry().await;
+        let client = streamx_indexer::proxy::get_client();
+        streamx_indexer::engine::search_all_json(&client, &reg, &query).await
     });
 
     env.new_string(json).expect("JNI string").into_raw()
@@ -404,7 +414,9 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
     let query = jstr(&mut env, j_query);
 
     let json = TorrentEngineHandle::get().rt.block_on(async {
-        indexer::engine::search_drama_json(&query).await
+        let reg = registry::get_registry().await;
+        let client = streamx_indexer::proxy::get_client();
+        streamx_indexer::engine::search_drama_json(&client, &reg, &query).await
     });
 
     env.new_string(json).expect("JNI string").into_raw()
@@ -420,7 +432,9 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
     let query = jstr(&mut env, j_query);
 
     let json = TorrentEngineHandle::get().rt.block_on(async {
-        indexer::engine::search_anime_english_json(&query).await
+        let reg = registry::get_registry().await;
+        let client = streamx_indexer::proxy::get_client();
+        streamx_indexer::engine::search_anime_english_json(&client, &reg, &query).await
     });
 
     env.new_string(json).expect("JNI string").into_raw()
@@ -436,7 +450,9 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
     let query = jstr(&mut env, j_query);
 
     let json = TorrentEngineHandle::get().rt.block_on(async {
-        indexer::engine::search_anime_other_dub_json(&query).await
+        let reg = registry::get_registry().await;
+        let client = streamx_indexer::proxy::get_client();
+        streamx_indexer::engine::search_anime_other_dub_json(&client, &reg, &query).await
     });
 
     env.new_string(json).expect("JNI string").into_raw()

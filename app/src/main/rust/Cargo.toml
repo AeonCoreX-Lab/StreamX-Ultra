@@ -37,6 +37,25 @@ log            = "0.4"
 android_logger = "0.14"
 anyhow         = "1.0"
 
+# ── Torrent indexer engine ──────────────────────────────────────────────────
+#
+# Replaces the old in-app src/indexer/ module (removed — see git history
+# for anyone diffing against pre-split versions). Site definitions now
+# live as community-contributable JSON in the streamx-torrent-indexer
+# repo instead of Rust/JSON hand-maintained here; this app only owns the
+# JNI boundary and the registry fetch-cache-fallback glue, both in
+# src/registry.rs. See that repo's docs/CONSUMING.md for the split
+# rationale and docs/CONTRIBUTING.md for how a source gets added.
+#
+# TODO(you): once streamx-torrent-indexer has at least one commit
+# pushed, replace `branch = "main"` below with `rev = "<commit-sha>"`
+# for release builds — branch tracking is fine for local development
+# but means a release build's output isn't fully reproducible from the
+# Cargo.lock alone. `branch = "main"` is left here (not a fake rev)
+# because a placeholder SHA would fail to resolve and block every build
+# until edited — this at least compiles as soon as the repo exists.
+streamx-indexer = { git = "https://github.com/AeonCoreX-Lab/streamx-torrent-indexer", branch = "main" }
+
 # Async runtime
 tokio       = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "macros", "fs"] }
 once_cell   = "1.18"
