@@ -40,19 +40,22 @@ import java.io.ByteArrayOutputStream
  * error handling.
  *
  * SECURITY NOTE: this uploads plain-text host/port/username/password
- * (see BackupPayload.kt). That's a deliberate, documented trade-off —
- * the appdata folder is only reachable by (a) this app, running as the
- * signed-in user, or (b) Google itself, exactly like every other
- * Google Sign-In-based per-app cloud save. It is NOT visible to other
- * apps, other Drive users, or the account owner's own Drive file
- * browser. This is a materially different exposure than, say, writing
- * the file to public Drive storage or external storage would be.
+ * (see BackupPayload.kt) and, as of the private-tracker feature,
+ * plain-text tracker API keys too — same documented trade-off, same
+ * reasoning. That's a deliberate, documented trade-off — the appdata
+ * folder is only reachable by (a) this app, running as the signed-in
+ * user, or (b) Google itself, exactly like every other Google
+ * Sign-In-based per-app cloud save. It is NOT visible to other apps,
+ * other Drive users, or the account owner's own Drive file browser.
+ * This is a materially different exposure than, say, writing the file
+ * to public Drive storage or external storage would be.
  *
  * EXTENSIBILITY: every settings store that wants automatic backup
  * should call [syncNow] after saving locally — see
- * ProxySettingsStore.save(), which does exactly that. syncNow() reads
- * the CURRENT state of every backed-up feature (right now just
- * ProxySettingsStore) and uploads one consolidated BackupPayload, so
+ * ProxySettingsStore.save() and PrivateTrackerStore's add()/update()/
+ * remove()/setEnabled(), which all do exactly that. syncNow() reads
+ * the CURRENT state of every backed-up feature (ProxySettingsStore,
+ * PrivateTrackerStore) and uploads one consolidated BackupPayload, so
  * multiple stores calling it in quick succession naturally coalesce
  * into a single upload each time (protected by [syncMutex]).
  */
@@ -148,6 +151,7 @@ object BackupManager {
 
     private fun buildCurrentPayload(): BackupPayload {
         val proxy = com.aeoncorex.streamx.ui.movie.ProxySettingsStore.get()
+        val trackers = com.aeoncorex.streamx.ui.movie.PrivateTrackerStore.getAll()
         return BackupPayload(
             proxySettings = proxy?.let {
                 BackedUpProxySettings(
@@ -158,7 +162,16 @@ object BackupManager {
                     username = it.username,
                     password = it.password
                 )
-            }
+            },
+            privateTrackers = trackers.map {
+                BackedUpTrackerCredential(
+                    id = it.id,
+                    name = it.name,
+                    baseUrl = it.baseUrl,
+                    apiKey = it.apiKey,
+                    enabled = it.enabled
+                )
+            }.ifEmpty { null }
             // Future: assemble other stores' current state here too.
         )
     }
@@ -179,6 +192,24 @@ object BackupManager {
                     username = backed.username,
                     password = backed.password
                 )
+            )
+        }
+        // Uses replaceAll() (not the individual add()/etc. functions) —
+        // this IS the full restored list, wholesale, not an incremental
+        // change; replaceAll() also deliberately doesn't re-trigger
+        // syncNow() itself (see its doc comment), since we just
+        // downloaded this data FROM the backup we're restoring.
+        payload.privateTrackers?.let { backed ->
+            com.aeoncorex.streamx.ui.movie.PrivateTrackerStore.replaceAll(
+                backed.map {
+                    com.aeoncorex.streamx.ui.movie.PrivateTracker(
+                        id = it.id,
+                        name = it.name,
+                        baseUrl = it.baseUrl,
+                        apiKey = it.apiKey,
+                        enabled = it.enabled
+                    )
+                }
             )
         }
         // Future: apply other stores' restored state here too.

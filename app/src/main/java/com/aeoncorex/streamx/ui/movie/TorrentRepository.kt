@@ -286,6 +286,26 @@ object TorrentRepository {
                 })
             }
 
+            // ── Private trackers (Torznab) ──────────────────────────
+            // Independent of the dubbed/English branch above — a
+            // private tracker's own catalog isn't split by dub
+            // language the way public site scraping is, so it always
+            // searches with the plain title (+ season/episode for a
+            // series, same convention englishQuery above already
+            // uses). One job per ENABLED tracker — a user with zero
+            // trackers configured adds zero jobs here, same as any
+            // other optional provider list in this app.
+            val trackerQuery = if (type == MovieType.SERIES) {
+                "$title S${String.format("%02d", season)}E${String.format("%02d", episode)}"
+            } else {
+                title
+            }
+            PrivateTrackerStore.getEnabled().forEach { tracker ->
+                jobs.add(async {
+                    withTimeoutOrNull(15_000) { PrivateTrackerSearch.search(tracker, trackerQuery) } ?: emptyList()
+                })
+            }
+
             jobs.awaitAll().forEach { allLinks.addAll(it) }
         }
 

@@ -25,9 +25,8 @@ data class BackupPayload(
     @SerializedName("proxy_settings")
     val proxySettings: BackedUpProxySettings? = null,
 
-    // Future fields go here, e.g.:
-    // @SerializedName("private_trackers")
-    // val privateTrackers: List<BackedUpTrackerCredential>? = null,
+    @SerializedName("private_trackers")
+    val privateTrackers: List<BackedUpTrackerCredential>? = null,
 
     @SerializedName("updated_at")
     val updatedAt: Long = System.currentTimeMillis()
@@ -52,4 +51,21 @@ data class BackedUpProxySettings(
     @SerializedName("port")      val port: Int,
     @SerializedName("username")  val username: String,
     @SerializedName("password")  val password: String
+)
+
+/**
+ * Mirror of PrivateTracker (see ui/movie/PrivateTracker.kt) for the
+ * same reason BackedUpProxySettings mirrors ProxySettingsStore's class
+ * — this backup schema shouldn't silently change shape if the live
+ * store's internal class does. [id] is backed up too (not just
+ * regenerated on restore) so a tracker's identity is stable across a
+ * restore — relevant if any future feature ever references a tracker
+ * by id (e.g. per-tracker search history or stats).
+ */
+data class BackedUpTrackerCredential(
+    @SerializedName("id")       val id: String,
+    @SerializedName("name")     val name: String,
+    @SerializedName("base_url") val baseUrl: String,
+    @SerializedName("api_key")  val apiKey: String,
+    @SerializedName("enabled")  val enabled: Boolean
 )

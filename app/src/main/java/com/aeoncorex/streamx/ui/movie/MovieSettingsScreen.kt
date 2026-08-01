@@ -5,11 +5,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -65,6 +67,12 @@ fun MovieSettingsScreen(navController: NavController) {
 
     var saveMessage by remember { mutableStateOf<String?>(null) }
     var saveSucceeded by remember { mutableStateOf(true) }
+
+    var trackers by remember { mutableStateOf(PrivateTrackerStore.getAll()) }
+    var newTrackerName by remember { mutableStateOf("") }
+    var newTrackerUrl by remember { mutableStateOf("") }
+    var newTrackerApiKey by remember { mutableStateOf("") }
+    var trackerAddMessage by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         containerColor = Color.Black,
@@ -195,6 +203,29 @@ fun MovieSettingsScreen(navController: NavController) {
 
                 item { SectionHeader("PRIVATE TRACKERS") }
                 item {
+                    Text(
+                        "Add a Torznab-compatible search API (the same convention Jackett/Prowlarr/Sonarr use — most private trackers expose one, often visible in their own API/Torznab settings page). Your API key stays encrypted on this device.",
+                        color = Color.Gray,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+
+                items(trackers, key = { it.id }) { tracker ->
+                    PrivateTrackerRow(
+                        tracker = tracker,
+                        onToggle = { enabled ->
+                            PrivateTrackerStore.setEnabled(tracker.id, enabled, context)
+                            trackers = PrivateTrackerStore.getAll()
+                        },
+                        onDelete = {
+                            PrivateTrackerStore.remove(tracker.id, context)
+                            trackers = PrivateTrackerStore.getAll()
+                        }
+                    )
+                }
+
+                item {
                     Box(
                         modifier = Modifier.fillMaxWidth()
                             .padding(vertical = 6.dp)
@@ -202,14 +233,54 @@ fun MovieSettingsScreen(navController: NavController) {
                             .padding(16.dp)
                     ) {
                         Column {
-                            Text("Coming soon", color = Color.White, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                "Add your own private-tracker login to include it in searches. " +
-                                    "Your credentials will stay on this device only.",
-                                color = Color.Gray,
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(top = 4.dp)
+                            Text("Add tracker", color = Color.White, fontWeight = FontWeight.SemiBold)
+
+                            TextFieldItem(
+                                label = "Name",
+                                value = newTrackerName,
+                                placeholder = "e.g. MyTracker",
+                                onValueChange = { newTrackerName = it }
                             )
+                            TextFieldItem(
+                                label = "Torznab base URL",
+                                value = newTrackerUrl,
+                                placeholder = "e.g. https://tracker.example/api/v1/torznab",
+                                onValueChange = { newTrackerUrl = it }
+                            )
+                            TextFieldItem(
+                                label = "API key",
+                                value = newTrackerApiKey,
+                                placeholder = "from the tracker's own API/Torznab settings page",
+                                isPassword = true,
+                                onValueChange = { newTrackerApiKey = it }
+                            )
+
+                            Button(
+                                onClick = {
+                                    if (newTrackerName.isBlank() || newTrackerUrl.isBlank() || newTrackerApiKey.isBlank()) {
+                                        trackerAddMessage = "Name, URL, and API key are all required"
+                                        return@Button
+                                    }
+                                    if (!newTrackerUrl.startsWith("http://") && !newTrackerUrl.startsWith("https://")) {
+                                        trackerAddMessage = "URL must start with http:// or https://"
+                                        return@Button
+                                    }
+                                    PrivateTrackerStore.add(newTrackerName, newTrackerUrl, newTrackerApiKey, context)
+                                    trackers = PrivateTrackerStore.getAll()
+                                    newTrackerName = ""
+                                    newTrackerUrl = ""
+                                    newTrackerApiKey = ""
+                                    trackerAddMessage = "Tracker added"
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Cyan, contentColor = Color.Black)
+                            ) {
+                                Text("Add", fontWeight = FontWeight.Bold)
+                            }
+
+                            trackerAddMessage?.let { msg ->
+                                Text(msg, color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                            }
                         }
                     }
                 }
@@ -235,6 +306,36 @@ fun SwitchSettingItem(title: String, subtitle: String, checked: Boolean, onCheck
             Text(subtitle, color = Color.Gray, fontSize = 12.sp)
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange, colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = Color.Cyan))
+    }
+}
+
+/**
+ * One configured private tracker in the list — name + enable toggle +
+ * delete, following [SwitchSettingItem]'s same card layout so the list
+ * reads consistently with the rest of this screen. The API key itself
+ * is deliberately never shown here (not even masked) — there's no
+ * "edit" flow, only add/remove, so there's no UI moment that would need
+ * to display it after the initial add.
+ */
+@Composable
+private fun PrivateTrackerRow(
+    tracker: PrivateTracker,
+    onToggle: (Boolean) -> Unit,
+    onDelete: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(tracker.name, color = Color.White, fontWeight = FontWeight.SemiBold)
+            Text(tracker.baseUrl, color = Color.Gray, fontSize = 12.sp)
+        }
+        Switch(checked = tracker.enabled, onCheckedChange = onToggle, colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = Color.Cyan))
+        IconButton(onClick = onDelete) {
+            Icon(Icons.Default.Delete, contentDescription = "Remove tracker", tint = Color.Gray)
+        }
     }
 }
 
