@@ -23,25 +23,43 @@ import okhttp3.Response
 //  the domain that gets the WebView solve — the interceptor never needs to
 //  know in advance which sites use Cloudflare.
 //
+//  ── CHANGED 2026-07-31: proactive attach + persistent cache ──────────────
+//  Previously this interceptor was PURELY reactive: every single request,
+//  even to a domain solved 30 seconds ago, went out with no cookie, hit a
+//  403, and only THEN triggered a solve — meaning every torrent search paid
+//  the WAF round-trip cost on every request, and a solved cookie only ever
+//  lived in Android's CookieManager with no TTL tracking, so there was no
+//  way to tell "still good" from "probably expired" without just trying.
+//  This is very likely why the interceptor "felt like it wasn't working" —
+//  it WAS solving, but only ever after already failing once, request after
+//  request, with no memory of having solved this domain minutes ago.
+//
+//  Now: TorrentWafCookieStore (MMKV, TTL-aware, mirrors wafCookieStore.js's
+//  design) is checked FIRST, before the request even goes out. A fresh
+//  cached cookie is attached proactively — most requests to an
+//  already-solved domain now never see a 403 at all. The reactive path
+//  (solve-on-403) still exists as a fallback for a domain that's never
+//  been seen before, or whose cached cookie turned out to be stale despite
+//  looking fresh (a WAF vendor can always invalidate early).
+//
 //  Flow:
-//    1. Request goes out normally.
-//    2. If the response looks like a WAF challenge (TorrentWafDetect —
-//       ported from wafDetect.js) instead of a dead origin, we know a
-//       clearance cookie would likely fix it.
-//    3. Resolve it on-device (WafCookieResolver.resolveLocalOnly —
-//       Phase-1-only, invisible WebView, never surprises the user with a
-//       captcha popup mid-search, same solve mechanics as the Worker-flow's
-//       resolveForLiveRetry() but WITHOUT reporting the cookie to the
-//       Worker — there's no Worker in this request path to report to; see
-//       resolveLocalOnly()'s doc comment for why that distinction matters).
-//    4. If solved, the cookie is now sitting in Android's CookieManager.
-//       OkHttp's default client has no CookieJar wired to that store, so we
-//       read it back out and attach it as a request header manually, then
-//       retry the SAME request once.
-//    5. Whether the retry succeeds or the solve failed, we return
-//       whatever response we have — callers' existing try/catch and
-//       empty-list fallbacks handle a still-bad response exactly like any
-//       other provider failure, no special-casing needed there.
+//    1. Check TorrentWafCookieStore for a fresh cookie for this domain. If
+//       found, attach it to the request BEFORE sending.
+//    2. Send the request (with or without a cookie attached).
+//    3. If the response still looks like a WAF challenge (TorrentWafDetect):
+//         a. If we'd attached a cached cookie, it was apparently stale —
+//            invalidate it in the store so the next request doesn't retry
+//            the same dead cookie.
+//         b. Resolve fresh on-device (WafCookieResolver.resolveLocalOnly —
+//            Phase-1-only, invisible WebView; see that function's doc
+//            comment for why this path never reports to the Worker).
+//         c. On success, WafCookieResolver itself now persists the solved
+//            cookie into TorrentWafCookieStore (see its resolveSilentInternal)
+//            — this interceptor just reads it back out and retries once.
+//    4. Whether the retry succeeds or the solve failed, we return whatever
+//       response we have — callers' existing try/catch and empty-list
+//       fallbacks handle a still-bad response exactly like any other
+//       provider failure, no special-casing needed there.
 //
 //  Bounded to ONE retry attempt per request — this is an interceptor
 //  sitting in a hot path for every torrent query, not a background warmup,
@@ -52,8 +70,19 @@ object TorrentWafInterceptor : Interceptor {
     private const val TAG = "TorrentWafInterceptor"
 
     override fun intercept(chain: Interceptor.Chain): Response {
-        val request  = chain.request()
-        val response = chain.proceed(request)
+        val originalRequest = chain.request()
+        val domain = originalRequest.url.host
+
+        // ── Step 1: proactive attach from the persistent cache ──────────
+        val cached = TorrentWafCookieStore.getFresh(domain)
+        val requestToSend = if (cached != null) {
+            Log.d(TAG, "$domain: attaching cached WAF cookie (${cached.secondsRemaining()}s remaining)")
+            originalRequest.newBuilder().header("Cookie", cached.cookie).build()
+        } else {
+            originalRequest
+        }
+
+        val response = chain.proceed(requestToSend)
 
         if (!response.isSuccessful) {
             // Peek the body (peekBody, not body!!.string()) so we don't
@@ -67,8 +96,16 @@ object TorrentWafInterceptor : Interceptor {
             }
 
             if (TorrentWafDetect.isLikelyWafBlock(response.code, bodySample)) {
-                val domain = request.url.host
                 Log.d(TAG, "$domain: response looks WAF-blocked (${response.code}) — attempting on-device solve")
+
+                if (cached != null) {
+                    // The cookie we proactively attached didn't actually
+                    // work — the WAF vendor invalidated it earlier than our
+                    // TTL assumed. Drop it now so the NEXT request to this
+                    // domain doesn't repeat the same failed attach.
+                    Log.d(TAG, "$domain: cached cookie was stale despite TTL — invalidating")
+                    TorrentWafCookieStore.invalidate(domain)
+                }
 
                 val context = WorkerStreamProviderEngine.getThemedContext()
                 if (context == null) {
@@ -86,7 +123,9 @@ object TorrentWafInterceptor : Interceptor {
                 // Worker at all. Reporting the cookie there would just bloat
                 // the Worker's KV registry with domains it never fetches
                 // itself, for zero benefit. See resolveLocalOnly()'s doc
-                // comment in WafCookieResolver.kt.
+                // comment in WafCookieResolver.kt. It DOES now persist to
+                // TorrentWafCookieStore internally (see resolveSilentInternal)
+                // — that's what step 1 above reads from on the NEXT request.
                 val solved = runBlocking {
                     WafCookieResolver.resolveLocalOnly(context, domain)
                 }
@@ -96,15 +135,19 @@ object TorrentWafInterceptor : Interceptor {
                     return response
                 }
 
-                val cookie = CookieManager.getInstance().getCookie("https://$domain/")
+                // Prefer the freshly-persisted store entry (has a known TTL
+                // attached); CookieManager is only a fallback for the
+                // unexpected case where the store write somehow didn't land.
+                val cookie = TorrentWafCookieStore.getFresh(domain)?.cookie
+                    ?: CookieManager.getInstance().getCookie("https://$domain/")
                 if (cookie.isNullOrBlank()) {
-                    Log.w(TAG, "$domain: solved but no cookie found in CookieManager — returning original response")
+                    Log.w(TAG, "$domain: solved but no cookie found — returning original response")
                     return response
                 }
 
                 response.close()
 
-                val retryRequest = request.newBuilder()
+                val retryRequest = originalRequest.newBuilder()
                     .header("Cookie", cookie)
                     .build()
 

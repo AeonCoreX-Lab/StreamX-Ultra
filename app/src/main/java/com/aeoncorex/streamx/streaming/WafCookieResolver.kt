@@ -82,7 +82,13 @@ object WafCookieResolver {
 
     private const val SILENT_TIMEOUT_MS    = 8_000L
     private const val USER_TIMEOUT_MS      = 120_000L
-    private const val REPORTED_TTL_SECONDS = 25 * 60
+    // Was private — widened to internal (2026-07-31) so
+    // TorrentWafCookieStore writes (from TorrentWafInterceptor /
+    // resolveLocalOnly callers) use the exact same TTL assumption as
+    // reportCookieToWorker() does for the Worker-side cache, rather
+    // than a second hardcoded copy of "25 minutes" drifting out of
+    // sync with this one over time.
+    internal const val REPORTED_TTL_SECONDS = 25 * 60
 
     // How many domains to solve concurrently during proactive warmup or a
     // refresh pass. WebView instances aren't free (each is a real
@@ -351,7 +357,18 @@ object WafCookieResolver {
         val myDeferred = inFlight.getValue(domain)
         return try {
             val solved = runSilentPhaseOnly(context, domain)
-            if (solved && reportToWorker) reportCookieToWorker(context, domain)
+            if (solved) {
+                // Persist locally regardless of reportToWorker — this is
+                // what TorrentWafInterceptor's first-request cache check
+                // reads from (see that file), and costs nothing extra for
+                // Worker-path callers either. Previously the cookie only
+                // lived in Android's CookieManager with no TTL tracking at
+                // all for the no-Worker (torrent) path — see
+                // TorrentWafCookieStore's header comment for the full
+                // "why this was missing" story.
+                persistLocalCookie(context, domain)
+                if (reportToWorker) reportCookieToWorker(context, domain)
+            }
             myDeferred.complete(solved)
             solved
         } catch (e: Exception) {
@@ -663,6 +680,33 @@ object WafCookieResolver {
     }
 
     // ── Report cookie to Worker ──────────────────────────────────────────────
+
+    /**
+     * Writes the just-solved cookie for [domain] into
+     * [TorrentWafCookieStore] — the local, no-Worker-required persistent
+     * cache TorrentWafInterceptor reads from on every subsequent request
+     * to the same domain. Called unconditionally after any successful
+     * silent solve (both [resolveForLiveRetry] and [resolveLocalOnly]
+     * paths — see [resolveSilentInternal]), independent of whether that
+     * solve ALSO gets reported to the Worker; the two caches serve
+     * different consumers (Worker-proxied direct-stream domains vs.
+     * on-device torrent-site domains) and cost nothing to keep both
+     * populated.
+     *
+     * Mirrors [reportCookieToWorker]'s own cookie/user-agent read exactly
+     * (same CookieManager call, same WebView-settings UA source) so the
+     * two caches never disagree about what was actually solved.
+     */
+    private suspend fun persistLocalCookie(context: Context, domain: String) {
+        val url = "https://$domain/"
+        val cookie = CookieManager.getInstance().getCookie(url)
+        if (cookie.isNullOrBlank()) return
+
+        val userAgent = withContext(Dispatchers.Main) {
+            WebView(context).settings.userAgentString
+        }
+        TorrentWafCookieStore.put(domain, cookie, userAgent, REPORTED_TTL_SECONDS)
+    }
 
     private suspend fun reportCookieToWorker(context: Context, domain: String) =
         withContext(Dispatchers.IO) {
