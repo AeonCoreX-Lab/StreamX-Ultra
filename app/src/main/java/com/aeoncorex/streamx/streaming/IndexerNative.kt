@@ -14,16 +14,21 @@ import org.json.JSONArray
 //    • nativeSearchDubbed  — searches 1337x (fallback), TorrentGalaxy,
 //                            KickassTorrents, KAT-WS, TorrentDownload,
 //                            ExtraTorrent, TheRARBG, ThePirateBay in
-//                            parallel for dubbed/dual-audio releases.
-//    • nativeSearchAll     — same sites, no dub-tag filtering.
-//    • nativeSearchDrama   — K-drama (TorrentQQ/Torrentsome) + general
-//                            sites, for K/C/Turkish drama.
+//                            parallel. Despite the name, no longer
+//                            filters by dub tag — see searchDubbed()'s
+//                            doc comment below.
+//    • nativeSearchAll     — same sites, identical result set to
+//                            nativeSearchDubbed as of 2026-07-25.
+//    • nativeSearchDrama   — Torrentsome/TorrentTip + general sites,
+//                            for K/C/Turkish drama.
 //    • nativeSearchAnimeEnglish / nativeSearchAnimeOtherDub — Nyaa.si +
 //                            Tokyo Toshokan for anime.
 //
 //  JNI function lives in:
-//    app/src/main/rust/src/lib.rs    → Java_..._IndexerNative_nativeSearchDubbed
-//    app/src/main/rust/src/indexer/  → actual scraping (engine.rs + sites/*.rs)
+//    app/src/main/rust/src/lib.rs → Java_..._IndexerNative_nativeSearchDubbed
+//  Actual scraping engine is the external streamx-indexer crate (see
+//  app/src/main/rust/Cargo.toml's git dependency) — not vendored into
+//  this app's own src/main/rust/src/ tree.
 //
 //  IMPORTANT — how this connects to playback:
 //  This object ONLY searches. It does not touch TorrentEngine at all.
@@ -164,7 +169,7 @@ object IndexerNative {
      *           "audio_tags":["Hindi Dubbed"],"quality":"1080p"}, ...]
      *         "[]" on any failure — never throws.
      */
-    private external fun nativeSearchDubbed(query: String, imdbId: String): String
+    private external fun nativeSearchDubbed(query: String, imdbId: String, authCookiesJson: String): String
 
     /**
      * Plain keyword search across all sites, no dub-tag filtering.
@@ -172,7 +177,7 @@ object IndexerNative {
      * broken TorrentProviders.fetch1337x() call in TorrentRepository.kt).
      * Same JSON shape as nativeSearchDubbed.
      */
-    private external fun nativeSearchAll(query: String): String
+    private external fun nativeSearchAll(query: String, authCookiesJson: String): String
 
     /**
      * K-drama / C-drama / Turkish drama search — returns BOTH original-voice
@@ -181,20 +186,46 @@ object IndexerNative {
      *   results.filter { "Korean" in it.audioTags }        → original voice
      *   results.filter { "English Dub" in it.audioTags }   → English dub
      *
-     * NOTE: results from TorrentQQ/Torrentsome (Korean-dedicated sites)
+     * NOTE: results from Torrentsome/TorrentTip (Korean-dedicated sites)
      * carry seeds=1 as a placeholder — those two sites don't publish real
      * swarm health data at all (verified against their Jackett definitions).
      * Check `source` to distinguish "seeds unknown" from "actually 1 seed".
      */
-    private external fun nativeSearchDrama(query: String): String
+    private external fun nativeSearchDrama(query: String, authCookiesJson: String): String
 
     /** Anime search — Nyaa's "English-translated" category (dub or sub). */
-    private external fun nativeSearchAnimeEnglish(query: String): String
+    private external fun nativeSearchAnimeEnglish(query: String, authCookiesJson: String): String
 
     /** Anime search — Nyaa's "Non-English-translated" category (other-language dub/sub). */
     private external fun nativeSearchAnimeOtherDub(query: String): String
 
+    /**
+     * Every built-in private tracker (every registry site with
+     * request.auth set) as a JSON array — see nativeListPrivateTrackers
+     * in lib.rs for the exact shape. Used to render the login list in
+     * Movie Settings without hardcoding tracker names/ids in Kotlin.
+     */
+    private external fun nativeListPrivateTrackers(): String
+
     // ── Public API ────────────────────────────────────────────────────────────
+
+    /**
+     * Every private-tracker cookie the user has configured, serialized
+     * once per search call as a single JSON object ({"siteId": "cookie",
+     * ...}) — see PrivateTrackerCookieStore's doc comment for the full
+     * design and MapAuthProvider (lib.rs) for how the Rust side consumes
+     * it. Public sites are entirely unaffected either way: a site whose
+     * SiteConfig has no `auth` block never looks this map up at all
+     * (see streamx_indexer::dispatch::search_site's requires_auth()
+     * check), so an empty or irrelevant map here costs nothing.
+     */
+    private fun authCookiesJson(): String {
+        val cookies = PrivateTrackerCookieStore.allCookies()
+        if (cookies.isEmpty()) return "{}"
+        val obj = org.json.JSONObject()
+        for ((siteId, cookie) in cookies) obj.put(siteId, cookie)
+        return obj.toString()
+    }
 
     /**
      * FIX (root cause of "0 Hindi/dub results" while the same title had
@@ -205,17 +236,23 @@ object IndexerNative {
      * TGx/TheRARBG search by ID instead of by [query] — which silently
      * dropped the dub-language keywords baked into [query] (e.g. "...
      * Hindi Dubbed 1080p") and returned that site's default-language
-     * listing instead, which then correctly failed the dub-tag filter
-     * downstream. If IMDB-based dedicated-site search is reintroduced
-     * later, it must be combined with the query's language keywords,
-     * not used as a full replacement for the query string.
+     * listing instead. If IMDB-based dedicated-site search is
+     * reintroduced later, it must be combined with the query's language
+     * keywords, not used as a full replacement for the query string.
+     *
+     * NOTE (2026-07-25): the Rust side no longer filters by dub tag at
+     * all — see streamx-indexer's search_dubbed doc comment. This now
+     * returns the exact same result set as searchAll() would for the
+     * same query; kept as its own function purely because callers
+     * already call it by this name and because [imdbId] is still a
+     * meaningful parameter here even though nothing currently reads it.
      */
     suspend fun searchDubbed(
         query:  String,
         imdbId: String? = null
     ): List<IndexerResult> = withContext(Dispatchers.IO) {
         try {
-            val json = nativeSearchDubbed(query, imdbId.orEmpty())
+            val json = nativeSearchDubbed(query, imdbId.orEmpty(), authCookiesJson())
             parseResults(json)
         } catch (e: Exception) {
             Log.w(TAG, "searchDubbed error: ${e.message}")
@@ -225,7 +262,7 @@ object IndexerNative {
 
     suspend fun searchAll(query: String): List<IndexerResult> = withContext(Dispatchers.IO) {
         try {
-            val json = nativeSearchAll(query)
+            val json = nativeSearchAll(query, authCookiesJson())
             parseResults(json)
         } catch (e: Exception) {
             Log.w(TAG, "searchAll error: ${e.message}")
@@ -239,7 +276,7 @@ object IndexerNative {
      */
     suspend fun searchDrama(query: String): List<IndexerResult> = withContext(Dispatchers.IO) {
         try {
-            val json = nativeSearchDrama(query)
+            val json = nativeSearchDrama(query, authCookiesJson())
             parseResults(json)
         } catch (e: Exception) {
             Log.w(TAG, "searchDrama error: ${e.message}")
@@ -250,7 +287,7 @@ object IndexerNative {
     /** Anime, English dub or sub (Nyaa "English-translated" category). */
     suspend fun searchAnimeEnglish(query: String): List<IndexerResult> = withContext(Dispatchers.IO) {
         try {
-            val json = nativeSearchAnimeEnglish(query)
+            val json = nativeSearchAnimeEnglish(query, authCookiesJson())
             parseResults(json)
         } catch (e: Exception) {
             Log.w(TAG, "searchAnimeEnglish error: ${e.message}")
@@ -269,6 +306,36 @@ object IndexerNative {
         }
     }
 
+    /**
+     * Every built-in private tracker the registry currently knows about —
+     * for MovieSettingsScreen's tracker login list. Never throws; returns
+     * an empty list on any parse/native failure so a registry hiccup
+     * degrades to "no built-in trackers shown" rather than crashing
+     * Settings.
+     */
+    suspend fun listPrivateTrackers(): List<PrivateTrackerListing> = withContext(Dispatchers.IO) {
+        try {
+            val json = nativeListPrivateTrackers()
+            val arr = JSONArray(json)
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                val id = o.optString("id", "")
+                if (id.isEmpty()) return@mapNotNull null
+                PrivateTrackerListing(
+                    id                  = id,
+                    displayName         = o.optString("display_name", id),
+                    instructions        = o.optString("instructions", ""),
+                    loginCheckPath      = o.optString("login_check_path", "").takeIf { it.isNotEmpty() },
+                    loginCheckSelector  = o.optString("login_check_selector", "").takeIf { it.isNotEmpty() },
+                    baseUrl             = o.optString("base_url", "")
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "listPrivateTrackers error: ${e.message}")
+            emptyList()
+        }
+    }
+
     // ── Parsing ───────────────────────────────────────────────────────────────
 
     private fun parseResults(json: String): List<IndexerResult> = try {
@@ -276,7 +343,15 @@ object IndexerNative {
         (0 until arr.length()).mapNotNull { i ->
             val o      = arr.optJSONObject(i) ?: return@mapNotNull null
             val magnet = o.optString("magnet", "")
-            if (!magnet.startsWith("magnet:")) return@mapNotNull null
+            val torrentFileUrl = o.optString("torrent_file_url", "").takeIf { it.isNotEmpty() }
+            // A result is only usable if it has EITHER a real magnet URI
+            // OR a torrent_file_url (private-tracker results — see
+            // TorrentResult::torrent_file_url's doc comment on the Rust
+            // side for why those never have a magnet at all). Previously
+            // this only checked magnet.startsWith("magnet:"), which
+            // silently dropped every private-tracker result before it
+            // ever reached the UI — now fixed.
+            if (!magnet.startsWith("magnet:") && torrentFileUrl == null) return@mapNotNull null
 
             val tagsArr = o.optJSONArray("audio_tags")
             val tags = mutableListOf<String>()
@@ -293,7 +368,10 @@ object IndexerNative {
                 source    = o.optString("source", ""),
                 audioTags = tags,
                 quality   = o.optString("quality", "SD"),
-                isConfirmedDub = o.optBoolean("is_confirmed_dub", true)
+                isConfirmedDub = o.optBoolean("is_confirmed_dub", true),
+                torrentFileUrl = torrentFileUrl,
+                requiresTorrentAuth = o.optBoolean("requires_torrent_auth", false),
+                siteId = o.optString("site_id", "")
             )
         }
     } catch (e: Exception) {
@@ -321,6 +399,19 @@ enum class ProxyKind(val wireValue: String) {
     SOCKS5("socks5")
 }
 
+/**
+ * One built-in private tracker, as listed by IndexerNative.listPrivateTrackers()
+ * for MovieSettingsScreen's login list. Mirrors lib.rs's PrivateTrackerInfo.
+ */
+data class PrivateTrackerListing(
+    val id: String,
+    val displayName: String,
+    val instructions: String,
+    val loginCheckPath: String?,
+    val loginCheckSelector: String?,
+    val baseUrl: String
+)
+
 data class IndexerResult(
     val title:     String,
     val magnet:    String,
@@ -339,17 +430,28 @@ data class IndexerResult(
      * confirmed dub for these — see the "label" property below, which
      * substitutes "Best match" when this is false.
      */
-    val isConfirmedDub: Boolean = true
+    val isConfirmedDub: Boolean = true,
+    /** See StreamLink.torrentFileUrl's doc comment — same field, mirrored from Rust's TorrentResult. */
+    val torrentFileUrl: String? = null,
+    /** See StreamLink.requiresTorrentAuth's doc comment. */
+    val requiresTorrentAuth: Boolean = false,
+    /** See StreamLink.siteId's doc comment. */
+    val siteId: String = ""
 ) {
     /**
-     * TorrentQQ, Torrentsome, TorrentTip (Korean drama sites), and
-     * eztvtorrent.co don't publish real seeder/leecher counts — the
-     * Rust indexer sets seeds=1 as an honest placeholder rather than
-     * fabricating a number. UI should show "health unknown" instead of
-     * a seed count for these sources.
+     * Torrentsome, TorrentTip (Korean drama sites), and eztvtorrent.co
+     * don't publish real seeder/leecher counts — the Rust indexer sets
+     * seeds=1 as an honest placeholder rather than fabricating a number.
+     * UI should show "health unknown" instead of a seed count for these
+     * sources.
+     *
+     * (TorrentQQ removed 2026-07-25 — see streamx-indexer's kdrama.rs:
+     * Jackett dropped that site's definition upstream entirely, no
+     * current reference to verify its selectors against, so it was
+     * removed here rather than kept as an unverifiable scraper.)
      */
     val isHealthUnknown: Boolean
-        get() = source == "TorrentQQ" || source == "Torrentsome" || source == "TorrentTip" || source == "eztvtorrent.co"
+        get() = source == "Torrentsome" || source == "TorrentTip" || source == "eztvtorrent.co"
 
     /**
      * Short label for list UI, e.g. "1080p • Hindi Dubbed • 1337x".
@@ -373,8 +475,10 @@ data class IndexerResult(
 /**
  * Maps an [IndexerResult] to the app's existing [StreamLink] shape
  * (defined in MovieModels.kt) so results flow through the same
- * TorrentCard UI and playTorrent() path as every other provider —
- * no changes needed in MovieLinkSelectionScreen.kt.
+ * TorrentCard UI and playTorrent() path as every other provider — no
+ * further changes needed in MovieLinkSelectionScreen.kt beyond
+ * playTorrent() itself branching on torrentFileUrl (see its doc
+ * comment there).
  *
  * Dub tags are folded into the title so they're visible in the list
  * even though StreamLink itself has no dedicated audioTags field.
@@ -396,13 +500,16 @@ fun IndexerResult.toStreamLink(): StreamLink {
     }
 
     return StreamLink(
-        title          = titleWithTags,
-        magnet         = magnet,
-        quality        = quality.uppercase(),
-        seeds          = seeds,
-        peers          = peers,
-        size           = size,
-        source         = source,
-        isConfirmedDub = isConfirmedDub
+        title                = titleWithTags,
+        magnet               = magnet,
+        quality              = quality.uppercase(),
+        seeds                = seeds,
+        peers                = peers,
+        size                 = size,
+        source               = source,
+        isConfirmedDub       = isConfirmedDub,
+        torrentFileUrl       = torrentFileUrl,
+        requiresTorrentAuth  = requiresTorrentAuth,
+        siteId               = siteId
     )
 }

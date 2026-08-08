@@ -27,6 +27,7 @@ import com.aeoncorex.streamx.ui.premium.PremiumScreen
 import com.aeoncorex.streamx.ui.movie.MovieScreen
 import com.aeoncorex.streamx.ui.movie.MovieDetailsScreen
 import com.aeoncorex.streamx.ui.movie.MovieSettingsScreen
+import com.aeoncorex.streamx.ui.movie.TrackerLoginScreen
 import com.aeoncorex.streamx.ui.movie.MovieLinkSelectionScreen
 import com.aeoncorex.streamx.ui.movie.MoviePlayerScreen
 import com.aeoncorex.streamx.ui.movie.ExoMoviePlayerScreen
@@ -105,6 +106,31 @@ fun AppNavigation(
         // ── Movie ─────────────────────────────────────────────────────────────
         composable("movie")          { MovieScreen(navController) }
         composable("movie_settings") { MovieSettingsScreen(navController) }
+
+        composable(
+            route     = "tracker_login/{siteId}/{displayName}/{baseUrl}?instructions={instructions}&loginCheckPath={loginCheckPath}&loginCheckSelector={loginCheckSelector}",
+            arguments = listOf(
+                navArgument("siteId")             { type = NavType.StringType },
+                navArgument("displayName")        { type = NavType.StringType },
+                navArgument("baseUrl")            { type = NavType.StringType },
+                navArgument("instructions")       { type = NavType.StringType; defaultValue = "" },
+                navArgument("loginCheckPath")     { type = NavType.StringType; defaultValue = "" },
+                navArgument("loginCheckSelector") { type = NavType.StringType; defaultValue = "" }
+            )
+        ) { back ->
+            fun arg(name: String) = back.arguments?.getString(name)?.let {
+                try { java.net.URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it }
+            } ?: ""
+            TrackerLoginScreen(
+                navController      = navController,
+                siteId             = arg("siteId"),
+                displayName        = arg("displayName"),
+                baseUrl            = arg("baseUrl"),
+                instructions       = arg("instructions"),
+                loginCheckPath     = arg("loginCheckPath").takeIf { it.isNotEmpty() },
+                loginCheckSelector = arg("loginCheckSelector").takeIf { it.isNotEmpty() }
+            )
+        }
 
         composable(
             route     = "movie_detail/{movieId}/{type}",
@@ -188,21 +214,24 @@ fun AppNavigation(
         }
 
         composable(
-            route     = "torrent_player/{encodedUrl}?imdbId={imdbId}&mbSubjectId={mbSubjectId}&mbSe={mbSe}&mbEp={mbEp}",
+            route     = "torrent_player/{encodedUrl}?imdbId={imdbId}&trackerSiteId={trackerSiteId}",
             arguments = listOf(
-                navArgument("encodedUrl")   { type = NavType.StringType },
-                navArgument("imdbId")       { type = NavType.StringType; defaultValue = "" },
-                navArgument("mbSubjectId")  { type = NavType.StringType; defaultValue = "" },
-                navArgument("mbSe")         { type = NavType.IntType;    defaultValue = 0 },
-                navArgument("mbEp")         { type = NavType.IntType;    defaultValue = 0 }
+                navArgument("encodedUrl")    { type = NavType.StringType },
+                navArgument("imdbId")        { type = NavType.StringType; defaultValue = "" },
+                // Set only when encodedUrl is a private tracker's
+                // authenticated .torrent download link (see
+                // MovieLinkSelectionScreen's playTorrent()) — empty for
+                // a normal magnet link. MoviePlayerScreen uses this to
+                // look up the live cookie from PrivateTrackerCookieStore
+                // at play time; the cookie itself never travels through
+                // this route.
+                navArgument("trackerSiteId") { type = NavType.StringType; defaultValue = "" }
             )
         ) { back ->
             MoviePlayerScreen(navController = navController,
-                encodedUrl  = back.arguments?.getString("encodedUrl") ?: "",
-                imdbId      = back.arguments?.getString("imdbId") ?: "",
-                mbSubjectId = back.arguments?.getString("mbSubjectId") ?: "",
-                mbSe        = back.arguments?.getInt("mbSe") ?: 0,
-                mbEp        = back.arguments?.getInt("mbEp") ?: 0)
+                encodedUrl    = back.arguments?.getString("encodedUrl") ?: "",
+                imdbId        = back.arguments?.getString("imdbId") ?: "",
+                trackerSiteId = back.arguments?.getString("trackerSiteId") ?: "")
         }
 
         // ── Music ─────────────────────────────────────────────────────────────

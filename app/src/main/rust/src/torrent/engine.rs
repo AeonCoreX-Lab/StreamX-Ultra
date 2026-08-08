@@ -41,7 +41,11 @@ impl TorrentEngine {
     }
 
     // ── Start ─────────────────────────────────────────────────────────────────
-    pub fn start(&self, magnet: &str, save_dir: &str) {
+    // `auth_cookie`: see TorrentSession::run()'s doc comment — only
+    // meaningful when `magnet` is actually a private tracker's
+    // authenticated .torrent download URL, ignored entirely for a real
+    // magnet: URI.
+    pub fn start(&self, magnet: &str, save_dir: &str, auth_cookie: Option<&str>) {
         // Claim the next generation for the session we're about to create.
         let my_generation = self.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
 
@@ -55,6 +59,7 @@ impl TorrentEngine {
 
         let magnet   = magnet.to_string();
         let save_dir = save_dir.to_string();
+        let auth_cookie = auth_cookie.map(|c| c.to_string());
 
         let session = Arc::new(TorrentSession::new());
         *self.session.lock() = Some((my_generation, session.clone()));
@@ -75,7 +80,7 @@ impl TorrentEngine {
         // Drive the session in background
         let rt = self.rt.clone();
         rt.spawn(async move {
-            session.run(magnet, save_dir).await;
+            session.run(magnet, save_dir, auth_cookie).await;
         });
 
         info!("TorrentEngine::start — session started (generation {my_generation})");

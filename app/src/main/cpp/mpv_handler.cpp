@@ -24,8 +24,8 @@ static int         s_surface_w = 0;
 static int         s_surface_h = 0;
 static std::mutex  mpv_mutex;
 
-// ── Playback-failure state (network/HTTP errors — expired MovieBox
-// signed URLs, 403s, connection resets, etc.) ──────────────────────
+// ── Playback-failure state (network/HTTP errors — expired signed
+// URLs, 403s, connection resets, etc.) ──────────────────────
 // Populated from MPV_EVENT_END_FILE in the event loop when mpv reports
 // a genuine error reason (MPV_END_FILE_REASON_ERROR), as opposed to a
 // normal stop/EOF/quit which needs no user-facing handling. Kotlin
@@ -1197,7 +1197,7 @@ static void mpv_event_loop() {
         if (ev->event_id == MPV_EVENT_END_FILE) {
             auto* end = static_cast<mpv_event_end_file*>(ev->data);
             if (end && end->reason == MPV_END_FILE_REASON_ERROR) {
-                // Genuine playback failure — expired MovieBox signed URL,
+                // Genuine playback failure — expired signed URL,
                 // HTTP 403/404, connection reset, unreachable host, etc.
                 // MPV_END_FILE_REASON_EOF/STOP/QUIT are normal and must
                 // NOT be surfaced as errors (EOF also fires on ordinary
@@ -1399,7 +1399,7 @@ std::string get_track_list_mpv(const char* type) {
     return out.str();
 }
 
-// ── Playback-error accessors (for MOVIEBOX/DIRECT retry support) ────
+// ── Playback-error accessors (for DIRECT-URL retry support) ────
 // See s_last_playback_error's doc comment near its declaration. Uses
 // its own mutex (not mpv_mutex) since these are called every poll tick
 // from Kotlin alongside get_property_string_mpv_safe() calls that DO

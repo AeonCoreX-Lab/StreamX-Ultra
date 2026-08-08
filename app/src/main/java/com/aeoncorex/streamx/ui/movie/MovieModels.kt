@@ -27,7 +27,31 @@ data class StreamLink(
      * every other provider (YTS, EZTV, BitSearch, etc.), which don't
      * have this distinction — they either found a match or didn't.
      */
-    val isConfirmedDub: Boolean = true
+    val isConfirmedDub: Boolean = true,
+    /**
+     * Set instead of a usable [magnet] for private-tracker results —
+     * every real private tracker (HD-Torrents, MySpleen, TorrentBD,
+     * etc.) only exposes a `.torrent` file download link on its listing
+     * page, never a magnet URI (that download hit is how these sites
+     * track ratio/membership on every single download). null for every
+     * public/magnet-based source, which is the overwhelming majority.
+     * When set, [magnet] is empty and playTorrent() must route through
+     * this field + [requiresTorrentAuth]/[siteId] instead.
+     */
+    val torrentFileUrl: String? = null,
+    /**
+     * True when [torrentFileUrl] needs the SAME session cookie the
+     * search itself used, attached as a Cookie header, or the download
+     * 403s / silently returns the tracker's login page instead of real
+     * .torrent bytes. Always false when [magnet] is set.
+     */
+    val requiresTorrentAuth: Boolean = false,
+    /**
+     * The registry's SiteConfig.id (e.g. "hdtorrents") — what
+     * PrivateTrackerCookieStore is keyed by. Only meaningful when
+     * [requiresTorrentAuth] is true; empty otherwise.
+     */
+    val siteId: String = ""
 ) {
     /**
      * Best-effort "Dual Audio" / "Multi Audio" detector run against the raw

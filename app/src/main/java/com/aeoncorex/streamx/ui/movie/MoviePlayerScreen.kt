@@ -71,7 +71,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.navigation.NavController
-import com.aeoncorex.streamx.streaming.MovieBoxNative
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -181,7 +180,7 @@ object StreamXCore {
     @JvmStatic external fun getForceSwDecode(): Boolean
     @JvmStatic external fun getActiveGpuContext(): String
 
-    // ── Playback-error accessors (MOVIEBOX/DIRECT retry support) ────
+    // ── Playback-error accessors (DIRECT-URL retry support) ────
     // Empty string from getMpvLastError() = no pending error. See
     // mpv_handler.cpp's s_last_playback_error doc comment.
     @JvmStatic external fun getMpvLastError(): String
@@ -214,18 +213,10 @@ object StreamXCore {
 // ═══════════════════════════════════════════════════════════════════
 // TORRENT   → magnet link, TorrentEngine downloads pieces, local HTTP
 //             stream server, real progress/speed/seeds available.
-// MOVIEBOX  → resolved direct MP4/HLS URL from the MovieBox provider,
-//             tagged with MOVIEBOX_URL_MARKER by MovieLinkSelectionScreen
-//             before navigation so the player can tell it apart from a
-//             generic direct link without any extra nav argument.
-// DIRECT    → any other raw playable URL (untagged).
-enum class PlaybackMode { TORRENT, MOVIEBOX, DIRECT }
-
-// Prefix MovieLinkSelectionScreen prepends to a MovieBox-resolved stream
-// URL before URL-encoding it into the nav route. Stripped immediately in
-// MoviePlayerScreen — MPV/StreamXCore never sees this prefix, only the
-// real URL after it.
-const val MOVIEBOX_URL_MARKER = "streamx-moviebox://"
+// DIRECT    → any other raw playable URL (a private-tracker or Torznab
+//             result that resolved to a direct HTTP(S) link instead of a
+//             magnet, or an external stream link).
+enum class PlaybackMode { TORRENT, DIRECT }
 
 data class MpvTrack(val id: Int, val title: String, val selected: Boolean)
 
@@ -504,12 +495,11 @@ fun MoviePlayerScreen(
     navController: NavController,
     encodedUrl: String,
     imdbId: String = "",
-    // Present only for PlaybackMode.MOVIEBOX sessions — needed to re-call
-    // MovieBoxNative.getStreams() and fetch a fresh signed URL if the
-    // current one expires mid-playback. See PlaybackMode doc above.
-    mbSubjectId: String = "",
-    mbSe: Int = 0,
-    mbEp: Int = 0
+    // Set only when decodedUrl is a private tracker's authenticated
+    // .torrent download link (not a magnet). Used to look up the live
+    // cookie from PrivateTrackerCookieStore right before starting the
+    // torrent session — see the TorrentEngine.start() call below.
+    trackerSiteId: String = ""
 ) {
     val context  = LocalContext.current
     val activity = context as? Activity
@@ -517,35 +507,29 @@ fun MoviePlayerScreen(
     val scope    = rememberCoroutineScope()
 
     // ── Dual playback mode ──────────────────────────────────────────
-    // TORRENT: decodedUrl is a magnet link — TorrentEngine downloads
-    //   pieces, exposes a local HTTP stream (http://127.0.0.1:PORT/stream),
-    //   and the buffering overlay shows REAL torrent progress (%, speed,
-    //   seeds) because that data genuinely exists and is meaningful here.
-    // MOVIEBOX: decodedUrl is a direct MP4/HLS URL that came from the
-    //   MovieBox resolver (MovieLinkSelectionScreen's Instant Play card).
-    //   There is no torrent session, no "seeds", no meaningful download
-    //   %, so the overlay must NOT show torrent-style stats — showing
-    //   "0 seeds" or a stuck 0% for a source that has neither would be
-    //   actively misleading. Instead this shows an indeterminate
-    //   "Buffering stream…" spinner; MPV opens the URL over plain HTTP
-    //   and buffers via normal range requests, same mechanism as any
-    //   direct link, just labeled correctly for what it actually is.
-    // DIRECT: any other raw URL (non-magnet, non-MovieBox-tagged) —
-    //   same UI treatment as MOVIEBOX, since neither has torrent stats.
-    //
-    // Detection: MovieLinkSelectionScreen tags MovieBox URLs with a
-    // lightweight marker prefix before navigating here (see
-    // playMovieBoxStream() in MovieLinkSelectionScreen.kt), stripped
-    // immediately below so MPV/StreamXCore only ever sees the real URL.
-    val moviePlaybackUrl = remember {
-        if (decodedUrl.startsWith(MOVIEBOX_URL_MARKER)) decodedUrl.removePrefix(MOVIEBOX_URL_MARKER) else decodedUrl
-    }
+    // TORRENT: decodedUrl is either a magnet link OR a private
+    //   tracker's authenticated .torrent download URL (trackerSiteId
+    //   non-blank — see MovieLinkSelectionScreen's playTorrent()).
+    //   Either way TorrentEngine downloads pieces, exposes a local HTTP
+    //   stream (http://127.0.0.1:PORT/stream), and the buffering
+    //   overlay shows REAL torrent progress (%, speed, seeds) because
+    //   that data genuinely exists and is meaningful here. The .torrent
+    //   file itself is fetched with the tracker's cookie attached (see
+    //   TorrentEngine.start()'s authCookie param) — everything
+    //   downstream of that (piece download, HTTP stream serving) is
+    //   identical to a normal magnet session.
+    // DIRECT: any other raw URL (non-magnet, no trackerSiteId) — a
+    //   Torznab result or other source that resolved to a direct
+    //   HTTP(S) media link. There is no torrent session, no "seeds", no
+    //   meaningful download %, so the overlay must NOT show
+    //   torrent-style stats — showing "0 seeds" or a stuck 0% for a
+    //   source that has neither would be actively misleading. Instead
+    //   this shows an indeterminate "Buffering…" spinner; MPV opens the
+    //   URL over plain HTTP and buffers via normal range requests.
+    val moviePlaybackUrl = decodedUrl
     val playbackMode = remember {
-        when {
-            decodedUrl.startsWith("magnet:?")          -> PlaybackMode.TORRENT
-            decodedUrl.startsWith(MOVIEBOX_URL_MARKER)  -> PlaybackMode.MOVIEBOX
-            else                                        -> PlaybackMode.DIRECT
-        }
+        if (decodedUrl.startsWith("magnet:?") || trackerSiteId.isNotBlank()) PlaybackMode.TORRENT
+        else PlaybackMode.DIRECT
     }
 
     val movieTitle = remember {
@@ -599,20 +583,6 @@ fun MoviePlayerScreen(
     var isStuttering       by remember { mutableStateOf(false) }
     var lastDropCount      by remember { mutableStateOf(0L) }
     var lastDropCheckTime  by remember { mutableStateOf(0L) }
-    // ── MovieBox re-resolve state ────────────────────────────────────
-    // Last mpv error-generation counter we've already reacted to (or
-    // decided not to react to). getMpvErrorGeneration() only ever
-    // increases, so comparing against this tells us "is there a NEW
-    // error since the last time we checked" without racing on the
-    // error message string itself. Starts at -1 so generation 0 (the
-    // very first possible error) is still recognized as new.
-    var lastSeenErrorGen   by remember { mutableStateOf(-1) }
-    // How many times we've already tried re-resolving a fresh MovieBox
-    // URL for the CURRENT videoPath session. Capped so a persistently
-    // broken subject/dub doesn't retry forever — after the cap, the
-    // failure surfaces as a normal error instead of silently looping.
-    var mbReResolveCount   by remember { mutableStateOf(0) }
-    val MAX_MB_RERESOLVES = 2
     // Tier 2 #14: Battery-saver awareness. When Android's Power Save mode is
     // active, the heavy ewa_lanczossharp GPU scaler (toggleVulkanFSR) is
     // disabled in favor of the cheap bilinear scaler — meaningful battery
@@ -739,7 +709,7 @@ fun MoviePlayerScreen(
         }
     }
 
-    // ── Torrent / MovieBox / Direct URL ──────────────────────────────
+    // ── Torrent / Direct URL ───────────────────────────────────────────
     LaunchedEffect(decodedUrl, retryTrigger) {
         var retryCount = 0; val maxRetries = 3
         while (retryCount < maxRetries) {
@@ -763,8 +733,16 @@ fun MoviePlayerScreen(
                     context.getExternalFilesDir("torrents")?.absolutePath
                         ?: context.cacheDir.absolutePath
                 }
+                // Empty for a normal magnet — TorrentEngine.start()
+                // treats "" as "no auth needed" (see its doc comment).
+                // Looked up fresh here (not passed through the nav
+                // route) so a cookie refreshed after this screen opened
+                // is always the one actually used.
+                val authCookie = if (trackerSiteId.isNotBlank())
+                    com.aeoncorex.streamx.streaming.PrivateTrackerCookieStore.cookieFor(trackerSiteId) ?: ""
+                else ""
                 var metadataTimeout = 0; var completed = false
-                withContext(Dispatchers.IO) { TorrentEngine.start(decodedUrl, torrentsRoot) }
+                withContext(Dispatchers.IO) { TorrentEngine.start(decodedUrl, torrentsRoot, authCookie) }
                 TorrentEngine.status.collect { status ->
                     when (status.state) {
                         TorrentEngine.State.METADATA -> {
@@ -799,16 +777,13 @@ fun MoviePlayerScreen(
                 }
                 if (completed) break; retryCount++; delay(2000)
             } else {
-                // MOVIEBOX or DIRECT — no torrent session, no piece
-                // download, no meaningful "progress %". MPV opens the
-                // URL directly over HTTP and buffers via normal range
-                // requests — the overlay reflects that honestly instead
-                // of borrowing torrent language ("Fetching metadata…",
-                // seeds/speed) that doesn't apply here.
-                statusMsg = when (playbackMode) {
-                    PlaybackMode.MOVIEBOX -> "Buffering stream…"
-                    else                  -> "Opening video…"
-                }
+                // DIRECT — no torrent session, no piece download, no
+                // meaningful "progress %". MPV opens the URL directly
+                // over HTTP and buffers via normal range requests — the
+                // overlay reflects that honestly instead of borrowing
+                // torrent language ("Fetching metadata…", seeds/speed)
+                // that doesn't apply here.
+                statusMsg = "Opening video…"
                 videoPath = moviePlaybackUrl
                 break
             }
@@ -816,80 +791,10 @@ fun MoviePlayerScreen(
         if (retryCount == maxRetries) statusMsg = "Failed after $maxRetries retries."
     }
 
-    // Reset MovieBox re-resolve tracking on a genuinely new video session
-    // (new decodedUrl from navigation) — NOT on videoPath alone, since
-    // videoPath itself changes during a re-resolve and resetting there
-    // would defeat the retry cap.
+    // Reset stale MPV error tracking on a genuinely new video session
+    // (new decodedUrl from navigation).
     LaunchedEffect(decodedUrl) {
-        mbReResolveCount = 0
-        lastSeenErrorGen = try { StreamXCore.getMpvErrorGeneration() } catch (e: Exception) { -1 }
         try { StreamXCore.clearMpvLastError() } catch (e: Exception) {}
-    }
-
-    // ── MovieBox expired-URL detection + re-resolve ──────────────────
-    // MOVIEBOX mode has no torrent-engine ERROR state to poll (that only
-    // exists for PlaybackMode.TORRENT — see the LaunchedEffect(decodedUrl,
-    // retryTrigger) torrent branch above). Instead this polls mpv's own
-    // end-file error signal (see mpv_handler.cpp's MPV_EVENT_END_FILE
-    // handling) and, on a genuinely NEW error, re-calls
-    // MovieBoxNative.getStreams() for a fresh signed URL — MovieBox's
-    // resource links expire after a while, so a long-paused or
-    // long-buffering session can otherwise fail with no recovery path.
-    // Runs only when we actually have the MovieBox identifiers needed to
-    // re-resolve (mbSubjectId non-blank) — plain DIRECT links have
-    // nothing to re-fetch, so their errors fall through to the normal
-    // error overlay instead.
-    LaunchedEffect(playbackMode, mbSubjectId) {
-        if (playbackMode != PlaybackMode.MOVIEBOX || mbSubjectId.isBlank()) return@LaunchedEffect
-        while (true) {
-            delay(1000)
-            val gen = try { StreamXCore.getMpvErrorGeneration() } catch (e: Exception) { lastSeenErrorGen }
-            if (gen == lastSeenErrorGen) continue
-            lastSeenErrorGen = gen
-
-            val errMsg = try { StreamXCore.getMpvLastError() } catch (e: Exception) { "" }
-            if (errMsg.isBlank()) continue // generation bumped but no message yet (race) — next tick will see it
-
-            if (mbReResolveCount >= MAX_MB_RERESOLVES) {
-                // Give up re-resolving — surface as a normal, visible error
-                // instead of retrying a subject/dub that's genuinely broken.
-                isPreBuffering = true
-                isErrorState   = true
-                statusMsg      = "Instant Play stream failed: $errMsg"
-                try { StreamXCore.clearMpvLastError() } catch (e: Exception) {}
-                continue
-            }
-
-            mbReResolveCount++
-            Log.d("MPV", "MovieBox stream error ($errMsg) — re-resolving, attempt $mbReResolveCount/$MAX_MB_RERESOLVES")
-            statusMsg      = "Reconnecting stream…"
-            isPreBuffering = true
-            isErrorState   = false
-            try { StreamXCore.clearMpvLastError() } catch (e: Exception) {}
-
-            try {
-                val fresh = withContext(Dispatchers.IO) {
-                    MovieBoxNative.getStreams(mbSubjectId, mbSe.coerceAtLeast(1), mbEp.coerceAtLeast(1))
-                }
-                val freshUrl = fresh.bestPlayableUrl()
-                if (freshUrl == null) {
-                    isErrorState = true
-                    statusMsg    = "Instant Play stream is no longer available."
-                } else {
-                    // Re-set videoPath to the freshly resolved URL — this
-                    // alone re-triggers LaunchedEffect(videoPath, isSurfaceReady)
-                    // above, which calls playMpvVideo() again. moviePlaybackUrl
-                    // itself is a val (computed once from the nav arg) so we
-                    // update videoPath directly rather than trying to mutate it.
-                    videoPath = freshUrl
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                isErrorState = true
-                statusMsg    = "Reconnect failed: ${e.localizedMessage}"
-            }
-        }
     }
 
     // Reset stale MPV tracking whenever videoPath changes.
@@ -1266,13 +1171,12 @@ fun MoviePlayerScreen(
                             downloadSpeed = downloadSpeed,
                             seeds         = seeds,
                         )
-                        // MOVIEBOX / DIRECT: indeterminate spinner only —
-                        // percent=null triggers the orbital "resolving"
-                        // animation instead of a stuck/fake 0%, and
-                        // passing seeds=0 here would render a "0 seeds"
-                        // badge for a source that was never a torrent in
-                        // the first place, so those two branches simply
-                        // never show the stat row (see
+                        // DIRECT: indeterminate spinner only — percent=null
+                        // triggers the orbital "resolving" animation instead
+                        // of a stuck/fake 0%, and passing seeds=0 here would
+                        // render a "0 seeds" badge for a source that was
+                        // never a torrent in the first place, so this
+                        // branch simply never shows the stat row (see
                         // FuturisticLoadingPanel: stats only render when
                         // percent is in 1..99).
                         else -> FuturisticLoadingPanel(
@@ -1286,11 +1190,11 @@ fun MoviePlayerScreen(
             }
         }
 
-        // Mid-play buffering overlay — torrent-only. MovieBox/Direct HTTP
-        // sources buffer via MPV's own internal demuxer cache, which this
-        // app has no external progress signal for — showing a fabricated
+        // Mid-play buffering overlay — torrent-only. Direct HTTP sources
+        // buffer via MPV's own internal demuxer cache, which this app has
+        // no external progress signal for — showing a fabricated
         // percentage or torrent seeds/speed here would be misleading, so
-        // this compact overlay simply doesn't appear for those modes.
+        // this compact overlay simply doesn't appear for that mode.
         // (MPV's own built-in buffering indication, if any, still applies
         // underneath — this only concerns our custom overlay.)
         if (!isPreBuffering && isMidBuffering && videoPath != null && playbackMode == PlaybackMode.TORRENT) {
@@ -1369,21 +1273,6 @@ fun MoviePlayerScreen(
                                     Icon(Icons.Rounded.People, null, tint = AeonPlayer.Green, modifier = Modifier.size(11.dp))
                                     Spacer(Modifier.width(3.dp))
                                     Text("$seeds", color = Color.White.copy(0.85f), fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                                }
-                            } else if (playbackMode == PlaybackMode.MOVIEBOX) {
-                                // Visual counterpart to the torrent stats badge
-                                // above — lets the user see at a glance which
-                                // mode is active without it being ambiguous.
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .padding(end = 10.dp)
-                                        .background(Color(0xFF00E676).copy(0.15f), RoundedCornerShape(8.dp))
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Icon(Icons.Rounded.FlashOn, null, tint = Color(0xFF00E676), modifier = Modifier.size(11.dp))
-                                    Spacer(Modifier.width(3.dp))
-                                    Text("Instant", color = Color(0xFF00E676), fontSize = 11.sp, fontWeight = FontWeight.Medium)
                                 }
                             }
 

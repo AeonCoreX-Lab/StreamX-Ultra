@@ -45,7 +45,10 @@ object TorrentEngine {
     // EXCEPT: getLocalUrlNative + setPlayheadNative are new
 
     private external fun initNative()
-    private external fun startNative(magnet: String, savePath: String)
+    // authCookie: pass "" for a normal magnet link (every public source).
+    // Non-empty only when `magnet` is actually a private tracker's
+    // authenticated .torrent download URL — see start()'s doc comment.
+    private external fun startNative(magnet: String, savePath: String, authCookie: String)
     private external fun stopNative()
     private external fun getStatusNative(): LongArray     // [progress,speed,seeds,peers,state,progressBytes]
     private external fun getFilePathNative(): String
@@ -150,13 +153,20 @@ object TorrentEngine {
     // eligible for Rust's max_by_key() file-selection: it physically cannot
     // be in the same directory as the new torrent's files. See FIX 4 in
     // session.rs for the full root-cause writeup.
-    fun start(magnet: String, torrentsRoot: String) {
+    //
+    // `magnet`: a real magnet: URI (the normal case), OR a private
+    // tracker's authenticated .torrent download URL (StreamLink from a
+    // built-in private tracker source — see PrivateTrackerCookieStore
+    // and MovieLinkSelectionScreen's playTorrent()). `authCookie` must
+    // be non-empty in the second case; leave it "" (the default) for a
+    // normal magnet link.
+    fun start(magnet: String, torrentsRoot: String, authCookie: String = "") {
         val movieDir = allocateFreshMovieDir(torrentsRoot)
         currentMovieDir = movieDir
 
-        Log.d(TAG, "start  movieDir=$movieDir")
+        Log.d(TAG, "start  movieDir=$movieDir  hasAuthCookie=${authCookie.isNotEmpty()}")
 
-        startNative(magnet, movieDir)
+        startNative(magnet, movieDir, authCookie)
         localUrl = getLocalUrlNative()          // "http://127.0.0.1:8088/stream"
 
         // NO TorrentStreamServer.start() — Rust HTTP server handles this now

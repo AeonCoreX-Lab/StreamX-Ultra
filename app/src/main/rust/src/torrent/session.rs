@@ -356,7 +356,20 @@ impl TorrentSession {
     }
 
     // ── run() — download loop ─────────────────────────────────────────────────
-    pub async fn run(self: &Arc<Self>, magnet: String, save_dir: String) {
+    // `magnet` is the historical name — it now also accepts a plain
+    // http(s):// URL pointing at a .torrent file (see auth_cookie doc
+    // below), so the parameter is really "torrent source", but kept
+    // named `magnet` to avoid touching every call site's variable names
+    // for a rename alone.
+    //
+    // `auth_cookie`: Some(cookie) when `magnet` is actually a private
+    // tracker's authenticated .torrent download URL (StreamLink from a
+    // built-in private tracker source — see
+    // TorrentResult::requires_torrent_auth on the indexer side) — the
+    // Cookie header private trackers require on every download hit, not
+    // just the search request. None for a real magnet: URI, which needs
+    // no further authenticated fetch (see run()'s branch below).
+    pub async fn run(self: &Arc<Self>, magnet: String, save_dir: String, auth_cookie: Option<String>) {
         // ── Orphaned-leftover safety net ─────────────────────────────────
         // Runs first — if a previous session's cleanup didn't complete
         // (crash/kill), this frees the space before the disk-space check
@@ -518,8 +531,44 @@ impl TorrentSession {
         let mut opts   = AddTorrentOptions::default();
         opts.overwrite = true;
 
+        // ── Magnet vs. authenticated .torrent-file source ────────────
+        // A real magnet: URI needs no further network fetch — librqbit
+        // resolves it itself via DHT/trackers, so AddTorrent::from_url
+        // still applies exactly as before.
+        //
+        // A private-tracker .torrent download URL is different: it's a
+        // plain http(s):// link, but fetching it WITHOUT the tracker's
+        // session cookie returns either an HTTP error or a login-page
+        // HTML body instead of real .torrent bytes (private trackers
+        // gate every download behind auth — see TorrentResult's
+        // requires_torrent_auth doc comment on the indexer side for
+        // why). librqbit's own from_url() has no way to attach a custom
+        // header to that fetch, so this fetches the bytes ourselves
+        // (with the Cookie header attached) and hands librqbit the
+        // decoded bytes directly via AddTorrent::from_bytes instead —
+        // by that point librqbit no longer needs network access to GET
+        // the .torrent file, only to talk to trackers/peers afterward,
+        // which is unauthenticated as normal.
+        let add_torrent_source = if magnet.starts_with("magnet:") {
+            AddTorrent::from_url(&magnet)
+        } else {
+            match fetch_torrent_file_bytes(&magnet, auth_cookie.as_deref()).await {
+                Ok(bytes) => AddTorrent::from_bytes(bytes),
+                Err(e) => {
+                    warn!("[torrent] failed to fetch .torrent file: {}", e);
+                    *self.last_error.write() = format!(
+                        "Failed to download .torrent file: {e:#}\nurl={magnet}\n\
+                         This usually means the tracker's session cookie has expired \
+                         — try logging into this tracker again from Movie Settings."
+                    );
+                    self.state.store(STATE_ERROR, Ordering::Relaxed);
+                    return;
+                }
+            }
+        };
+
         let add_response = match rq_session
-            .add_torrent(AddTorrent::from_url(&magnet), Some(opts))
+            .add_torrent(add_torrent_source, Some(opts))
             .await
         {
             Ok(r)  => r,
@@ -926,4 +975,42 @@ impl TorrentSession {
             if err.is_empty() { "(none)" } else { &err },
         )
     }
+}
+
+// ── Authenticated .torrent-file download ─────────────────────────────────
+// See run()'s add_torrent_source branch above for why this exists: a
+// private tracker's download link needs the SAME session cookie the
+// search itself used, and librqbit's own AddTorrent::from_url() has no
+// hook for attaching one. This does the fetch ourselves and hands back
+// raw bytes for AddTorrent::from_bytes() instead.
+async fn fetch_torrent_file_bytes(url: &str, auth_cookie: Option<&str>) -> anyhow::Result<bytes::Bytes> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .build()?;
+
+    let mut req = client.get(url);
+    if let Some(cookie) = auth_cookie {
+        req = req.header("Cookie", cookie);
+    }
+
+    let resp = req.send().await?;
+    if !resp.status().is_success() {
+        anyhow::bail!("HTTP {} fetching .torrent file", resp.status());
+    }
+
+    // A cookie that's expired or was never valid typically doesn't 4xx —
+    // it 200s with the tracker's own login-page HTML instead (redirects
+    // to /login.php that still resolve with a 200 body). A real
+    // .torrent file is bencoded binary and always starts with "d8:" or
+    // similar ASCII-digit-then-colon bencode dict framing — checking
+    // for an HTML doctype/tag up front turns that silent failure mode
+    // into a clear "cookie expired" error instead of librqbit choking
+    // on garbage bytes with a much less obvious message downstream.
+    let bytes = resp.bytes().await?;
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(200)]).to_lowercase();
+    if head.contains("<!doctype") || head.contains("<html") {
+        anyhow::bail!("received a login page instead of a .torrent file — cookie likely expired");
+    }
+
+    Ok(bytes)
 }

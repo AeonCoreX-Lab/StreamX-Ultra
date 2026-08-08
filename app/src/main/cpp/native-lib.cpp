@@ -176,7 +176,7 @@ Java_com_aeoncorex_streamx_ui_movie_StreamXCore_getActiveGpuContext(JNIEnv* env,
 }
 
 // ════════════════════════════════════════════════════════════
-//  PLAYBACK-ERROR BRIDGES (MOVIEBOX/DIRECT retry support)
+//  PLAYBACK-ERROR BRIDGES (DIRECT-URL retry support)
 // ════════════════════════════════════════════════════════════
 
 // Empty string = no pending error. Non-empty = mpv_error_string() text

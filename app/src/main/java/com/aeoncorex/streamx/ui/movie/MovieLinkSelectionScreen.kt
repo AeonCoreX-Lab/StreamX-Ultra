@@ -26,145 +26,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.aeoncorex.streamx.ads.AdManager
-import com.aeoncorex.streamx.streaming.MovieBoxDub
-import com.aeoncorex.streamx.streaming.MovieBoxException
-import com.aeoncorex.streamx.streaming.MovieBoxItemDetails
-import com.aeoncorex.streamx.streaming.MovieBoxNative
-import com.aeoncorex.streamx.streaming.MovieBoxSeasonInfo
-import com.aeoncorex.streamx.streaming.MovieBoxStreamResult
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withTimeout
 import java.net.URLDecoder
 import java.net.URLEncoder
-
-// ── Language chips shown in the torrent filter row ────────────────────────
-private data class LangChip(
-    val lang:  DubLanguage,
-    val flag:  String,
-    val label: String
-)
-
-private val LANG_CHIPS = listOf(
-    LangChip(DubLanguage.English,   "🇺🇸", "English"),
-    LangChip(DubLanguage.Hindi,     "🇮🇳", "Hindi"),
-    LangChip(DubLanguage.Tamil,     "🇮🇳", "Tamil"),
-    LangChip(DubLanguage.Telugu,    "🇮🇳", "Telugu"),
-    LangChip(DubLanguage.Bengali,   "🇧🇩", "Bengali"),
-    LangChip(DubLanguage.Kannada,   "🇮🇳", "Kannada"),
-    LangChip(DubLanguage.Malayalam, "🇮🇳", "Malayalam"),
-    LangChip(DubLanguage.Japanese,  "🇯🇵", "Japanese"),
-    LangChip(DubLanguage.DualAudio, "🌐",  "Dual Audio"),
-)
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  MovieBox section state — real-time dub + episode aware
-// ═══════════════════════════════════════════════════════════════════════════
-
-@Stable
-private class MovieBoxSectionState {
-    var isResolvingSubject by mutableStateOf(true)
-    var subjectNotFound     by mutableStateOf(false)
-    var itemDetails         by mutableStateOf<MovieBoxItemDetails?>(null)
-    var selectedDub         by mutableStateOf<MovieBoxDub?>(null)
-    var streamResult        by mutableStateOf<MovieBoxStreamResult?>(null)
-    var isCheckingStream    by mutableStateOf(false)
-    var streamError         by mutableStateOf<String?>(null)
-    // Cached per dub subject_id so switching between dubs the user has
-    // already visited doesn't re-fetch season info every time — MovieBox's
-    // own authoritative episode count (NOT TMDB's), since a dub's
-    // subject_id can have a different available episode count than the
-    // original (dubbing coverage varies per language).
-    val seasonInfoCache     = mutableStateMapOf<String, MovieBoxSeasonInfo>()
-
-    val isAvailable: Boolean
-        get() = streamResult?.hasResource == true && streamResult?.bestPlayableUrl() != null
-}
-
-// The Rust engine already bounds each native call to ~45s internally, but
-// that bound lives entirely on the native side (see moviebox/client.rs's
-// with_deadline). Wrapping the calls again here means the Compose UI is
-// guaranteed to leave its loading state within a fixed, predictable window
-// even if a future native-side change ever regresses that guarantee — the
-// spinner can never hang indefinitely no matter what the JNI call does.
-private const val MOVIEBOX_CALL_TIMEOUT_MS = 60_000L
-
-private suspend fun MovieBoxSectionState.resolveSubject(title: String) {
-    isResolvingSubject = true
-    subjectNotFound = false
-    itemDetails = null
-    selectedDub = null
-    try {
-        withTimeout(MOVIEBOX_CALL_TIMEOUT_MS) {
-            val results = MovieBoxNative.search(title)
-            // Prefer a result confirmed to have a resource (now that
-            // search returns hasResource directly) — falls back to the
-            // first result if none are marked, since some responses may
-            // omit the field rather than reliably set it false.
-            val best = results.firstOrNull { it.hasResource } ?: results.firstOrNull()
-            if (best == null) {
-                subjectNotFound = true
-                return@withTimeout
-            }
-            val details = MovieBoxNative.getItemDetails(best.subjectId)
-            itemDetails = details
-            selectedDub = details.dubs.firstOrNull { it.original } ?: details.dubs.firstOrNull()
-        }
-    } catch (e: TimeoutCancellationException) {
-        subjectNotFound = true
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        subjectNotFound = true
-    } finally {
-        isResolvingSubject = false
-    }
-}
-
-private suspend fun MovieBoxSectionState.checkStreamFor(dub: MovieBoxDub, se: Int, ep: Int) {
-    isCheckingStream = true
-    streamError = null
-    streamResult = null
-    try {
-        // Fetch (or reuse cached) MovieBox-authoritative season info for
-        // THIS dub's subject_id before hitting the resource endpoint —
-        // catches "episode doesn't exist for this dub" up front with a
-        // clear message instead of a generic "no stream" after a wasted
-        // call. Best-effort and outside the main timeout: if season-info
-        // itself fails or is slow, we don't block the whole check on a
-        // secondary endpoint — getStreams() below remains the source of
-        // truth either way.
-        val seasonInfo = seasonInfoCache[dub.subjectId] ?: runCatching {
-            withTimeout(MOVIEBOX_CALL_TIMEOUT_MS) { MovieBoxNative.getSeasonInfo(dub.subjectId) }
-        }.getOrNull()?.also { seasonInfoCache[dub.subjectId] = it }
-
-        val knownMaxEp = seasonInfo?.episodeCountFor(se)
-        if (knownMaxEp != null && ep > knownMaxEp) {
-            streamError = "${dub.displayName} only has $knownMaxEp episode(s) for Season $se"
-            return
-        }
-
-        val result = withTimeout(MOVIEBOX_CALL_TIMEOUT_MS) {
-            MovieBoxNative.getStreams(dub.subjectId, se, ep)
-        }
-        streamResult = result
-        if (!result.hasResource || result.bestPlayableUrl() == null) {
-            streamError = "No stream available for ${dub.displayName} · S${se}E${ep}"
-        }
-    } catch (e: TimeoutCancellationException) {
-        streamError = "Stream lookup timed out for ${dub.displayName} · S${se}E${ep} — please try again"
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: MovieBoxException) {
-        streamError = e.message ?: "Stream lookup failed"
-    } catch (e: Exception) {
-        streamError = "Stream lookup failed: ${e.localizedMessage}"
-    } finally {
-        isCheckingStream = false
-    }
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Screen
@@ -185,10 +51,10 @@ fun MovieLinkSelectionScreen(
     val isSeries = type.equals("SERIES", true) || type.equals("TV", true)
 
     // ── Episode/season selection — starts from whatever MovieDetailsScreen
-    // passed in, but is fully user-adjustable from here now, for BOTH the
-    // torrent flow and the MovieBox flow. This is the piece that was
-    // previously missing: MovieDetailsScreen fixed (season, episode) once
-    // and this screen never let the user change it without navigating back.
+    // passed in, but is fully user-adjustable from here now. This is the
+    // piece that was previously missing: MovieDetailsScreen fixed
+    // (season, episode) once and this screen never let the user change
+    // it without navigating back.
     var selectedSeason  by remember { mutableIntStateOf(season.coerceAtLeast(1)) }
     var selectedEpisode by remember { mutableIntStateOf(episode.coerceAtLeast(1)) }
     var availableSeasons  by remember { mutableStateOf<List<SeasonDto>>(emptyList()) }
@@ -197,13 +63,35 @@ fun MovieLinkSelectionScreen(
     var isLoadingEpisodes by remember { mutableStateOf(false) }
     var showEpisodeSheet  by remember { mutableStateOf(false) }
 
-    var selectedLang by remember { mutableStateOf<DubLanguage>(DubLanguage.English) }
+    // ── Unified result pool + search bar ─────────────────────────────
+    // Replaces the old per-language chip row (which re-triggered a fresh
+    // network search on every tap — slow, and split results across 9
+    // separate searches the user had to click through one at a time).
+    // Now: ONE fetch merges the native/English-provider pass with the
+    // dubbed-provider pass (DualAudio pulls in the same Hindi/Tamil/
+    // Telugu-friendly sources — TorrentCSV, SolidTorrents, Nyaa,
+    // AnimeTosho — that the old per-language chips used individually,
+    // since those providers return whatever they find rather than
+    // filtering server-side by a single requested language), then the
+    // search bar filters that single merged list client-side by title —
+    // instant, no re-fetch, and multi/dual-audio releases (tagged via
+    // StreamLink.audioTag, see MovieModels.kt) are just as searchable as
+    // a plain language name typed into the box.
+    var searchQuery  by remember { mutableStateOf("") }
     var torrentLinks by remember { mutableStateOf<List<StreamLink>>(emptyList()) }
     var isLoading    by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var adLoading    by remember { mutableStateOf(false) }
 
-    val movieBoxState = remember { MovieBoxSectionState() }
+    val filteredLinks = remember(torrentLinks, searchQuery) {
+        if (searchQuery.isBlank()) torrentLinks
+        else torrentLinks.filter { link ->
+            link.title.contains(searchQuery, ignoreCase = true) ||
+            link.source.contains(searchQuery, ignoreCase = true) ||
+            link.quality.contains(searchQuery, ignoreCase = true) ||
+            link.audioTag?.label?.contains(searchQuery, ignoreCase = true) == true
+        }
+    }
 
     // ── Load season list once (series only) — needed so the episode
     // sheet shows real season numbers/episode counts instead of a blind
@@ -234,21 +122,42 @@ fun MovieLinkSelectionScreen(
         }
     }
 
-    // ── Torrent search — re-fires on title/season/episode/language change
-    LaunchedEffect(decodedTitle, selectedSeason, selectedEpisode, selectedLang) {
+    // ── Torrent search — re-fires on title/season/episode change only.
+    // Fetches BOTH the native/English pass and the DualAudio pass in
+    // parallel and merges them (dedupe by magnet happens inside each
+    // TorrentRepository call already; a second distinctBy here catches
+    // any overlap between the two passes), so the search bar has one
+    // complete pool to filter instead of the user needing to re-search
+    // per language.
+    LaunchedEffect(decodedTitle, selectedSeason, selectedEpisode) {
         isLoading = true; errorMessage = null; torrentLinks = emptyList()
         try {
             val movieType = if (isSeries) MovieType.SERIES else MovieType.MOVIE
             val isAnime   = listOf("Naruto","One Piece","Demon Slayer","Jujutsu","Attack on Titan","Dragon Ball")
                 .any { decodedTitle.contains(it, ignoreCase = true) }
             val validImdb = if (imdbId != "null" && imdbId.isNotEmpty()) imdbId else null
-            val result    = TorrentRepository.getStreamLinks(
+
+            val nativeResult = TorrentRepository.getStreamLinks(
                 type = movieType, title = decodedTitle, imdbId = validImdb,
                 season = selectedSeason, episode = selectedEpisode, isAnime = isAnime,
-                dubLang = selectedLang
+                dubLang = DubLanguage.English
             )
             currentCoroutineContext().ensureActive()
-            torrentLinks = result
+
+            val dubbedResult = try {
+                TorrentRepository.getStreamLinks(
+                    type = movieType, title = decodedTitle, imdbId = validImdb,
+                    season = selectedSeason, episode = selectedEpisode, isAnime = isAnime,
+                    dubLang = DubLanguage.DualAudio
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList() // dubbed pass is best-effort — native pass alone still shows results
+            }
+            currentCoroutineContext().ensureActive()
+
+            torrentLinks = (nativeResult + dubbedResult).distinctBy { it.magnet }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -258,57 +167,26 @@ fun MovieLinkSelectionScreen(
         }
     }
 
-    // ── MovieBox subject resolution — once per title, independent of
-    // season/episode (a subject covers all episodes of a series).
-    LaunchedEffect(decodedTitle) {
-        movieBoxState.resolveSubject(decodedTitle)
-    }
-
-    // ── MovieBox stream re-check — fires on dub change OR episode change,
-    // so switching either one always re-validates against the real API
-    // instead of assuming the previous result still applies.
-    LaunchedEffect(movieBoxState.selectedDub, selectedSeason, selectedEpisode) {
-        val dub = movieBoxState.selectedDub ?: return@LaunchedEffect
-        movieBoxState.checkStreamFor(dub, se = selectedSeason, ep = selectedEpisode)
-    }
-
-    fun playTorrent(magnet: String) {
+    // Takes the whole StreamLink (not just a magnet string) so private-
+    // tracker results — which carry torrentFileUrl instead of a usable
+    // magnet — can be routed correctly. The actual cookie itself is
+    // deliberately NOT passed through the nav route string: only siteId
+    // is, and MoviePlayerScreen looks up the live cookie from
+    // PrivateTrackerCookieStore itself at play time. This keeps a
+    // potentially-sensitive session cookie out of the nav back stack /
+    // any future deep-link logging, and means a cookie refreshed after
+    // this screen was opened (e.g. the user re-logged in from Settings
+    // in another tab) is always the one actually used.
+    fun playTorrent(link: StreamLink) {
         if (activity == null) return
         adLoading = true
         AdManager.showInterstitial(activity) {
             adLoading = false
-            val enc = URLEncoder.encode(magnet, "UTF-8")
+            val playableUrl = link.torrentFileUrl ?: link.magnet
+            val enc = URLEncoder.encode(playableUrl, "UTF-8")
             val encImdb = URLEncoder.encode(imdbId.takeIf { it != "null" } ?: "", "UTF-8")
-            navController.navigate("torrent_player/$enc?imdbId=$encImdb")
-        }
-    }
-
-    fun playMovieBoxStream(streamUrl: String) {
-        if (activity == null) return
-        adLoading = true
-        AdManager.showInterstitial(activity) {
-            adLoading = false
-            // Tag with MOVIEBOX_URL_MARKER so MoviePlayerScreen's
-            // PlaybackMode detection shows the instant-play UI (no
-            // torrent seeds/speed stats, indeterminate buffering spinner,
-            // "Instant" badge) instead of assuming it's a bare direct URL.
-            // MoviePlayerScreen strips this prefix before it ever reaches
-            // MPV — the player only ever opens the real stream URL.
-            val tagged = MOVIEBOX_URL_MARKER + streamUrl
-            val enc = URLEncoder.encode(tagged, "UTF-8")
-            val encImdb = URLEncoder.encode(imdbId.takeIf { it != "null" } ?: "", "UTF-8")
-            // Pass through the exact dub subject_id + se/ep that produced
-            // this URL, so MoviePlayerScreen can re-call
-            // MovieBoxNative.getStreams() for a fresh signed URL if this
-            // one expires mid-playback, instead of failing with no
-            // recovery. Falls back to empty/0 if for some reason no dub
-            // is selected (shouldn't happen — onPlay only fires when
-            // state.isAvailable is true, which requires a selected dub).
-            val dubSubjectId = movieBoxState.selectedDub?.subjectId ?: ""
-            val encMbSubjectId = URLEncoder.encode(dubSubjectId, "UTF-8")
-            navController.navigate(
-                "torrent_player/$enc?imdbId=$encImdb&mbSubjectId=$encMbSubjectId&mbSe=$selectedSeason&mbEp=$selectedEpisode"
-            )
+            val encSiteId = URLEncoder.encode(if (link.requiresTorrentAuth) link.siteId else "", "UTF-8")
+            navController.navigate("torrent_player/$enc?imdbId=$encImdb&trackerSiteId=$encSiteId")
         }
     }
 
@@ -351,50 +229,43 @@ fun MovieLinkSelectionScreen(
             ) {
                 Column(Modifier.fillMaxSize()) {
 
-                    // ── MovieBox Instant Play (real-time dub + episode aware) ──
-                    MovieBoxInstantPlayCard(
-                        state = movieBoxState,
-                        onPlay = ::playMovieBoxStream,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)
-                    )
-
-                    // ── Language Filter Row (torrent) ────────────────────
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(LANG_CHIPS) { chip ->
-                            val isSelected = selectedLang::class == chip.lang::class
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        if (isSelected) Color(0xFF003333) else Color(0xFF0F0F1A),
-                                        RoundedCornerShape(20.dp)
-                                    )
-                                    .border(
-                                        1.dp,
-                                        if (isSelected) Color.Cyan else Color.White.copy(0.1f),
-                                        RoundedCornerShape(20.dp)
-                                    )
-                                    .clickable { selectedLang = chip.lang }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                ) {
-                                    Text(chip.flag, fontSize = 14.sp)
-                                    Text(
-                                        chip.label,
-                                        color = if (isSelected) Color.Cyan else Color.White.copy(0.75f),
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                    )
+                    // ── Search bar ────────────────────────────────────────
+                    // Filters the single merged result pool by title, source,
+                    // quality, or audio tag — e.g. typing "hindi", "dual",
+                    // "multi", "1080p", or a release-group name all narrow
+                    // the same list instantly, no re-fetch, no separate tabs.
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        placeholder = {
+                            Text("Search by title, language, quality…", color = Color.Gray, fontSize = 13.sp)
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Rounded.Search, null, tint = Color.Gray, modifier = Modifier.size(20.dp))
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Rounded.Close, null, tint = Color.Gray, modifier = Modifier.size(18.dp))
                                 }
                             }
-                        }
-                    }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor   = Color.Cyan,
+                            unfocusedBorderColor = Color.White.copy(0.12f),
+                            focusedContainerColor   = Color(0xFF0F0F1A),
+                            unfocusedContainerColor = Color(0xFF0F0F1A),
+                            cursorColor = Color.Cyan,
+                            focusedTextColor   = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp)
+                    )
 
                     // ── Results area (torrent) ───────────────────────────
                     Box(Modifier.fillMaxSize()) {
@@ -405,11 +276,7 @@ fun MovieLinkSelectionScreen(
                             ) {
                                 CircularProgressIndicator(color = Color.Cyan, modifier = Modifier.size(36.dp), strokeWidth = 3.dp)
                                 Spacer(Modifier.height(12.dp))
-                                val loadMsg = if (selectedLang == DubLanguage.English)
-                                    "Scanning P2P Networks…"
-                                else
-                                    "Searching ${LANG_CHIPS.find { it.lang::class == selectedLang::class }?.label ?: ""} dubs…"
-                                Text(loadMsg, color = Color.Gray, fontSize = 13.sp)
+                                Text("Scanning P2P Networks…", color = Color.Gray, fontSize = 13.sp)
                                 Text("YTS · RARBG · EZTV · 1337x", color = Color.Gray.copy(0.5f), fontSize = 11.sp)
                             }
                             errorMessage != null -> Column(
@@ -426,36 +293,49 @@ fun MovieLinkSelectionScreen(
                             ) {
                                 Icon(Icons.Rounded.CloudOff, null, tint = Color.Gray, modifier = Modifier.size(44.dp))
                                 Spacer(Modifier.height(12.dp))
-                                val langLabel = LANG_CHIPS.find { it.lang::class == selectedLang::class }?.label ?: "selected language"
-                                Text("No $langLabel torrents found", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                Text("No sources found", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                                 Text(
-                                    if (selectedLang == DubLanguage.English) "Try instant stream instead"
-                                    else "Try a different language or instant stream",
+                                    "No torrents were found for this title right now",
                                     color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center
                                 )
                                 Spacer(Modifier.height(16.dp))
                                 Button(
                                     onClick = { navController.popBackStack() },
                                     colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E2A1E))
-                                ) { Text("← Use Instant Play", color = Color.Cyan) }
+                                ) { Text("← Go Back", color = Color.Cyan) }
+                            }
+                            filteredLinks.isEmpty() -> Column(
+                                Modifier.align(Alignment.Center).padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(Icons.Rounded.SearchOff, null, tint = Color.Gray, modifier = Modifier.size(44.dp))
+                                Spacer(Modifier.height(12.dp))
+                                Text("No matches for \"$searchQuery\"", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    "${torrentLinks.size} sources available · try a different search term",
+                                    color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center
+                                )
+                                Spacer(Modifier.height(16.dp))
+                                TextButton(onClick = { searchQuery = "" }) {
+                                    Text("Clear search", color = Color.Cyan)
+                                }
                             }
                             else -> LazyColumn(
                                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 item {
-                                    val langLabel = LANG_CHIPS.find { it.lang::class == selectedLang::class }
                                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
                                         Icon(Icons.Rounded.DownloadForOffline, null, tint = Color.Cyan, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(6.dp))
                                         Text(
-                                            "${torrentLinks.size} ${langLabel?.flag ?: ""} ${langLabel?.label ?: ""} sources found",
+                                            "${filteredLinks.size} of ${torrentLinks.size} sources",
                                             color = Color.Cyan, fontSize = 13.sp, fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
-                                items(torrentLinks) { link ->
-                                    TorrentCard(link) { playTorrent(link.magnet) }
+                                items(filteredLinks) { link ->
+                                    TorrentCard(link) { playTorrent(link) }
                                 }
                                 item { Spacer(Modifier.height(20.dp)) }
                             }
@@ -651,105 +531,6 @@ private fun EpisodeSelectSheet(
                 Text("Ep. $selectedEpisode", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp))
                 IconButton(onClick = { onEpisodeSelected(selectedEpisode + 1) }) {
                     Icon(Icons.Rounded.Add, null, tint = Color.Gray)
-                }
-            }
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  MovieBox Instant Play card
-// ═══════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun MovieBoxInstantPlayCard(
-    state: MovieBoxSectionState,
-    onPlay: (streamUrl: String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    if (state.subjectNotFound && !state.isResolvingSubject) return
-
-    Column(
-        modifier
-            .fillMaxWidth()
-            .background(
-                Brush.horizontalGradient(listOf(Color(0xFF0A1F1A), Color(0xFF0A0A14))),
-                RoundedCornerShape(14.dp)
-            )
-            .border(1.dp, Color(0xFF00E676).copy(alpha = 0.25f), RoundedCornerShape(14.dp))
-            .padding(14.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.FlashOn, null, tint = Color(0xFF00E676), modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Instant Play", color = Color(0xFF00E676), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.weight(1f))
-            if (state.isResolvingSubject) {
-                CircularProgressIndicator(color = Color(0xFF00E676), modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-            }
-        }
-
-        when {
-            state.isResolvingSubject -> {
-                Spacer(Modifier.height(6.dp))
-                Text("Checking instant sources…", color = Color.Gray, fontSize = 12.sp)
-            }
-
-            state.itemDetails != null -> {
-                Spacer(Modifier.height(8.dp))
-
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(state.itemDetails!!.dubs) { dub ->
-                        val isSelected = dub.subjectId == state.selectedDub?.subjectId
-                        Box(
-                            Modifier
-                                .background(
-                                    if (isSelected) Color(0xFF003322) else Color(0xFF12121C),
-                                    RoundedCornerShape(16.dp)
-                                )
-                                .border(
-                                    1.dp,
-                                    if (isSelected) Color(0xFF00E676) else Color.White.copy(0.1f),
-                                    RoundedCornerShape(16.dp)
-                                )
-                                .clickable { state.selectedDub = dub }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                dub.displayName,
-                                color = if (isSelected) Color(0xFF00E676) else Color.White.copy(0.75f),
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(10.dp))
-
-                when {
-                    state.isCheckingStream -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(color = Color.Gray, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Resolving stream…", color = Color.Gray, fontSize = 12.sp)
-                    }
-
-                    state.isAvailable -> Button(
-                        onClick = { state.streamResult?.bestPlayableUrl()?.let(onPlay) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Rounded.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "Play ${state.selectedDub?.displayName ?: ""} · ${state.streamResult?.sources?.maxByOrNull { it.resolutions }?.resolutions ?: 0}p",
-                            color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp
-                        )
-                    }
-
-                    state.streamError != null -> Text(
-                        state.streamError!!, color = Color.Gray, fontSize = 12.sp
-                    )
                 }
             }
         }

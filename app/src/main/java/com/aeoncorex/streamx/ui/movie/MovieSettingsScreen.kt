@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.aeoncorex.streamx.streaming.ProxyKind
+import kotlinx.coroutines.launch
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  MovieSettingsScreen — Network & Sources
@@ -73,6 +74,31 @@ fun MovieSettingsScreen(navController: NavController) {
     var newTrackerUrl by remember { mutableStateOf("") }
     var newTrackerApiKey by remember { mutableStateOf("") }
     var trackerAddMessage by remember { mutableStateOf<String?>(null) }
+
+    // ── Built-in private trackers (HD-Torrents, MySpleen, TorrentBD, …) ──
+    // Separate from the Torznab list above: these are sites the indexer
+    // registry itself knows how to scrape (see sources/private/*.json in
+    // streamx-torrent-indexer) — logging in here makes that specific
+    // site's results start appearing in every search automatically,
+    // with no per-tracker API key to manage. Loaded on first open AND
+    // re-loaded every time this screen resumes (e.g. coming back from
+    // TrackerLoginScreen after a successful login), via the standard
+    // ON_RESUME lifecycle observer — a plain LaunchedEffect(Unit) alone
+    // would only run once and never pick up a login that just happened.
+    var builtInTrackers by remember { mutableStateOf<List<com.aeoncorex.streamx.streaming.PrivateTrackerListing>>(emptyList()) }
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    val coroutineScope = rememberCoroutineScope()
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                coroutineScope.launch {
+                    builtInTrackers = com.aeoncorex.streamx.streaming.IndexerNative.listPrivateTrackers()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     Scaffold(
         containerColor = Color.Black,
@@ -201,10 +227,58 @@ fun MovieSettingsScreen(navController: NavController) {
                     }
                 }
 
-                item { SectionHeader("PRIVATE TRACKERS") }
+                item { SectionHeader("PRIVATE TRACKERS (BUILT-IN)") }
                 item {
                     Text(
-                        "Add a Torznab-compatible search API (the same convention Jackett/Prowlarr/Sonarr use — most private trackers expose one, often visible in their own API/Torznab settings page). Your API key stays encrypted on this device.",
+                        "Log in once to a supported private tracker and its results appear in every search automatically — no API key to find or paste. You log in on the tracker's own real page; this app only detects when it succeeds and remembers your session.",
+                        color = Color.Gray,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+                if (builtInTrackers.isEmpty()) {
+                    item {
+                        Text(
+                            "No built-in private trackers available right now.",
+                            color = Color.DarkGray,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
+                        )
+                    }
+                } else {
+                    items(builtInTrackers, key = { it.id }) { site ->
+                        val credential = remember(site.id, builtInTrackers) {
+                            com.aeoncorex.streamx.streaming.PrivateTrackerCookieStore.get(site.id)
+                        }
+                        BuiltInTrackerRow(
+                            site = site,
+                            isLoggedIn = credential != null,
+                            lastVerifiedOk = credential?.lastVerifiedOk,
+                            onLogin = {
+                                val enc = { s: String -> java.net.URLEncoder.encode(s, "UTF-8") }
+                                navController.navigate(
+                                    "tracker_login/${enc(site.id)}/${enc(site.displayName)}/${enc(site.baseUrl)}" +
+                                        "?instructions=${enc(site.instructions)}" +
+                                        "&loginCheckPath=${enc(site.loginCheckPath ?: "")}" +
+                                        "&loginCheckSelector=${enc(site.loginCheckSelector ?: "")}"
+                                )
+                            },
+                            onLogout = {
+                                com.aeoncorex.streamx.streaming.PrivateTrackerCookieStore.remove(site.id)
+                                // Forces the `remember(site.id, builtInTrackers)` above to
+                                // re-read the store — reassigning to the same list
+                                // reference wouldn't recompute, so this rebuilds the
+                                // list to trigger recomposition.
+                                builtInTrackers = builtInTrackers.toList()
+                            }
+                        )
+                    }
+                }
+
+                item { SectionHeader("PRIVATE TRACKERS (TORZNAB)") }
+                item {
+                    Text(
+                        "For any OTHER private tracker not listed above: add its Torznab-compatible search API (the same convention Jackett/Prowlarr/Sonarr use — most private trackers expose one, often visible in their own API/Torznab settings page). Your API key stays encrypted on this device.",
                         color = Color.Gray,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -335,6 +409,55 @@ private fun PrivateTrackerRow(
         Switch(checked = tracker.enabled, onCheckedChange = onToggle, colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = Color.Cyan))
         IconButton(onClick = onDelete) {
             Icon(Icons.Default.Delete, contentDescription = "Remove tracker", tint = Color.Gray)
+        }
+    }
+}
+
+/**
+ * One built-in, auth-required registry tracker (HD-Torrents, MySpleen,
+ * TorrentBD, …) — shows login state and a Login/Logout action. Distinct
+ * from [PrivateTrackerRow] (the Torznab list) since these have no API
+ * key to display or delete-vs-disable choice — just "logged in" or not.
+ */
+@Composable
+private fun BuiltInTrackerRow(
+    site: com.aeoncorex.streamx.streaming.PrivateTrackerListing,
+    isLoggedIn: Boolean,
+    lastVerifiedOk: Boolean?,
+    onLogin: () -> Unit,
+    onLogout: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(site.displayName, color = Color.White, fontWeight = FontWeight.SemiBold)
+            val statusText = when {
+                !isLoggedIn -> "Not logged in"
+                lastVerifiedOk == false -> "Session expired — please log in again"
+                else -> "Logged in"
+            }
+            val statusColor = when {
+                !isLoggedIn -> Color.Gray
+                lastVerifiedOk == false -> Color(0xFFFF9800)
+                else -> Color(0xFF4CAF50)
+            }
+            Text(statusText, color = statusColor, fontSize = 12.sp)
+        }
+        if (isLoggedIn) {
+            TextButton(onClick = onLogout) {
+                Text("Log out", color = Color.Gray, fontSize = 13.sp)
+            }
+        } else {
+            Button(
+                onClick = onLogin,
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Cyan, contentColor = Color.Black),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+            ) {
+                Text("Log in", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
         }
     }
 }

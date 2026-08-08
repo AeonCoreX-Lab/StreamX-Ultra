@@ -17,7 +17,6 @@
 mod torrent;
 mod jsengine;
 mod registry;
-mod moviebox;
 
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
@@ -161,14 +160,22 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_ui_movie_TorrentEngine_startNative(
     // JNIEnv marked as mut here so we can pass it as &mut env below
-    mut env:  JNIEnv,
-    _obj:     JClass,
-    j_magnet: JString,
-    j_path:   JString,
+    mut env:      JNIEnv,
+    _obj:         JClass,
+    j_magnet:     JString,
+    j_path:       JString,
+    // Pass "" from Kotlin for a real magnet: URI (the overwhelmingly
+    // common case, every public source) — same empty-string-means-absent
+    // convention as j_auth_cookies_json below. Non-empty only when
+    // `magnet` is actually a private tracker's authenticated .torrent
+    // download URL — see TorrentSession::run()'s doc comment.
+    j_auth_cookie: JString,
 ) {
-    let magnet   = jstr(&mut env, j_magnet);
-    let save_dir = jstr(&mut env, j_path);
-    TorrentEngineHandle::get().start(&magnet, &save_dir);
+    let magnet      = jstr(&mut env, j_magnet);
+    let save_dir    = jstr(&mut env, j_path);
+    let auth_cookie = jstr(&mut env, j_auth_cookie);
+    let auth_cookie = if auth_cookie.is_empty() { None } else { Some(auth_cookie) };
+    TorrentEngineHandle::get().start(&magnet, &save_dir, auth_cookie.as_deref());
 }
 
 #[no_mangle]
@@ -363,19 +370,22 @@ fn percent_encode(s: &str) -> String {
 // rather than spinning up a second one.
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_nativeSearchDubbed(
-    mut env:     JNIEnv,
-    _cls:        JClass,
-    j_query:     JString,
-    j_imdb_id:   JString, // pass empty string "" if unavailable
+    mut env:              JNIEnv,
+    _cls:                 JClass,
+    j_query:              JString,
+    j_imdb_id:            JString, // pass empty string "" if unavailable
+    j_auth_cookies_json:  JString, // {"siteId": "cookie value", ...} — see PrivateTrackerCookieStore.allCookies()
 ) -> jstring {
     let query   = jstr(&mut env, j_query);
     let imdb_id = jstr(&mut env, j_imdb_id);
     let imdb_opt: Option<&str> = if imdb_id.is_empty() { None } else { Some(&imdb_id) };
+    let auth_json = jstr(&mut env, j_auth_cookies_json);
+    let auth = MapAuthProvider::from_json(&auth_json);
 
     let json = TorrentEngineHandle::get().rt.block_on(async {
         let reg = registry::get_registry().await;
         let client = streamx_indexer::proxy::get_client();
-        streamx_indexer::engine::search_dubbed_json(&client, &reg, &query, imdb_opt).await
+        streamx_indexer::engine::search_dubbed_json(&client, &reg, &query, imdb_opt, &auth).await
     });
 
     env.new_string(json).expect("JNI string").into_raw()
@@ -386,16 +396,19 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
 // fetch1337x(englishQuery) call).
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_nativeSearchAll(
-    mut env:  JNIEnv,
-    _cls:     JClass,
-    j_query:  JString,
+    mut env:              JNIEnv,
+    _cls:                 JClass,
+    j_query:              JString,
+    j_auth_cookies_json:  JString,
 ) -> jstring {
     let query = jstr(&mut env, j_query);
+    let auth_json = jstr(&mut env, j_auth_cookies_json);
+    let auth = MapAuthProvider::from_json(&auth_json);
 
     let json = TorrentEngineHandle::get().rt.block_on(async {
         let reg = registry::get_registry().await;
         let client = streamx_indexer::proxy::get_client();
-        streamx_indexer::engine::search_all_json(&client, &reg, &query).await
+        streamx_indexer::engine::search_all_json(&client, &reg, &query, &auth).await
     });
 
     env.new_string(json).expect("JNI string").into_raw()
@@ -407,16 +420,19 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
 // same pattern as searchDubbed()/searchAll() above.
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_nativeSearchDrama(
-    mut env:  JNIEnv,
-    _cls:     JClass,
-    j_query:  JString,
+    mut env:              JNIEnv,
+    _cls:                 JClass,
+    j_query:              JString,
+    j_auth_cookies_json:  JString,
 ) -> jstring {
     let query = jstr(&mut env, j_query);
+    let auth_json = jstr(&mut env, j_auth_cookies_json);
+    let auth = MapAuthProvider::from_json(&auth_json);
 
     let json = TorrentEngineHandle::get().rt.block_on(async {
         let reg = registry::get_registry().await;
         let client = streamx_indexer::proxy::get_client();
-        streamx_indexer::engine::search_drama_json(&client, &reg, &query).await
+        streamx_indexer::engine::search_drama_json(&client, &reg, &query, &auth).await
     });
 
     env.new_string(json).expect("JNI string").into_raw()
@@ -425,16 +441,19 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
 // ── Anime — English dub/sub ────────────────────────────────────────────────
 #[no_mangle]
 pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_nativeSearchAnimeEnglish(
-    mut env:  JNIEnv,
-    _cls:     JClass,
-    j_query:  JString,
+    mut env:              JNIEnv,
+    _cls:                 JClass,
+    j_query:              JString,
+    j_auth_cookies_json:  JString,
 ) -> jstring {
     let query = jstr(&mut env, j_query);
+    let auth_json = jstr(&mut env, j_auth_cookies_json);
+    let auth = MapAuthProvider::from_json(&auth_json);
 
     let json = TorrentEngineHandle::get().rt.block_on(async {
         let reg = registry::get_registry().await;
         let client = streamx_indexer::proxy::get_client();
-        streamx_indexer::engine::search_anime_english_json(&client, &reg, &query).await
+        streamx_indexer::engine::search_anime_english_json(&client, &reg, &query, &auth).await
     });
 
     env.new_string(json).expect("JNI string").into_raw()
@@ -458,142 +477,104 @@ pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_native
     env.new_string(json).expect("JNI string").into_raw()
 }
 
-// ── ⑥ MovieBox — direct-stream provider (search / dubs / resolve) ────────────
-//
-// Separate from the indexer (⑤) above: indexer returns magnet URIs for
-// TorrentEngine to download; MovieBox returns ready-to-play HTTP(S) MP4/HLS
-// URLs directly — no torrent session involved. Called from MovieBoxNative.kt.
-//
-// Dub handling: nativeGetItemDetails() returns a `dubs[]` array where each
-// entry has ITS OWN subject_id (confirmed against real MovieBox responses —
-// dubs are not a query-param switch on one subject_id, they are separate
-// subjects). Kotlin re-calls nativeGetStreams() with whichever subject_id
-// the user picked from that list.
-use moviebox::client as moviebox_client;
-
-#[no_mangle]
-pub extern "system" fn Java_com_aeoncorex_streamx_streaming_MovieBoxNative_nativeSearch(
-    mut env: JNIEnv,
-    _cls: JClass,
-    j_query: JString,
-    page: jni::sys::jint,
-) -> jstring {
-    let query = jstr(&mut env, j_query);
-
-    let json = TorrentEngineHandle::get().rt.block_on(async {
-        match moviebox_client::search(&query, page.max(1) as u32).await {
-            Ok(items) => serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string()),
-            Err(e) => format!(
-                "{{\"error\":{}}}",
-                serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"unknown error\"".into())
-            ),
-        }
-    });
-
-    env.new_string(json).expect("JNI string").into_raw()
+// ── Private tracker listing (Movie Settings) ──────────────────────────────────
+// Returns every registry site whose request.auth is set — i.e. every
+// built-in private tracker (HD-Torrents, MySpleen, TorrentBD, and
+// whatever's added to sources/private/ later) — as a JSON array, so
+// MovieSettingsScreen can render a login card for each one without
+// hardcoding the list in Kotlin. The registry (not this JNI layer) is
+// the single source of truth for which sites need auth; adding a new
+// site to sources/private/ makes it appear here with no app-side code
+// change, same as it does for search.
+#[derive(serde::Serialize)]
+struct PrivateTrackerInfo {
+    id: String,
+    display_name: String,
+    instructions: String,
+    login_check_path: Option<String>,
+    login_check_selector: Option<String>,
+    /// First mirror, used as the WebView's initial login-page URL.
+    /// TrackerLoginScreen just needs somewhere on the real site to
+    /// start — the user navigates from there themselves (to whatever
+    /// the site's actual login link is), so this doesn't need to be
+    /// the exact login URL specifically.
+    base_url: String,
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_aeoncorex_streamx_streaming_MovieBoxNative_nativeGetItemDetails(
-    mut env: JNIEnv,
+pub extern "system" fn Java_com_aeoncorex_streamx_streaming_IndexerNative_nativeListPrivateTrackers(
+    env:  JNIEnv,
     _cls: JClass,
-    j_subject_id: JString,
 ) -> jstring {
-    let subject_id = jstr(&mut env, j_subject_id);
-
     let json = TorrentEngineHandle::get().rt.block_on(async {
-        match moviebox_client::get_item_details(&subject_id).await {
-            Ok(details) => serde_json::to_string(&details).unwrap_or_else(|_| "{}".to_string()),
-            Err(e) => format!(
-                "{{\"error\":{}}}",
-                serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"unknown error\"".into())
-            ),
-        }
+        let reg = registry::get_registry().await;
+        let mut list: Vec<PrivateTrackerInfo> = reg.sites.values()
+            .filter_map(|site| {
+                let auth = site.request.auth.as_ref()?;
+                Some(PrivateTrackerInfo {
+                    id: site.id.clone(),
+                    display_name: site.display_name.clone(),
+                    instructions: auth.instructions.clone(),
+                    login_check_path: auth.login_check_path.clone(),
+                    login_check_selector: auth.login_check_selector.clone(),
+                    base_url: site.mirrors.first().cloned().unwrap_or_default(),
+                })
+            })
+            .collect();
+        // Stable, predictable ordering for the UI list — alphabetical by
+        // display name rather than HashMap's unspecified iteration order,
+        // which would otherwise shuffle the list between app launches.
+        list.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+        serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string())
     });
 
+    let mut env = env;
     env.new_string(json).expect("JNI string").into_raw()
 }
-
-/// java: MovieBoxNative.nativeGetSeasonInfo(subjectId: String): String (JSON SeasonInfo)
-///
-/// Returns MovieBox's OWN season/episode-count list for `subjectId` —
-/// authoritative for what episodes actually exist under that subject,
-/// which matters especially after a dub switch (a dub's subject_id can
-/// have a different available episode count than the original). Use this
-/// instead of assuming TMDB's episode count applies to every dub.
-#[no_mangle]
-pub extern "system" fn Java_com_aeoncorex_streamx_streaming_MovieBoxNative_nativeGetSeasonInfo(
-    mut env: JNIEnv,
-    _cls: JClass,
-    j_subject_id: JString,
-) -> jstring {
-    let subject_id = jstr(&mut env, j_subject_id);
-
-    let json = TorrentEngineHandle::get().rt.block_on(async {
-        match moviebox_client::get_season_info(&subject_id).await {
-            Ok(info) => serde_json::to_string(&info).unwrap_or_else(|_| "{}".to_string()),
-            Err(e) => format!(
-                "{{\"error\":{}}}",
-                serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"unknown error\"".into())
-            ),
-        }
-    });
-
-    env.new_string(json).expect("JNI string").into_raw()
-}
-
-#[no_mangle]
-pub extern "system" fn Java_com_aeoncorex_streamx_streaming_MovieBoxNative_nativeGetStreams(
-    mut env: JNIEnv,
-    _cls: JClass,
-    j_subject_id: JString,
-    se: jni::sys::jint,
-    ep: jni::sys::jint,
-) -> jstring {
-    let subject_id = jstr(&mut env, j_subject_id);
-    let se_u = se.max(1) as u32;
-    let ep_u = ep.max(1) as u32;
-
-    let json = TorrentEngineHandle::get().rt.block_on(async {
-        match moviebox_client::get_streams(&subject_id, se_u, ep_u).await {
-            Ok(r) => serde_json::to_string(&r).unwrap_or_else(|_| "{}".to_string()),
-            Err(e) => format!(
-                "{{\"error\":{}}}",
-                serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"unknown error\"".into())
-            ),
-        }
-    });
-
-    env.new_string(json).expect("JNI string").into_raw()
-}
-
-#[no_mangle]
-pub extern "system" fn Java_com_aeoncorex_streamx_streaming_MovieBoxNative_nativeGetCaptions(
-    mut env: JNIEnv,
-    _cls: JClass,
-    j_subject_id: JString,
-    j_resource_id: JString,
-) -> jstring {
-    let subject_id = jstr(&mut env, j_subject_id);
-    let resource_id = jstr(&mut env, j_resource_id);
-
-    let json = TorrentEngineHandle::get().rt.block_on(async {
-        match moviebox_client::get_captions(&subject_id, &resource_id).await {
-            Ok(c) => serde_json::to_string(&c).unwrap_or_else(|_| "{}".to_string()),
-            Err(e) => format!(
-                "{{\"error\":{}}}",
-                serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"unknown error\"".into())
-            ),
-        }
-    });
-
-    env.new_string(json).expect("JNI string").into_raw()
-}
-
 
 // Fixed back to `&mut JNIEnv` since `get_string` requires a mutable reference.
 fn jstr(env: &mut JNIEnv, s: JString) -> String {
     env.get_string(&s).map(|js| js.into()).unwrap_or_default()
+}
+
+// ── Private tracker auth bridge ─────────────────────────────────────────────
+//
+// Bridges PrivateTrackerCookieStore.kt (the app-side encrypted, per-site
+// cookie store — see that file's doc comment for the full design) to
+// streamx_indexer::dispatch::AuthProvider (the crate-side trait every
+// search_*() function asks for a cookie through). Kotlin's
+// PrivateTrackerCookieStore.allCookies() serializes its whole map to a
+// single JSON object once per search call and passes it as a jstring
+// argument — see IndexerNative.kt's searchX() wrappers — rather than a
+// per-site JNI round-trip, since a search fans out to every registry
+// site concurrently and doing a callback-per-site across the JNI
+// boundary would be needless overhead for what's normally a small map
+// (one entry per private tracker the user has actually configured).
+//
+// A malformed or empty JSON string is NOT an error here — it just means
+// no cookies are available, so every requires_auth() site searches
+// unauthenticated (see AuthProvider::cookie_for's doc comment in
+// dispatch.rs for why that's a soft "no results" rather than a hard
+// failure for the caller).
+struct MapAuthProvider {
+    cookies: std::collections::HashMap<String, String>,
+}
+
+impl MapAuthProvider {
+    fn from_json(json: &str) -> Self {
+        let cookies = if json.trim().is_empty() {
+            std::collections::HashMap::new()
+        } else {
+            serde_json::from_str(json).unwrap_or_default()
+        };
+        Self { cookies }
+    }
+}
+
+impl streamx_indexer::dispatch::AuthProvider for MapAuthProvider {
+    fn cookie_for(&self, site_id: &str) -> Option<String> {
+        self.cookies.get(site_id).cloned()
+    }
 }
 
 // ── ④ JS Provider Engine (QuickJS) ──────────────────────────────────────────
