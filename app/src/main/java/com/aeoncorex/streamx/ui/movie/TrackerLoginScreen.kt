@@ -173,15 +173,21 @@ fun TrackerLoginScreen(
                     factory = { ctx ->
                         WebView(ctx).apply {
                             layoutParams = ViewGroup.LayoutParams(-1, -1)
+                            @SuppressLint("SetJavaScriptEnabled")
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
                             settings.userAgentString = HttpClient.DESKTOP_UA
 
-                            @SuppressLint("SetJavaScriptEnabled")
-                            CookieManager.getInstance().apply {
-                                setAcceptCookie(true)
-                                setAcceptThirdPartyCookies(this@apply, true)
-                            }
+                            // setAcceptThirdPartyCookies needs the actual
+                            // WebView instance (this@apply here means
+                            // THIS WebView, not CookieManager) — a nested
+                            // CookieManager.getInstance().apply { } block
+                            // would shadow `this` to the CookieManager
+                            // instead, which is a type mismatch this
+                            // method never accepts.
+                            val cm = CookieManager.getInstance()
+                            cm.setAcceptCookie(true)
+                            cm.setAcceptThirdPartyCookies(this, true)
 
                             webViewClient = object : WebViewClient() {
                                 override fun onPageFinished(view: WebView?, url: String?) {
@@ -215,8 +221,9 @@ fun TrackerLoginScreen(
  * this CSS selector" check — good enough for the simple presence
  * selectors login_check_selector actually uses (an id, a class, an
  * href-prefix attribute selector — see the SiteConfig auth blocks in
- * sources/private/*.json for real examples), without pulling in a full
- * HTML parser + CSS engine just for a yes/no presence check here. Falls
+ * sources/private/ (e.g. hdtorrents.json) for real examples), without
+ * pulling in a full HTML parser + CSS engine just for a yes/no
+ * presence check here. Falls
  * back to treating the selector as a plain substring search for
  * anything this simplified parser doesn't recognize, which is safe: a
  * false positive would need the plain text of a CSS selector to appear

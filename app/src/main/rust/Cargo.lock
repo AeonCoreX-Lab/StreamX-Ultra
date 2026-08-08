@@ -2979,7 +2979,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "streamx-indexer"
 version = "0.1.0"
-source = "git+https://github.com/AeonCoreX-Lab/streamx-torrent-indexer?branch=main#21eeb1d5bce93504d5516b566f0b8fa3a8392461"
+source = "git+https://github.com/AeonCoreX-Lab/streamx-torrent-indexer?branch=main#348bba824e054b22e26a027219b3c0aea65c97c6"
 dependencies = [
  "anyhow",
  "futures",
