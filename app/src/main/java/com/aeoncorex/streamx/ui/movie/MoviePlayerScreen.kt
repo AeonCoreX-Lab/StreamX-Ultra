@@ -531,6 +531,11 @@ fun MoviePlayerScreen(
         if (decodedUrl.startsWith("magnet:?") || trackerSiteId.isNotBlank()) PlaybackMode.TORRENT
         else PlaybackMode.DIRECT
     }
+    android.util.Log.d(
+        "StreamXPlayTorrent",
+        "MoviePlayerScreen composed: playbackMode=$playbackMode " +
+        "decodedUrl.take(80)=${decodedUrl.take(80)} trackerSiteId=$trackerSiteId imdbId=$imdbId"
+    )
 
     val movieTitle = remember {
         if (decodedUrl.startsWith("magnet:?")) {

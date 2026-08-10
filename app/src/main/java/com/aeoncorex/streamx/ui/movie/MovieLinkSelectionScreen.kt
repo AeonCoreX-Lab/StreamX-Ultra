@@ -178,15 +178,26 @@ fun MovieLinkSelectionScreen(
     // this screen was opened (e.g. the user re-logged in from Settings
     // in another tab) is always the one actually used.
     fun playTorrent(link: StreamLink) {
-        if (activity == null) return
+        if (activity == null) {
+            android.util.Log.w("StreamXPlayTorrent", "playTorrent: activity is null, aborting")
+            return
+        }
         adLoading = true
+        android.util.Log.d(
+            "StreamXPlayTorrent",
+            "playTorrent called: title=${link.title} source=${link.source} " +
+            "magnet.isBlank=${link.magnet.isBlank()} torrentFileUrl=${link.torrentFileUrl} " +
+            "requiresTorrentAuth=${link.requiresTorrentAuth} siteId=${link.siteId}"
+        )
         AdManager.showInterstitial(activity) {
             adLoading = false
             val playableUrl = link.torrentFileUrl ?: link.magnet
             val enc = URLEncoder.encode(playableUrl, "UTF-8")
             val encImdb = URLEncoder.encode(imdbId.takeIf { it != "null" } ?: "", "UTF-8")
             val encSiteId = URLEncoder.encode(if (link.requiresTorrentAuth) link.siteId else "", "UTF-8")
-            navController.navigate("torrent_player/$enc?imdbId=$encImdb&trackerSiteId=$encSiteId")
+            val route = "torrent_player/$enc?imdbId=$encImdb&trackerSiteId=$encSiteId"
+            android.util.Log.d("StreamXPlayTorrent", "navigating to: $route")
+            navController.navigate(route)
         }
     }
 
