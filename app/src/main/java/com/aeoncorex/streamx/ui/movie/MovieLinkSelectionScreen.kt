@@ -186,12 +186,25 @@ fun MovieLinkSelectionScreen(
         android.util.Log.d(
             "StreamXPlayTorrent",
             "playTorrent called: title=${link.title} source=${link.source} " +
-            "magnet.isBlank=${link.magnet.isBlank()} torrentFileUrl=${link.torrentFileUrl} " +
-            "requiresTorrentAuth=${link.requiresTorrentAuth} siteId=${link.siteId}"
+            "magnet='${link.magnet}' torrentFileUrl='${link.torrentFileUrl}' " +
+            "requiresTorrentAuth=${link.requiresTorrentAuth} siteId='${link.siteId}'"
         )
+        // Reverted to the original, proven pattern (magnet is the primary,
+        // always-non-null path — exactly how this worked before private-
+        // tracker support existed) instead of `torrentFileUrl ?: magnet`.
+        // Private-tracker results are the ONLY case where magnet is empty
+        // and torrentFileUrl carries the real link — routed separately
+        // and explicitly below instead of relying on Elvis-operator
+        // fallback ordering, so the public/magnet path is byte-for-byte
+        // what it was before this feature existed.
+        val playableUrl: String = if (link.requiresTorrentAuth && !link.torrentFileUrl.isNullOrBlank()) {
+            link.torrentFileUrl
+        } else {
+            link.magnet
+        }
+        android.util.Log.d("StreamXPlayTorrent", "resolved playableUrl='$playableUrl'")
         AdManager.showInterstitial(activity) {
             adLoading = false
-            val playableUrl = link.torrentFileUrl ?: link.magnet
             val enc = URLEncoder.encode(playableUrl, "UTF-8")
             val encImdb = URLEncoder.encode(imdbId.takeIf { it != "null" } ?: "", "UTF-8")
             val encSiteId = URLEncoder.encode(if (link.requiresTorrentAuth) link.siteId else "", "UTF-8")

@@ -325,8 +325,8 @@ object IndexerNative {
                     id                  = id,
                     displayName         = o.optString("display_name", id),
                     instructions        = o.optString("instructions", ""),
-                    loginCheckPath      = o.optString("login_check_path", "").takeIf { it.isNotEmpty() },
-                    loginCheckSelector  = o.optString("login_check_selector", "").takeIf { it.isNotEmpty() },
+                    loginCheckPath      = o.optString("login_check_path", "").takeIf { it.isNotEmpty() && it != "null" },
+                    loginCheckSelector  = o.optString("login_check_selector", "").takeIf { it.isNotEmpty() && it != "null" },
                     baseUrl             = o.optString("base_url", "")
                 )
             }
@@ -343,7 +343,29 @@ object IndexerNative {
         (0 until arr.length()).mapNotNull { i ->
             val o      = arr.optJSONObject(i) ?: return@mapNotNull null
             val magnet = o.optString("magnet", "")
-            val torrentFileUrl = o.optString("torrent_file_url", "").takeIf { it.isNotEmpty() }
+            // BUG FIX (2026-08-10): org.json's JSONObject.optString(key, fallback)
+            // has a well-known quirk — it only returns `fallback` when the key is
+            // MISSING or its value isn't a string at all. When the JSON key IS
+            // present with an explicit JSON `null` value (exactly what Rust's
+            // serde_json produces for `Option<String>::None`, since
+            // TorrentResult::torrent_file_url has no
+            // #[serde(skip_serializing_if = "Option::is_none")]), optString
+            // returns the LITERAL FOUR-CHARACTER STRING "null" instead of the
+            // fallback. That string is non-empty, so `.takeIf { it.isNotEmpty() }`
+            // let it through as a "real" value — meaning every public-source
+            // result (the overwhelming majority, which never sets
+            // torrent_file_url) ended up with torrentFileUrl = "null" (a string)
+            // instead of the Kotlin `null` the rest of the code assumes. That in
+            // turn broke `link.torrentFileUrl ?: link.magnet` in
+            // MovieLinkSelectionScreen.playTorrent(): since "null" is non-null,
+            // the Elvis operator always picked it over the real magnet, and
+            // every single torrent — public or private — navigated to
+            // torrent_player/null. Checking for the literal "null" string
+            // explicitly (in addition to isNullOrEmpty) closes this at the
+            // parsing boundary so nothing downstream has to know this quirk
+            // exists.
+            val torrentFileUrl = o.optString("torrent_file_url", "")
+                .takeIf { it.isNotEmpty() && it != "null" }
             // A result is only usable if it has EITHER a real magnet URI
             // OR a torrent_file_url (private-tracker results — see
             // TorrentResult::torrent_file_url's doc comment on the Rust
