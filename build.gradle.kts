@@ -1,15 +1,15 @@
 // Top-level build.gradle.kts
 plugins {
     // Android Gradle Plugin 9.0.1 (compatible with Gradle 9.4.1)
-    id("com.android.application") version "9.2.1" apply false
-    id("com.android.library") version "9.2.1" apply false
+    id("com.android.application") version "9.3.1" apply false
+    id("com.android.library") version "9.3.1" apply false
 
     // AGP 9.0+ has built-in Kotlin — kotlin.android plugin must NOT be applied.
     // Only the Compose compiler plugin is needed separately.
-    id("org.jetbrains.kotlin.plugin.compose") version "2.4.0" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "2.4.10" apply false
     
     // ── REGISTER KOTLIN SERIALIZATION PLUGIN (Kotlin 2.4.0) ──
-    id("org.jetbrains.kotlin.plugin.serialization") version "2.4.0" apply false
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.4.10" apply false
     
 
     // Google Services
