@@ -383,8 +383,8 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:3.0.0")
     implementation("com.squareup.retrofit2:converter-gson:3.0.0")
     implementation("com.squareup.retrofit2:converter-scalars:3.0.0")
-    implementation("org.jsoup:jsoup:1.22.2")
-    implementation("com.squareup.okhttp3:okhttp:5.3.2")
+    implementation("org.jsoup:jsoup:1.23.1")
+    implementation("com.squareup.okhttp3:okhttp:5.4.0")
     
      // ── KOTLINX SERIALIZATION JSON CORE EXTENSION ──
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
