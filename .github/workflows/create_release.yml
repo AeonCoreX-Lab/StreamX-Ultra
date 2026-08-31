@@ -21,14 +21,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: "recursive"
           token: ${{ secrets.ACCESS_TOKEN }}
           fetch-depth: 0
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -66,7 +66,7 @@ jobs:
       # FIX (Bug #2): actions/cache@v3 → actions/cache@v4
       # v3 uses Node.js 20 which is deprecated June 16, 2026.
       - name: Restore vcpkg artifacts
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/vcpkg/archives
@@ -249,14 +249,14 @@ jobs:
             -PRELEASE_KEY_PASSWORD=${{ env.RELEASE_KEY_PASSWORD }}
 
       - name: Upload Release APK as Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: StreamX-Ultra-Release-APK
           path: app/build/outputs/apk/release/*.apk
 
       - name: "StreamX Bot: Generate Release Notes"
         id: build_changelog
-        uses: mikepenz/release-changelog-builder-action@v4
+        uses: mikepenz/release-changelog-builder-action@v6
         with:
           toTag: ${{ github.ref_name }}
           configurationJson: |
